@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt');
 const getUserByEmail = async (email) => {
   try {
     const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    console.log('User fetched by email:', result.rows[0]);
     return result.rows[0];
   } catch (error) {
     console.error('Error fetching user by email:', error);
@@ -22,7 +23,7 @@ const getRoleById = async (roleId) => {
     throw error;
   }
 }
-
+// Fetch all users
 const getAllUsers = async () => {
   try {
     const result = await db.query('SELECT * FROM users');
@@ -33,18 +34,16 @@ const getAllUsers = async () => {
   }
 }
 
-const createUser = async (email, username, password, roleid) => {
+// Register a new user
+const createUser = async (email, password, roleid) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10); 
     
     const result = await db.query(
-      'INSERT INTO users (email, username, password, roleid) VALUES ($1, $2, $3, $4) RETURNING *',
-      [email, username, hashedPassword, roleid]
+      'INSERT INTO users (email, password, roleid) VALUES ($1, $2, $3) RETURNING *',
+      [email, hashedPassword,1]
     );
-
-
-
-
+    
     return result.rows[0];
   } catch (error) {
     console.error('Error creating user:', error);
