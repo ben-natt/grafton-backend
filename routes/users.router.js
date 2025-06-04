@@ -77,6 +77,7 @@ router.post('/register', async (req, res) => {
   try {
     const existingUser = await usersModel.getUserByEmail(email); 
     if (existingUser) {
+      console.log('User already exists with this email:', email);
       return res.status(400).json({ message: 'User already exists with this email.' });
     }
     if (password.length < 8) {
@@ -112,19 +113,22 @@ router.post('/register', async (req, res) => {
   }
 });
 
-
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
   console.log('Login request received:', req.body);
   try {
     const user = await usersModel.getUserByEmail(email);
+    console.log('Users fetched:', user);
+
     if (!user) {
       return res.status(401).json({ message: 'Invalid Email or Password.' });
     }
+
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid Email or Password' });
+      return res.status(401).json({ message: 'Invalid Email or Password.' });
     }
+
     res.status(200).json({
       message: 'Login successful',
       user: { email: user.email, username: user.username },
@@ -134,6 +138,7 @@ router.post('/login', async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
+
 
 router.get('/', (req, res) => {
   usersModel.getAllUsers()
