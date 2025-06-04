@@ -3,16 +3,20 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const userRoutes = require('./routes/users.router');
 const inboundRoutes = require('./routes/inbound.router');
+const scheduleRoutes = require('./routes/schedule_inbound_router'); // Adjust path if needed
 const outboundRoutes = require('./routes/outbound.router'); // Uncomment if outbound routes are needed
+const { sequelize, DataTypes } = require('./database'); // Correctly import from database.js
 const app = express();
 
 // Middlewares
 app.use(cors());
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
 // Routes
 app.use('/users', userRoutes);
 app.use('/inbounds', inboundRoutes);
 app.use('/outbounds', outboundRoutes); // Uncomment if outbound routes are needed
+app.use('/schedule', scheduleRoutes); // Adjust path if needed
 
 module.exports = app;
