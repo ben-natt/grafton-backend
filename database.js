@@ -1,12 +1,35 @@
+// database.js
 require('dotenv').config();
-const { Pool } = require('pg');
+const { Sequelize, DataTypes } = require('sequelize');
 
-const pool = new Pool({
-  user: process.env.DB_USERNAME,
-  host: process.env.DB_HOST,
-  database: process.env.DB_DATABASE,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-});
+const sequelize = new Sequelize(
+  process.env.DB_DATABASE , 
+  process.env.DB_USERNAME ,
+  process.env.DB_PASSWORD , 
+  {
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 5432,
+    dialect: 'postgres',
+    logging: false,
+    pool: {
+      max: 5,
+      min: 0,
+      acquire: 30000,
+      idle: 10000
+    }
+  }
+);
 
-module.exports = pool;
+const query = async (sql, params) => {
+  try {
+    const [results] = await sequelize.query(sql, {
+      replacements: params,
+      type: sequelize.QueryTypes.SELECT
+    });
+    return { rows: results };
+  } catch (error) {
+    throw error;
+  }
+};
+
+module.exports = { sequelize, DataTypes, query }; 

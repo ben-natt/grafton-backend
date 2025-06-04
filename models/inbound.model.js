@@ -28,8 +28,11 @@ const getAllInbound = async () => {
                 i."inboundId" limit 200
         `;
         
-        const result = await db.query(query);
-        return result.rows;
+      const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT
+        });
+
+        return result;
     } catch (error) {
         console.error('Error fetching all inbound records:', error);
         throw error;
@@ -61,17 +64,21 @@ const getInboundByDate = async (date) => {
             JOIN
                 public.users u ON u.userid = i."userId"
             WHERE
-                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = $1
+                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
             ORDER BY
                 i."inboundId" limit 200
         `;
-        const result = await db.query(query, [date]);
-        return result.rows;
+        const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT,
+            replacements: { date } 
+        });
+        return result;
     } catch (error) {
         console.error(`Error fetching inbound records for date ${date}:`, error);
         throw error;
     }
 };
+
 
 const getInboundByDateRange = async (startDate, endDate) => {
     try {
@@ -98,40 +105,46 @@ const getInboundByDateRange = async (startDate, endDate) => {
             WHERE
                 TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN $1 AND $2
             ORDER BY
-                i."inboundId" limit 200
+                i."inboundId" LIMIT 200
         `;
-        const result = await db.query(query, [startDate, endDate]);
-      //  console.log(`Fetched inbound records from ${startDate} to ${endDate}:`, result.rows);
-        return result.rows;
+        
+        const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT,
+            bind: [startDate, endDate] // Use bind instead of replacements for $1, $2 syntax
+        });
+        
+        return result;
     } catch (error) {
         console.error(`Error fetching inbound records for date range ${startDate} to ${endDate}:`, error);
         throw error;
     }
 };
 
-
+// For getUpcomingInbound
 const getUpcomingInbound = async () => {
-    try{
+    try {
         const query = `
-        SELECT
-            COUNT(*) AS "upcomingInbound"
+            SELECT COUNT(*) AS "upcomingInbound"
             FROM public.lot
             WHERE status IN ('Pending')
-        `
-        const result = await db.query(query);
-     //   console.log(result);
-        if (result.rows[0].upcomingInbound == 0) {
-        // console.log('No upcoming inbound records found!');
-            return result.rows[0].upcomingInbound;
-        }else {
-            return result.rows[0].upcomingInbound;
+        `;
+        
+        const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT
+        });
+        
+        // Handle case where result might be empty
+        if (!result || result.length === 0) {
+            console.log('No upcoming inbound records found!');
+            return 0;
         }
-    }catch (error) {
+        
+        return result[0].upcomingInbound || 0;
+    } catch (error) {
         console.error('Error fetching upcoming inbound records:', error);
         throw error;
     }
-}
-
+};
 const getInventory = async () => {
     try {
         const query = `
@@ -146,18 +159,120 @@ const getInventory = async () => {
                 c."commodityName";
         `;
         
-        const result = await db.query(query);
-        return result.rows;
+            const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT
+        });
+        return result;
     } catch (error) {
         console.error('Error fetching inventory records:', error);
         throw error;
     }
 };
 
+const getAllScheduleInbound = async () => {
+    try {
+        const query = `
+          select  
+          TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+		l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 2, '0') AS "Lot No",
+		l."exWarehouseLot" AS  "Ex-W Lot",
+		l."commodity" AS "Metal",
+		l."brand"  AS "Brand",
+		l."shape"  AS "Shape",
+		l."expectedBundleCount" AS "Qty", 
+		u."username" AS "Scheduled By"
+            from public.lot l 
+            JOIN public.scheduleinbounds i ON l."scheduleInboundId" = i."scheduleInboundId"
+            LEFT JOIN public.users u ON i."userId" = u.userid
+
+        `;
+        const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT
+        });
+
+        return result;
+    } catch (error) {
+        console.error('Error fetching all schedule inbound records:', error);
+        throw error;
+    }
+};
+
+const getScheduleInboundByDate = async (date) => {
+    try {
+        const query = `
+            SELECT
+                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+                l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 2, '0') AS "Lot No",
+                l."exWarehouseLot" AS "Ex-W Lot",
+                l."commodity" AS "Metal",
+                l."brand" AS "Brand",
+                l."shape" AS "Shape",
+                l."expectedBundleCount" AS "Qty",
+                u."username" AS "Scheduled By"
+               
+            FROM
+                public.lot l
+            JOIN
+                public.scheduleinbounds i ON l."scheduleInboundId" = i."scheduleInboundId"
+            LEFT JOIN
+                public.users u ON i."userId" = u.userid
+            WHERE
+                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
+        `;
+        const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT,
+            replacements: { date }
+        });
+        return result;
+    } catch (error) {
+        console.error(`Error fetching schedule inbound records for date ${date}:`, error);
+        throw error;
+    }
+};
+
+const getScheduleInboundByDateRange = async (startDate, endDate) => {
+    try {
+        const query = `
+            SELECT
+                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+                l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 2, '0') AS "Lot No",
+                l."exWarehouseLot" AS "Ex-W Lot",
+                l."commodity" AS "Metal",
+                l."brand" AS "Brand",
+                l."shape" AS "Shape",
+                l."expectedBundleCount" AS "Qty",
+                u."username" AS "Scheduled By"
+            FROM
+                public.lot l
+            JOIN
+                public.scheduleinbounds i ON l."scheduleInboundId" = i."scheduleInboundId"
+            LEFT JOIN
+                public.users u ON i."userId" = u.userid
+            WHERE
+                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN $1 AND $2
+        `;
+        
+        const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT,
+            bind: [startDate, endDate] // Use bind instead of replacements for $1, $2 syntax
+        });
+        
+        return result;
+    } catch (error) {
+        console.error(`Error fetching schedule inbound records for date range ${startDate} to ${endDate}:`, error);
+        throw error;
+    }
+};
+
+
+
 module.exports = {
     getAllInbound,
     getInventory,
     getInboundByDate,
     getInboundByDateRange,
-    getUpcomingInbound
+    getUpcomingInbound,
+    getAllScheduleInbound,
+    getScheduleInboundByDate,
+    getScheduleInboundByDateRange
 };

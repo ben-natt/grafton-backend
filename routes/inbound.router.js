@@ -42,4 +42,25 @@ router.get('/inventory', async (req, res) => {
         res.status(500).json({ message: 'Internal server error' });
     }
 })
+
+router.get('/scheduled', async (req, res) => {
+    const {date, startDate, endDate} = req.query;
+    try {
+        let scheduleInbounds;
+        if (date) {
+            scheduleInbounds = await inboundModel.getScheduleInboundByDate(date);
+        } else if (startDate && endDate) {
+            scheduleInbounds = await inboundModel.getScheduleInboundByDateRange(startDate, endDate);
+        } else {
+            scheduleInbounds = await inboundModel.getAllScheduleInbound();
+        }
+        
+        res.status(200).json(scheduleInbounds);
+    } catch (error) {
+        console.error('Error fetching schedule inbound records:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+})
+
+
 module.exports = router;
