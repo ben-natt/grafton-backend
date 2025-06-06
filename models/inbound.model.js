@@ -103,14 +103,14 @@ const getInboundByDateRange = async (startDate, endDate) => {
             JOIN
                 public.users u ON u.userid = i."userId"
             WHERE
-                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN $1 AND $2
+                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
             ORDER BY
                 i."inboundId" LIMIT 200
         `;
         
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
-            bind: [startDate, endDate] // Use bind instead of replacements for $1, $2 syntax
+            replacements: { startDate, endDate }
         });
         
         return result;
@@ -249,12 +249,12 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
             LEFT JOIN
                 public.users u ON i."userId" = u.userid
             WHERE
-                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN $1 AND $2
+                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
         `;
         
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
-            bind: [startDate, endDate] // Use bind instead of replacements for $1, $2 syntax
+            replacements: { startDate, endDate }
         });
         
         return result;

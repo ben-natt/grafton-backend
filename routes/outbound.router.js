@@ -31,4 +31,22 @@ router.get('/upcoming', async (req, res) => {
     }
 });
 
+
+router.get('/scheduled', async (req, res) => {
+    const { date, startDate, endDate } = req.query;
+    try {
+        let scheduleOutbounds;
+        if (date) {
+            scheduleOutbounds = await outboundModel.getScheduleOutboundByDate(date);
+        } else if (startDate && endDate) {
+            scheduleOutbounds = await outboundModel.getScheduleOutboundByDateRange(startDate, endDate);
+        } else {
+            scheduleOutbounds = await outboundModel.getAllScheduleOutbounds();
+        }
+        res.status(200).json(scheduleOutbounds);
+    } catch (error) {
+        console.error('Error fetching schedule outbound records:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
 module.exports = router;
