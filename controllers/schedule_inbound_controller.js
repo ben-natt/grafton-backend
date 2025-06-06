@@ -139,7 +139,7 @@ exports.uploadExcel = async (req, res) => {
 };
 
 exports.createScheduleInbound = async (req, res) => {
-  const userId = 1; // You might want to get this dynamically from authentication
+  const userId = 7; //Grace
   const { inboundDate, jobDataMap } = req.body;
 
   if (!jobDataMap || Object.keys(jobDataMap).length === 0) {
@@ -172,7 +172,7 @@ exports.createScheduleInbound = async (req, res) => {
       for (const lot of lots) {
         await Lot.upsert({
           ...lot,
-          scheduleInboundId: scheduleInboundId, // <-- Fix: set FK explicitly
+          scheduleInboundId: scheduleInboundId, 
         }, {
           transaction: transaction,
         });
@@ -186,7 +186,7 @@ exports.createScheduleInbound = async (req, res) => {
     await transaction.rollback();
     console.error('Database error during scheduling:', dbError);
     res.status(500).json({
-      message: 'Error processing scheduling data and saving to database.',
+      message: 'Job No and Lot No must be unique per schedule inbound.',
       error: dbError.message,
     });
   }

@@ -153,14 +153,14 @@ module.exports = (sequelize, DataTypes) => {
     createdAt: 'createdAt',
   });
 
-  // Associations
+  // This is one to many relationship
   ScheduleInbound.hasMany(Lot, {
     foreignKey: 'scheduleInboundId',
     sourceKey: 'scheduleInboundId',
     as: 'lot',
     onDelete: 'CASCADE',
   });
-
+  // This is many to one relationship
   Lot.belongsTo(ScheduleInbound, {
     foreignKey: 'scheduleInboundId',
     targetKey: 'scheduleInboundId',
