@@ -1,4 +1,4 @@
-
+//defines the structure of data and how it relates in the database,
 module.exports = (sequelize, DataTypes) => {
   const ScheduleInbound = sequelize.define('ScheduleInbound', {
     scheduleInboundId: {
