@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -9,12 +10,14 @@ const outboundRoutes = require('./routes/outbound.router'); // Uncomment if outb
 const stockRoutes = require('./routes/stock.router');
 const pendingTasks = require('./routes/pending_tasks_router');
 const { sequelize, DataTypes } = require('./database'); // Correctly import from database.js
+
 const app = express();
 
 // Middlewares
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // Routes
 app.use('/users', userRoutes);
@@ -24,6 +27,7 @@ app.use('/schedule', scheduleRoutes); // Adjust path if needed
 app.use('/schedule-outbounds', scheduleOutboundRoutes); // Uncomment if outbound scheduling routes are needed
 app.use('/stocks', stockRoutes);
 app.use('/pending', pendingTasks);
+
 
 
 module.exports = app;
