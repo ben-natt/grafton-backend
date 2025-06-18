@@ -126,15 +126,18 @@ const getDetailsPendingOutbound = async (jobNo) => {
   try {
     const query = `
             SELECT
+                si."selectedInboundId",
                 i."jobNo",
                 i."lotNo",
                 i."noOfBundle" as "expectedBundleCount",
                 b."brandName" AS "brand",
                 c."commodityName" AS "commodity",
                 w."exLmeWarehouseName" AS "exLmeWarehouse",
-                i."exWarehouseLot"
+                i."exWarehouseLot",
+                so."lotReleaseWeight"
             FROM public.selectedinbounds si
             JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+            JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
             LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
             LEFT JOIN public.brands b ON i."brandId" = b."brandId"
             LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
