@@ -8,6 +8,7 @@ const scheduleRoutes = require("./routes/schedule_inbound_router"); // Adjust pa
 const scheduleOutboundRoutes = require("./routes/schedule_outbound_router"); // Uncomment if outbound scheduling routes are needed
 const outboundRoutes = require("./routes/outbound.router"); // Uncomment if outbound routes are needed
 const stockRoutes = require("./routes/stock.router");
+const activitiesRoutes = require("./routes/activities.router"); 
 const { sequelize, DataTypes } = require("./database"); // Correctly import from database.js
 const app = express();
 
@@ -24,5 +25,6 @@ app.use("/outbounds", outboundRoutes); // Uncomment if outbound routes are neede
 app.use("/schedule", scheduleRoutes); // Adjust path if needed
 app.use("/schedule-outbounds", scheduleOutboundRoutes); // Uncomment if outbound scheduling routes are needed
 app.use("/stocks", stockRoutes);
+app.use("/activities", activitiesRoutes); 
 
 module.exports = app;
