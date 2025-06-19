@@ -18,4 +18,10 @@ router.get(
  */
 router.post("/confirm", outboundController.confirmOutbound);
 
+/*
+ * GET /outbound/generate-grn/:jobNo
+ * Generates a Goods Receipt Note (GRN) for the specified job number.
+ */
+router.get("/generate-grn/:jobNo", outboundController.generateGrn);
+
 module.exports = router;

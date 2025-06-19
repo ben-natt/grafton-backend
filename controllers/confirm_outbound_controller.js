@@ -58,7 +58,22 @@ const confirmOutbound = async (req, res) => {
   }
 };
 
+const generateGrn = async (req, res) => {
+  try {
+    const { jobNo } = req.params;
+    const grnDetails = await outboundModel.getGrnDetails(jobNo);
+    if (!grnDetails) {
+      return res.status(404).json({ error: "GRN details not found." });
+    }
+    res.status(200).json(grnDetails);
+  } catch (error) {
+    console.error("Error in generateGrn controller:", error);
+    res.status(500).json({ error: "Failed to generate GRN." });
+  }
+};
+
 module.exports = {
   getConfirmationDetails,
   confirmOutbound,
+  generateGrn,
 };
