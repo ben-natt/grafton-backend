@@ -384,6 +384,7 @@ const createScheduleOutbound = async (scheduleData) => {
     }
 }
 
+//new function to edit lot information
 const EditInformation = async (inboundId, updateData) => {
     try {
         const setClauses = [];
