@@ -33,7 +33,7 @@ router.post("/tasks-user", async (req, res) => {
 });
 
 // --- OUTBOUND ROUTES ---
-
+// Fetch job numbers for pending outbound tasks
 router.get("/tasks-outbound-jobNo", async (req, res) => {
   try {
     const result = await pendingTasksModel.findJobNoPendingOutbound();
@@ -45,6 +45,7 @@ router.get("/tasks-outbound-jobNo", async (req, res) => {
   }
 });
 
+// Fetch details for pending outbound tasks based on job number
 router.post("/tasks-outbound", async (req, res) => {
   const { jobNo } = req.body;
   try {
