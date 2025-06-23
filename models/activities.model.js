@@ -68,8 +68,10 @@ const getInboundRecord = async () => {
     try {
         const query = `
             SELECT 
+                i."inboundId" as id,
                 TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-                i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
+                i."jobNo" AS "Job No",
+                i."lotNo" AS "Lot No",
                 i."exWarehouseLot" AS "Ex-W Lot",
                 c."commodityName" AS "Metal",
                 b."brandName" AS "Brand",
@@ -107,8 +109,10 @@ const getOutboundRecord = async () => {
     try {
         const query = `
             SELECT 
+                o."outboundTransactionId" AS id,
                 TO_CHAR(o."outboundedDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-                o."jobNo" || ' - ' || LPAD(o."lotNo"::text, 2, '0') AS "Lot No",
+                o."jobNo" AS "Job No",
+                o."lotNo" AS "Lot No",
                 o."exWarehouseLot" AS  "Ex-W Lot",
                 o."commodity" AS "Metal",
                 o."brands"  AS "Brand",
@@ -161,11 +165,90 @@ const getFilterOptions = async () => {
     }
 };
 
+// MODIFICATION: Added 'ProcessedBy' user and ensured all fields are present.
+const getInboundRecordByInboundId = async (inboundId) => {
+    try {
+        const query = `
+            SELECT
+                i."jobNo" AS "JobNo", i."lotNo" AS "LotNo", i."noOfBundle" AS "NoOfBundle",
+                i."inboundId", i."barcodeNo" AS "Barcode", c."commodityName" AS "Commodity", b."brandName" AS "Brand",
+                s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
+                i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
+                exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse",
+                i."inboundDate" AS "InboundDate", i."scheduleInboundDate" AS "ScheduleInboundDate",
+                i."grossWeight" AS "GrossWeight", i."netWeight" AS "NetWeight", i."actualWeight" AS "ActualWeight",
+                i."isRebundled" AS "IsRebundled", i."isRepackProvided" AS "IsRepackProvided",
+                u_scheduler."username" AS "ScheduledBy",
+                -- Assuming there is no 'processedBy' for inbound, returning NULL
+                NULL AS "ProcessedBy",
+                i."updatedAt" AS "UpdatedAt"
+            FROM public.inbounds i
+            LEFT JOIN public.brands b ON b."brandId" = i."brandId"
+            LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
+            LEFT JOIN public.shapes s ON s."shapeId" = i."shapeId"
+            LEFT JOIN public.exlmewarehouses exlme ON exlme."exLmeWarehouseId" = i."exLmeWarehouseId"
+            LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
+            LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
+            LEFT JOIN public.users u_scheduler ON u_scheduler.userid = i."userId"
+            WHERE i."inboundId" = :inboundId
+            LIMIT 1;
+        `;
+
+        const result = await db.sequelize.query(query, {
+            replacements: { inboundId },
+            type: db.sequelize.QueryTypes.SELECT
+        });
+
+        return result;
+    } catch (error) {
+        console.error('Error fetching inbound record by inboundId:', error);
+        throw error;
+    }
+};
+
+// MODIFICATION: Corrected user joins to fetch both scheduler and processor.
+const getOutboundRecordByOutboundId = async (outboundId) => {
+    try {
+        const query = `
+           SELECT
+                o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", o."noOfBundle" AS "NoOfBundle",o."lotReleaseWeight" AS "LotReleaseWeight",
+                o."outboundTransactionId", o."commodity" AS "Commodity", o."brands" AS "Brand",
+                o."shape" AS "Shape", o."exLmeWarehouse" AS "ExLMEWarehouse",
+                o."exWarehouseLot" AS "ExWarehouseLot", o."releaseWarehouse" AS "ReleaseWarehouse",
+                so."releaseDate" AS "ReleaseDate", so."createdAt" AS "ScheduleOutboundDate",
+                o."exportDate" AS "ExportDate", o."deliveyDate" AS "DeliveryDate",
+                o."netWeight" AS "TotalReleaseWeight",
+                o."storageReleaseLocation" AS "StorageReleaseLocation", o."transportVendor" AS "TransportVendor",
+                scheduler."username" AS "ScheduledBy",
+                processor."username" AS "ProcessedBy",
+                o."updatedAt" AS "UpdatedAt"
+            FROM public.outboundtransactions o
+            LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = o."scheduleOutboundId"
+            LEFT JOIN public.users scheduler ON scheduler.userid = o."scheduledBy"
+            LEFT JOIN public.users processor ON processor.userid = o."outboundedBy"
+            WHERE o."outboundTransactionId" = :outboundId
+            LIMIT 1;
+        `;
+
+        const result = await db.sequelize.query(query, {
+            replacements: { outboundId },
+            type: db.sequelize.QueryTypes.SELECT
+        });
+
+        return result;
+    } catch (error) {
+        console.error('Error fetching outbound record by outboundId:', error);
+        throw error;
+    }
+};
+
 
 module.exports = {
     getInboundSummary,
     getOutboundSummary,
     getInboundRecord,
     getOutboundRecord,
-    getFilterOptions
+    getFilterOptions,
+    getInboundRecordByInboundId,
+    getOutboundRecordByOutboundId
 };  
