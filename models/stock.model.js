@@ -81,14 +81,16 @@ const getFilterOptions = async () => {
         const shapesQuery = 'SELECT DISTINCT "shapeName" FROM public.shapes WHERE "shapeName" IS NOT NULL ORDER BY "shapeName";';
         const commoditiesQuery = 'SELECT DISTINCT "commodityName" FROM public.commodities WHERE "commodityName" IS NOT NULL ORDER BY "commodityName";';
         const jobNosQuery = 'SELECT DISTINCT "jobNo" FROM public.inbounds WHERE "jobNo" IS NOT NULL ORDER BY "jobNo";';
+        const exLMEWarehouseQuery = 'SELECT DISTINCT "exLmeWarehouseName" FROM public.exlmewarehouses WHERE "exLmeWarehouseName" IS NOT NULL ORDER BY "exLmeWarehouseName";';
 
-        const [brands, shapes, commodities, jobNos] = await Promise.all([
+        const [brands, shapes, commodities, jobNos, exlmewarehouse] = await Promise.all([
             db.sequelize.query(brandsQuery, { type: db.sequelize.QueryTypes.SELECT }),
             db.sequelize.query(shapesQuery, { type: db.sequelize.QueryTypes.SELECT }),
             db.sequelize.query(commoditiesQuery, { type: db.sequelize.QueryTypes.SELECT }),
             db.sequelize.query(jobNosQuery, { type: db.sequelize.QueryTypes.SELECT }),
+            db.sequelize.query(exLMEWarehouseQuery, { type: db.sequelize.QueryTypes.SELECT })
         ]);
-        if (!brands || !shapes || !commodities || !jobNos) {
+        if (!brands || !shapes || !commodities || !jobNos || !exlmewarehouse) {
             throw new Error('Failed to fetch filter options');
         }
 
@@ -97,6 +99,7 @@ const getFilterOptions = async () => {
             shapes: shapes.map(item => item.shapeName),
             commodities: commodities.map(item => item.commodityName),
             jobNos: jobNos.map(item => item.jobNo),
+            exLMEWarehouse: exlmewarehouse.map(item => item.exLmeWarehouseName)
         };
     } catch (error) {
         console.error('Error fetching filter options:', error);
@@ -379,7 +382,101 @@ const createScheduleOutbound = async (scheduleData) => {
         console.error('Error in createScheduleOutbound transaction:', error);
         throw new Error('Failed to create outbound schedule due to a database error.');
     }
+}
+
+const EditInformation = async (inboundId, updateData) => {
+    try {
+        const setClauses = [];
+        const replacements = { inboundId };
+
+        for (const key in updateData) {
+            // Map frontend keys to DB columns
+            let dbColumnName;
+            switch (key) {
+                case 'noOfBundle': dbColumnName = 'noOfBundle'; break;
+                case 'barcodeNo': dbColumnName = 'barcodeNo'; break;
+                case 'commodity': dbColumnName = 'commodityId'; break;
+                case 'brand': dbColumnName = 'brandId'; break;
+                case 'shape': dbColumnName = 'shapeId'; break;
+                case 'exLMEWarehouse': dbColumnName = 'exLmeWarehouseId'; break;
+                case 'exWarehouseLot': dbColumnName = 'exWarehouseLot'; break;
+                case 'exWarehouseWarrant': dbColumnName = 'exWarehouseWarrant'; break;
+                case 'exWarehouseLocation': dbColumnName = 'exWarehouseLocationId'; break;
+                case 'inboundWarehouse': dbColumnName = 'inboundWarehouseId'; break;
+                case 'grossWeight': dbColumnName = 'grossWeight'; break;
+                case 'netWeight': dbColumnName = 'netWeight'; break;
+                case 'actualWeight': dbColumnName = 'actualWeight'; break;
+                case 'isRelabelled': dbColumnName = 'isRelabelled'; break;
+                case 'isRebundled': dbColumnName = 'isRebundled'; break;
+                case 'isRepackProvided': dbColumnName = 'isRepackProvided'; break;
+                default:
+                    console.warn(`Unknown key: ${key}`);
+                    continue;
+            }
+
+            // Lookup IDs if needed
+            if (['commodityId', 'brandId', 'shapeId', 'exLmeWarehouseId', 'exWarehouseLocationId', 'inboundWarehouseId'].includes(dbColumnName)) {
+                let lookupTable, lookupNameCol, lookupIdCol;
+                switch (dbColumnName) {
+                    case 'commodityId': lookupTable = 'commodities'; lookupNameCol = 'commodityName'; lookupIdCol = 'commodityId'; break;
+                    case 'brandId': lookupTable = 'brands'; lookupNameCol = 'brandName'; lookupIdCol = 'brandId'; break;
+                    case 'shapeId': lookupTable = 'shapes'; lookupNameCol = 'shapeName'; lookupIdCol = 'shapeId'; break;
+                    case 'exLmeWarehouseId': lookupTable = 'exlmewarehouses'; lookupNameCol = 'exLmeWarehouseName'; lookupIdCol = 'exLmeWarehouseId'; break;
+                    case 'exWarehouseLocationId': lookupTable = 'exwarehouselocations'; lookupNameCol = 'exWarehouseLocationName'; lookupIdCol = 'exWarehouseLocationId'; break;
+                    case 'inboundWarehouseId': lookupTable = 'inboundwarehouses'; lookupNameCol = 'inboundWarehouseName'; lookupIdCol = 'inboundWarehouseId'; break;
+                }
+                const lookupQuery = `SELECT "${lookupIdCol}" FROM public."${lookupTable}" WHERE "${lookupNameCol}" = :value LIMIT 1;`;
+                const lookupResult = await db.sequelize.query(lookupQuery, {
+                    type: db.sequelize.QueryTypes.SELECT,
+                    replacements: { value: updateData[key] }
+                });
+                if (lookupResult.length > 0) {
+                    setClauses.push(`"${dbColumnName}" = :${key}_id`);
+                    replacements[`${key}_id`] = lookupResult[0][lookupIdCol];
+                } else {
+                    console.warn(`Lookup failed for ${key}: ${updateData[key]}`);
+                    continue;
+                }
+            }
+            // Handle boolean fields
+            else if (['isRelabelled', 'isRebundled', 'isRepackProvided'].includes(dbColumnName)) {
+                setClauses.push(`"${dbColumnName}" = :${key}`);
+                replacements[key] = (updateData[key] === 'Yes');
+            }
+            // Direct mapping for simple fields
+            else {
+                setClauses.push(`"${dbColumnName}" = :${key}`);
+                replacements[key] = updateData[key];
+            }
+        }
+
+        if (setClauses.length === 0) {
+            return { success: false, message: 'No valid fields to update.' };
+        }
+
+        const query = `
+            UPDATE public.inbounds
+            SET ${setClauses.join(', ')}, "updatedAt" = NOW()
+            WHERE "inboundId" = :inboundId;
+        `;
+
+        const [results, metadata] = await db.sequelize.query(query, {
+            replacements,
+            type: db.sequelize.QueryTypes.UPDATE
+        });
+
+        if (metadata.rowCount > 0) {
+            return { success: true, message: 'Lot information updated successfully.' };
+        } else {
+            return { success: false, message: 'No lot found with the given inboundId or no changes made.' };
+        }
+
+    } catch (error) {
+        console.error('Error in EditInformation:', error);
+        throw error;
+    }
 };
+
 
 module.exports = {
     getAllStock,
@@ -387,5 +484,6 @@ module.exports = {
     getInventory,
     getFilterOptions,
     getLotSummary,
-    createScheduleOutbound
+    createScheduleOutbound,
+    EditInformation
 };

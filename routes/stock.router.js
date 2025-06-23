@@ -83,4 +83,24 @@ router.post('/schedule-outbound', async (req, res) => {
     }
 });
 
+router.put('/update/:inboundId', async (req, res) => {
+    const inboundId = req.params.inboundId;
+    const updateData = req.body;
+    if (!inboundId) {
+        return res.status(400).json({ error: 'Missing inboundId in URL' });
+    }
+    if (!updateData || Object.keys(updateData).length === 0) {
+        return res.status(400).json({ error: 'No data to update' });
+    }
+    try {
+        const updatedRecord = await stockModel.EditInformation(inboundId, updateData);
+        if (!updatedRecord || updatedRecord.length === 0) {
+            return res.status(404).json({ error: 'Record not found or nothing updated.' });
+        }
+        res.json({ success: true, data: updatedRecord });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to update record', details: error.message });
+    }
+});
+
 module.exports = router;
