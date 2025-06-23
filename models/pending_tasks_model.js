@@ -5,6 +5,7 @@ const findJobNoPendingTasks = async () => {
   try {
     const query = `
             SELECT DISTINCT "jobNo" FROM public.lot
+                  WHERE "status" = 'Pending'
         `;
     const result = await db.sequelize.query(query, {
       type: db.sequelize.QueryTypes.SELECT
@@ -19,7 +20,7 @@ const findJobNoPendingTasks = async () => {
 const getDetailsPendingTasks = async (jobNo) => {
   try {
     const query = `
-    SELECT "lotId", "jobNo", "commodity", "expectedBundleCount", "brand", 
+    SELECT "lotId", "lotNo","jobNo", "commodity", "expectedBundleCount", "brand", 
            "exWarehouseLot", "exLmeWarehouse"
     FROM public.lot
     WHERE "jobNo" = :jobNo AND "status" = 'Pending'
