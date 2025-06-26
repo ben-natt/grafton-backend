@@ -36,6 +36,17 @@ router.post('/tasks-user', async (req, res) => {
 });
 
 
+router.post('/tasks-user-single-date', async (req, res) => {
+    const { jobNo } = req.body;
+    try {
+        const result = await pendingTasksModel.pendingTasksUserIdSingleDate(jobNo);
+        res.status(200).json(result);
+    } catch (error) {
+        console.error('Error fetching stock records:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 // --- OUTBOUND ROUTES ---
 
 router.get("/tasks-outbound-jobNo", async (req, res) => {
