@@ -212,7 +212,7 @@ router.post("/login", async (req, res) => {
     res.status(200).json({
       message: "Login successful",
       token: token, // Send the JWT back to the client
-      user: { email: user.email, username: user.username },
+      user: { id : user.userid, email: user.email, username: user.username },
     });
   } catch (error) {
     console.error("Login Error:", error);
