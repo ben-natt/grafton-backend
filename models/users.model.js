@@ -4,7 +4,7 @@ const path = require("path");
 const fs = require("fs");
 
 // Create uploads directory if not exists
-const uploadDir = path.join(__dirname, "../../uploads");
+const uploadDir = path.join(__dirname, "../uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -117,10 +117,12 @@ const createUser = async (email, password, roleid) => {
 const updateUserProfile = async (userId, updates) => {
   try {
     let query = "UPDATE users SET ";
-    const fields = [];
-    const replacements = { userId };
+    const fields = []; // Array to hold the fields to update
+    const replacements = { userId }; // Object to hold the replacements for the query
 
     Object.keys(updates).forEach((key) => {
+      // Iterate over the updates object
+      // Check if the key is a valid field in the users table
       if (key !== "userid") {
         // Exclude userid from updates
         fields.push(`${key} = :${key}`);
@@ -134,11 +136,12 @@ const updateUserProfile = async (userId, updates) => {
 
     query +=
       fields.join(", ") +
-      ", updatedat = CURRENT_TIMESTAMP WHERE userid = :userId RETURNING *";
+      ", updatedat = CURRENT_TIMESTAMP WHERE userid = :userId RETURNING *"; // Use RETURNING * to get the updated row
 
     const [updatedRows] = await db.sequelize.query(query, {
-      replacements,
-      type: db.sequelize.QueryTypes.UPDATE,
+      replacements, // Use the replacements object
+      // Use the QueryTypes.UPDATE to indicate this is an update operation
+      type: db.sequelize.QueryTypes.UPDATE, // Use QueryTypes.UPDATE to indicate this is an update operation
     });
 
     return updatedRows[0]; // Return the first updated row

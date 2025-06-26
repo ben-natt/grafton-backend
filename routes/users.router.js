@@ -18,11 +18,11 @@ function generateOtp() {
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "../../uploads"));
+    cb(null, path.join(__dirname, "../uploads"));
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, "profile-" + uniqueSuffix + path.extname(file.originalname));
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9); // Unique suffix to avoid filename collisions
+    cb(null, "profile-" + uniqueSuffix + path.extname(file.originalname)); // Use original file extension
   },
 });
 
@@ -30,18 +30,20 @@ const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png|gif/;
-    const mimetype = filetypes.test(file.mimetype);
+    const filetypes = /jpeg|jpg|png|gif/; // Allowed file types
+    const mimetype = filetypes.test(file.mimetype); // Check MIME type -- MIME full form is "Multipurpose Internet Mail Extensions"
+    // Check file extension
     const extname = filetypes.test(
       path.extname(file.originalname).toLowerCase()
     );
 
     if (mimetype && extname) {
-      return cb(null, true);
+      // If both MIME type and extension are valid
+      return cb(null, true); // Accept the file
     }
     cb(new Error("Only image files are allowed!"));
   },
-}).single("profileImage");
+}).single("profileImage"); // 'profileImage' is the field name in the form data
 
 router.post("/send-otp", async (req, res) => {
   const { email } = req.body;
@@ -212,7 +214,8 @@ router.post("/login", async (req, res) => {
     res.status(200).json({
       message: "Login successful",
       token: token, // Send the JWT back to the client
-      user: { id : user.userid, email: user.email, username: user.username },
+      user: { id: user.userid, email: user.email, username: user.username },
+
     });
   } catch (error) {
     console.error("Login Error:", error);
@@ -245,7 +248,7 @@ router.get("/profile", authenticate, async (req, res) => {
 
     //  Construct the full URL for the profile image
     const fullProfileImageUrl = user.profileimageurl
-      ? `${req.protocol}://${req.get("host")}/${user.profileimageurl}`
+      ? `${req.protocol}://${req.get("host")}/${user.profileimageurl}` // Use req.protocol and req.get("host") is needed to construct the full URL
       : null;
 
     res.status(200).json({
@@ -323,13 +326,14 @@ router.put("/profile", authenticate, (req, res) => {
       }
 
       if (Object.keys(updates).length === 0) {
-        return res.status(400).json({ message: "No updates provided" });
+        return res.status(400).json({ message: "No updates provided" }); // Ensure updates object is not empty
       }
 
       const updatedUser = await usersModel.updateUserProfile(userId, updates);
       // After updating, fetch the user again to get the updated role name
       const userWithUpdatedRole = await usersModel.getUserById(userId);
 
+      // Construct the user profile object to return
       const userProfile = {
         userid: userWithUpdatedRole.userid,
         email: userWithUpdatedRole.email,
