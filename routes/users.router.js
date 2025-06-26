@@ -43,7 +43,7 @@ const upload = multer({
     }
     cb(new Error("Only image files are allowed!"));
   },
-}).single("profileImage");
+}).single("profileImage"); // 'profileImage' is the field name in the form data
 
 router.post("/send-otp", async (req, res) => {
   const { email } = req.body;

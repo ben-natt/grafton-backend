@@ -1,7 +1,26 @@
 const db = require("../database");
 
-// ... (getConfirmationDetailsById, countTotalLotsInJob, confirmSelectedInbounds, getGrnDetailsForSelection, getOutboundByJobIdentifier functions remain the same) ...
+// This function is now intended to be called within a transaction.
+const confirmSelectedInbounds = async (selectedInboundIds, transaction) => {
+  try {
+    const query = `
+      UPDATE public.selectedinbounds
+      SET "isOutbounded" = true, "updatedAt" = NOW()
+      WHERE "selectedInboundId" IN (:selectedInboundIds) AND "isOutbounded" = false;
+    `;
 
+    await db.sequelize.query(query, {
+      replacements: { selectedInboundIds },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction, // Use the provided transaction
+    });
+  } catch (error) {
+    console.error("Error updating outbound status in model:", error);
+    throw error; // Throw error to be caught by the calling function's transaction
+  }
+};
+
+// Fetches confirmation details for a selected inbound by its ID.
 const getConfirmationDetailsById = async (selectedInboundId) => {
   try {
     const query = `
@@ -41,6 +60,7 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
   }
 };
 
+// Counts the total lot release weight for a given job number.
 const countTotalLotsInJob = async (jobNo) => {
   try {
     const query = `
@@ -61,29 +81,9 @@ const countTotalLotsInJob = async (jobNo) => {
   }
 };
 
-const confirmSelectedInbounds = async (selectedInboundIds) => {
-  try {
-    const query = `
-      UPDATE public.selectedinbounds
-      SET "isOutbounded" = true, "updatedAt" = NOW()
-      WHERE "selectedInboundId" IN (:selectedInboundIds) AND "isOutbounded" = false
-      RETURNING "selectedInboundId";
-    `;
-
-    const results = await db.sequelize.query(query, {
-      replacements: { selectedInboundIds },
-      type: db.sequelize.QueryTypes.SELECT,
-    });
-    return results.map((r) => r.selectedInboundId);
-  } catch (error) {
-    console.error("Error updating outbound status in model:", error);
-    throw error;
-  }
-};
-
+// Fetches GRN details for a selection of inbounds based on the job number and selected inbound IDs.
 const getGrnDetailsForSelection = async (jobNo, selectedInboundIds) => {
   try {
-    // 1. Generate the next prospective GRN Number based on existing records for the job.
     const grnCountQuery = `
       SELECT COUNT(*) as grn_count
       FROM public.outbounds
@@ -97,7 +97,6 @@ const getGrnDetailsForSelection = async (jobNo, selectedInboundIds) => {
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
     const grnNo = `${jobNo.replace("SINI", "SINO")}/${grnIndex}`;
 
-    // 2. Fetch details ONLY for the provided list of selectedInboundIds
     const lotsQuery = `
       SELECT
         i."lotNo", i."jobNo", i."noOfBundle", i."grossWeight", i."netWeight",
@@ -121,7 +120,6 @@ const getGrnDetailsForSelection = async (jobNo, selectedInboundIds) => {
       return null;
     }
 
-    // 3. Assemble the response object using the first lot for common details.
     const firstLot = lots[0];
     return {
       releaseDate: firstLot.releaseDate,
@@ -149,31 +147,9 @@ const getGrnDetailsForSelection = async (jobNo, selectedInboundIds) => {
   }
 };
 
-// Checks if an outbound record already exists for a given jobIdentifier.
-const getOutboundByJobIdentifier = async (jobIdentifier) => {
-  try {
-    const query = `
-      SELECT "outboundId" 
-      FROM public.outbounds 
-      WHERE "jobIdentifier" = :jobIdentifier
-      LIMIT 1;
-    `;
-    const result = await db.sequelize.query(query, {
-      replacements: { jobIdentifier },
-      type: db.sequelize.QueryTypes.SELECT,
-      plain: true,
-    });
-    return result; // Will be an object like { outboundId: ... } if found, otherwise null
-  } catch (error) {
-    console.error("Error fetching outbound by jobIdentifier:", error);
-    throw error;
-  }
-};
-
+// Fetches the list of operators (users with roleId 1 or 2) for the frontend.
 const getOperators = async () => {
   try {
-    // This query now uses the exact column names from your Grn.sql file.
-    // It selects 'username' but aliases it as "fullName" for the frontend.
     const query = `
       SELECT 
         userid AS "userId", 
@@ -193,6 +169,7 @@ const getOperators = async () => {
   }
 };
 
+// Creates a GRN and associated transactions based on the provided form data.
 const createGrnAndTransactions = async (formData) => {
   const {
     selectedInboundIds,
@@ -212,8 +189,9 @@ const createGrnAndTransactions = async (formData) => {
   const t = await db.sequelize.transaction();
 
   try {
-    // Step 1: Create the main record in the `outbounds` table
-    // The `releaseDate` here is the actual date of outbounding.
+    // LOGIC CHANGE: Update the selected inbounds' status within the transaction
+    await confirmSelectedInbounds(selectedInboundIds, t);
+
     const outboundInsertQuery = `
       INSERT INTO public.outbounds (
           "releaseDate", "driverName", "driverIdentityNo", "truckPlateNo",
@@ -225,7 +203,7 @@ const createGrnAndTransactions = async (formData) => {
           :warehouseStaff, :warehouseSupervisor, :userId, :grnNo, :jobIdentifier,
           :driverSignature, :warehouseStaffSignature, :warehouseSupervisorSignature,
           NOW(), NOW()
-      ) RETURNING "outboundId", "createdAt" AS "outboundedDate";
+      ) RETURNING "outboundId", "createdAt" AS "outboundedDate", "jobIdentifier", "grnNo";
     `;
     const outboundResult = await db.sequelize.query(outboundInsertQuery, {
       replacements: {
@@ -245,11 +223,10 @@ const createGrnAndTransactions = async (formData) => {
       transaction: t,
     });
 
-    const outboundId = outboundResult[0][0].outboundId;
-    // --- CHANGE: Capture the actual outbound date from the created record ---
-    const outboundedDate = outboundResult[0][0].outboundedDate;
+    const createdOutbound = outboundResult[0][0];
+    const outboundId = createdOutbound.outboundId;
+    const outboundedDate = createdOutbound.outboundedDate;
 
-    // --- CHANGE: Modified query to include exLmeWarehouse ---
     const lotsDetailsQuery = `
       SELECT
           si."inboundId", si."scheduleOutboundId",
@@ -275,9 +252,7 @@ const createGrnAndTransactions = async (formData) => {
       transaction: t,
     });
 
-    // Step 3: Insert a transaction record for each lot
     for (const lot of lotsToProcess) {
-      // --- CHANGE: Use the correct values for transaction insertion ---
       const transactionQuery = `
         INSERT INTO public.outboundtransactions (
             "outboundId", "inboundId", "jobNo", "lotNo", shape, commodity, brands,
@@ -299,7 +274,7 @@ const createGrnAndTransactions = async (formData) => {
         replacements: {
           ...lot,
           outboundId,
-          outboundedDate, // Use the captured actual outbound date
+          outboundedDate,
           driverName,
           driverIdentityNo,
           truckPlateNo,
@@ -313,8 +288,13 @@ const createGrnAndTransactions = async (formData) => {
     }
 
     await t.commit();
+
     return {
-      message: `${lotsToProcess.length} transaction(s) created successfully.`,
+      createdOutbound: {
+        ...createdOutbound,
+        releaseDate: outboundedDate,
+      },
+      lotsForPdf: lotsToProcess,
     };
   } catch (error) {
     await t.rollback();
@@ -326,9 +306,7 @@ const createGrnAndTransactions = async (formData) => {
 module.exports = {
   getConfirmationDetailsById,
   countTotalLotsInJob,
-  confirmSelectedInbounds,
   getGrnDetailsForSelection,
-  getOutboundByJobIdentifier,
   createGrnAndTransactions,
-  getOperators, // Export new function
+  getOperators,
 };
