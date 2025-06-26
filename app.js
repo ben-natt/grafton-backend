@@ -12,6 +12,7 @@ const activitiesRoutes = require("./routes/activities.router");
 
 const pendingTasks = require("./routes/pending_tasks_router");
 const confirmOutboundRoutes = require("./routes/confirm_outbound.router");
+const confirmInboundRoutes = require("./routes/confirm_inbound_router");
 
 const { sequelize, DataTypes } = require("./database"); // Correctly import from database.js
 
@@ -38,4 +39,6 @@ app.use("/activities", activitiesRoutes);
 
 app.use("/pending", pendingTasks);
 app.use("/confirm-outbound", confirmOutboundRoutes);
+app.use("/confirm-inbound", confirmInboundRoutes);
+
 module.exports = app;
