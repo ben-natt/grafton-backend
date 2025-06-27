@@ -26,12 +26,12 @@ const getDetailsPendingTasks = async (jobNo) => {
     WHERE "jobNo" = :jobNo AND "status" = 'Pending'
     ORDER BY "exWarehouseLot" ASC;
     `;
-    
+
     const result = await db.sequelize.query(query, {
       replacements: { jobNo },
       type: db.sequelize.QueryTypes.SELECT
     });
-    
+
     if (result.length > 0) {
       console.log('Query result:', result);
       console.log('First result keys:', Object.keys(result[0]));
@@ -113,23 +113,25 @@ const pendingTasksUserId = async (jobNo) => {
   }
 };
 
+
+// FOR OFICE VERSION
 const pendingTasksUserIdSingleDate = async (jobNo) => {
   try {
     const query = `
           SELECT 
             u."username", 
-            TO_CHAR(s."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "inboundDate"
+            TO_CHAR(s."inboundDate" AT TIME ZONE 'Asia/Singapore', 'DD-MM-YYYY') AS "inboundDate"
           FROM public.scheduleinbounds s
           JOIN public.lot l ON s."jobNo" = l."jobNo"
           JOIN public.users u ON s."userId" = u."userid"
           WHERE l."jobNo" = :jobNo AND l."status" = 'Pending'
       `;
-    
+
     const result = await db.sequelize.query(query, {
       replacements: { jobNo },
       type: db.sequelize.QueryTypes.SELECT
     });
-    
+
     if (result.length > 0) {
       console.log('Query result:', result);
       console.log('First result keys:', Object.keys(result[0]));
@@ -143,6 +145,77 @@ const pendingTasksUserIdSingleDate = async (jobNo) => {
     throw error;
   }
 };
+
+const updateReportStatus = async (lotId) => {
+  try {
+    const query = `
+      UPDATE public.lot
+      SET "report" = false
+      WHERE "lotId" = :lotId
+      RETURNING *;
+    `;
+    const result = await db.sequelize.query(query, {
+      replacements: { lotId },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    return result[0];
+  } catch (error) {
+    console.error("Error updating report status:", error);
+    throw error;
+  }
+};
+
+const getDetailsPendingTasksOrderByReport = async (jobNo) => {
+  try {
+    const query = `
+    SELECT "lotId", "lotNo","jobNo", "commodity", "expectedBundleCount", "brand",
+           "exWarehouseLot", "exLmeWarehouse", "shape", "report"
+    FROM public.lot
+    WHERE "jobNo" = :jobNo AND "status" = 'Pending'
+    ORDER BY "report" DESC;
+    `;
+
+    const result = await db.sequelize.query(query, {
+      replacements: { jobNo },
+      type: db.sequelize.QueryTypes.SELECT
+    });
+
+    if (result.length > 0) {
+      console.log('Query result:', result);
+      console.log('First result keys:', Object.keys(result[0]));
+    } else {
+      console.log('No pending tasks found for jobNo:', jobNo);
+    }
+    return result;
+  } catch (error) {
+    console.error('Error in /pending-tasks route:', error);
+    console.error('Error fetching pending tasks records:', error);
+    throw error;
+  }
+};
+
+const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
+  try {
+    const query = `
+      UPDATE public.lot
+      SET "expectedBundleCount" = :expectedBundleCount
+      WHERE "lotId" = :lotId
+      RETURNING *;
+    `;
+    const result = await db.sequelize.query(query, {
+      replacements: { lotId, expectedBundleCount },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    return result[0];
+  } catch (error) {
+    console.error("Error updating quantity:", error);
+    throw error;
+  }
+};
+
+
 
 // --- OUTBOUND ---
 const findJobNoPendingOutbound = async () => {
@@ -242,14 +315,88 @@ const pendingOutboundTasksUserId = async (jobNo) => {
   }
 };
 
+// FOR OFFICE VERSION
+
+// SELECTEDINBOUNDS TABLE, INBOUND TABLE AAND (EXTRAS LIKE COMMODITIES, BRANDS, EXLMEWAREHOUSES)
+const getDetailsPendingOutboundOffice = async (jobNo) => {
+  try {
+    const query = `
+            SELECT
+              si."selectedInboundId",
+                i."jobNo",
+                i."lotNo",
+                i."noOfBundle" as "expectedBundleCount",
+                b."brandName" AS "brand",
+                c."commodityName" AS "commodity",
+                w."exLmeWarehouseName" AS "exLmeWarehouse",
+                i."exWarehouseLot",
+                sh."shapeName",
+                so."lotReleaseWeight"
+            FROM public.selectedinbounds si
+            JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+            JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
+            LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
+            LEFT JOIN public.shapes sh ON sh."shapeName" = i."shape"
+            LEFT JOIN public.brands b ON i."brandId" = b."brandId"
+            LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
+            WHERE si."jobNo" = :jobNo AND si."isOutbounded" = false
+            ORDER BY i."lotNo" ASC
+        `;
+    const result = await db.sequelize.query(query, {
+      replacements: { jobNo },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    return result;
+  } catch (error) {
+    console.error("Error fetching pending outbound task details:", error);
+    throw error;
+  }
+};
+
+const pendingOutboundTasksUserIdSingleDate = async (jobNo) => {
+  try {
+    const query = `
+            SELECT
+            u."username",
+            TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD-MM-YYYY') AS "releaseDate"
+            FROM public.selectedinbounds si
+            JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
+            JOIN public.users u ON so."userId" = u."userid"
+            WHERE si."jobNo" = :jobNo AND si."isOutbounded" = false;
+      `;
+
+    const result = await db.sequelize.query(query, {
+      replacements: { jobNo },
+      type: db.sequelize.QueryTypes.SELECT
+    });
+
+    if (result.length > 0) {
+      console.log('Query result:', result);
+      console.log('First result keys:', Object.keys(result[0]));
+    } else {
+      console.log('No pending tasks found for jobNo:', jobNo);
+    }
+    return result;
+  } catch (error) {
+    console.error('Error in /pending-tasks route:', error);
+    console.error('Error fetching pending tasks records:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   // Inbound
   getDetailsPendingTasks,
   pendingTasksUserId,
   findJobNoPendingTasks,
   pendingTasksUserIdSingleDate,
+  updateReportStatus,
+  getDetailsPendingTasksOrderByReport,
+  pendingTasksUpdateQuantity,
   // Outbound
   findJobNoPendingOutbound,
   getDetailsPendingOutbound,
   pendingOutboundTasksUserId,
+  getDetailsPendingOutboundOffice,
+  pendingOutboundTasksUserIdSingleDate,
 };
