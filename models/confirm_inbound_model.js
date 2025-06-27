@@ -87,7 +87,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         continue;
       }
 
-      // 2. Convert name fields to ID
+      // Convert name fields to ID
       const commodityId = await getIdByName("commodities", "commodityName", "commodityId", lot.commodity);
       const shapeId = await getIdByName("shapes", "shapeName", "shapeId", lot.shape);
       const brandId = await getIdByName("brands", "brandName", "brandId", lot.brand);
@@ -95,7 +95,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       const inboundWarehouseId = await getIdByName("inboundwarehouses", "inboundWarehouseName", "inboundWarehouseId", lot.inboundWarehouse);
       const exWarehouseLocationId = await getIdByName("exwarehouselocations", "exWarehouseLocationName", "exWarehouseLocationId", lot.exWarehouseLocation);
 
-      // 3. Update lot status
+      // Update lot status
       await db.sequelize.query(
         `UPDATE public.lot SET status = 'Received', "updatedAt" = NOW()
          WHERE "lotId" = :lotId`,
@@ -106,7 +106,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         }
       );
 
-      // 4. Insert into inbounds
+      // Insert into inbounds
       const insertQuery = `
         INSERT INTO public.inbounds (
           "jobNo", "lotNo", "noOfBundle", "barcodeNo", "commodityId", "shapeId",

@@ -4,7 +4,7 @@ const {reportConfirmation,insertInboundFromLots } = require('../models/confirm_i
 const router = express.Router();
 
 // ROUTER TO DO REPORT
-router.post('/report-confirmation', async (req, res) => {
+router.post('/tasks-report-confirmation', async (req, res) => {
   try {
     const { lotIds } = req.body;
 
@@ -31,10 +31,10 @@ router.post('/report-confirmation', async (req, res) => {
 
 
 // ROUTER TO DO THE UPDATE AND ADDING OF INBOUND
-router.post("/confirm-multiple-inbounds", async (req, res) => {
-  const { lots, userId } = req.body;
+router.post("/tasks-complete-inbound", async (req, res) => {
+  const { selectedLots, userId } = req.body;
 
-  if (!Array.isArray(lots) || lots.length === 0) {
+  if (!Array.isArray(selectedLots) || selectedLots.length === 0) {
     return res.status(400).json({ error: "Lots array is required and cannot be empty." });
   }
 
@@ -43,7 +43,7 @@ router.post("/confirm-multiple-inbounds", async (req, res) => {
   }
 
   try {
-    const result = await confirmInboundModel.insertInboundFromLots(lots, userId);
+    const result = await confirmInboundModel.insertInboundFromLots(selectedLots, userId);
     res.status(200).json({ success: true, inserted: result });
   } catch (error) {
     console.error("Error inserting inbounds:", error);
