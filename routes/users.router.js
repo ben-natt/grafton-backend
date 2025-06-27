@@ -18,7 +18,7 @@ function generateOtp() {
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "../uploads"));
+    cb(null, path.join(__dirname, "../uploads/img/profile"));
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9); // Unique suffix to avoid filename collisions
@@ -28,7 +28,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  limits: { fileSize: 1 * 1024 * 1024 }, // 1MB limit
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png|gif/; // Allowed file types
     const mimetype = filetypes.test(file.mimetype); // Check MIME type -- MIME full form is "Multipurpose Internet Mail Extensions"
@@ -215,7 +215,6 @@ router.post("/login", async (req, res) => {
       message: "Login successful",
       token: token, // Send the JWT back to the client
       user: { id: user.userid, email: user.email, username: user.username },
-
     });
   } catch (error) {
     console.error("Login Error:", error);
@@ -309,7 +308,7 @@ router.put("/profile", authenticate, (req, res) => {
           const oldFilename = path.basename(user.profileimageurl);
           const oldImagePath = path.join(
             __dirname,
-            "../../uploads", // Point to the uploads directory
+            "../uploads/img/profile", // Point to the uploads directory
             oldFilename
           );
           if (fs.existsSync(oldImagePath)) {
@@ -322,7 +321,7 @@ router.put("/profile", authenticate, (req, res) => {
           }
         }
 
-        updates.profileimageurl = `uploads/${req.file.filename}`;
+        updates.profileimageurl = `uploads/img/profile/${req.file.filename}`;
       }
 
       if (Object.keys(updates).length === 0) {
