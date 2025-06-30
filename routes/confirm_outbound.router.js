@@ -14,22 +14,22 @@ router.get(
 /*
  * POST /outbound/confirm
  * Confirms a list of lots for outbound, updating their status.
- * @body   { "itemsToConfirm": [{ "selectedInboundId": 1 }, { "selectedInboundId": 2 }] }
+ * @body   { "itemsToConfirm": [{ "selectedInboundId": 1 }, { "selectedInboundId": 2 }], "scheduleOutboundId": 1 }
  */
 router.post("/confirm", outboundController.confirmOutbound);
 
 /*
- * GET /outbound/generate-grn/:jobNo
- * Generates a Goods Receipt Note (GRN) for the specified job number.
+ * POST /outbound/generate-grn-details
+ * Generates the necessary details for a Goods Release Note (GRN).
+ * @body { "scheduleOutboundId": 1, "selectedInboundIds": [1, 2, 3] }
  */
 router.post("/generate-grn-details", outboundController.getGrnDetails);
 
 /*
  * POST /outbound/create-grn-and-transactions
  * Creates a GRN and associated transactions based on the provided data.
- * @body { "jobNo": "JOB123", "selectedInboundIds": [1, 2, 3] }
+ * @body { "scheduleOutboundId": 1, "selectedInboundIds": [1, 2, 3], ...other GRN data }
  * This endpoint processes the GRN and creates the necessary transactions in the system.
- * It expects a job number and a list of selected inbound IDs to create the GRN and transactions.
  */
 router.post(
   "/create-grn-and-transactions",
