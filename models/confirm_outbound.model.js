@@ -1,6 +1,5 @@
 const db = require("../database");
 
-// This function is now intended to be called within a transaction.
 const confirmSelectedInbounds = async (selectedInboundIds, transaction) => {
   try {
     const query = `
@@ -12,15 +11,14 @@ const confirmSelectedInbounds = async (selectedInboundIds, transaction) => {
     await db.sequelize.query(query, {
       replacements: { selectedInboundIds },
       type: db.sequelize.QueryTypes.UPDATE,
-      transaction, // Use the provided transaction
+      transaction,
     });
   } catch (error) {
     console.error("Error updating outbound status in model:", error);
-    throw error; // Throw error to be caught by the calling function's transaction
+    throw error;
   }
 };
 
-// Fetches confirmation details for a selected inbound by its ID.
 const getConfirmationDetailsById = async (selectedInboundId) => {
   try {
     const query = `
@@ -60,28 +58,6 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
   }
 };
 
-// ** UPDATED ** Now counts lots based on scheduleOutboundId
-const countTotalLotsInSchedule = async (scheduleOutboundId) => {
-  try {
-    const query = `
-      SELECT SUM(so."lotReleaseWeight") as "totalReleaseWeight"
-      FROM public.selectedinbounds si
-      JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
-      WHERE si."scheduleOutboundId" = :scheduleOutboundId AND si."isOutbounded" = false;
-    `;
-    const result = await db.sequelize.query(query, {
-      replacements: { scheduleOutboundId },
-      type: db.sequelize.QueryTypes.SELECT,
-      plain: true,
-    });
-    return result ? result.totalReleaseWeight : 0;
-  } catch (error) {
-    console.error("Error counting total lots in schedule:", error);
-    throw error;
-  }
-};
-
-// ** UPDATED ** Fetches GRN details based on scheduleOutboundId
 const getGrnDetailsForSelection = async (
   scheduleOutboundId,
   selectedInboundIds
@@ -89,7 +65,6 @@ const getGrnDetailsForSelection = async (
   try {
     const outboundJobNo = `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
 
-    // Count existing GRNs for this scheduleOutboundId to generate the correct index
     const grnCountQuery = `
       SELECT COUNT(*) as grn_count
       FROM public.outbounds
@@ -105,6 +80,7 @@ const getGrnDetailsForSelection = async (
 
     const lotsQuery = `
       SELECT
+        si."selectedInboundId",
         i."lotNo", i."jobNo", i."noOfBundle", i."grossWeight", i."netWeight",
         c."commodityName" as commodity, b."brandName" as brand, s."shapeName" as shape,
         so."releaseWarehouse",
@@ -126,7 +102,6 @@ const getGrnDetailsForSelection = async (
       return null;
     }
 
-    // Aggregate cargo details
     const aggregateDetails = (key) =>
       [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
 
@@ -142,7 +117,9 @@ const getGrnDetailsForSelection = async (
         brand: aggregateDetails("brand"),
       },
       lots: lots.map((lot) => ({
-        lotNo: `${lot.jobNo.replace("SINI", "SINO")}-${lot.lotNo}`,
+        selectedInboundId: lot.selectedInboundId,
+        lotNo: lot.lotNo,
+        jobNo: lot.jobNo,
         bundles: lot.noOfBundle,
         grossWeightMt: parseFloat(lot.grossWeight * 0.907185).toFixed(2),
         netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
@@ -157,7 +134,6 @@ const getGrnDetailsForSelection = async (
   }
 };
 
-// Fetches the list of operators (users with roleId 1 or 2) for the frontend.
 const getOperators = async () => {
   try {
     const query = `
@@ -179,8 +155,6 @@ const getOperators = async () => {
   }
 };
 
-// ** UPDATED ** Creates a GRN and associated transactions based on the provided form data.
-// jobIdentifier is now scheduleOutboundId
 const createGrnAndTransactions = async (formData) => {
   const {
     selectedInboundIds,
@@ -191,7 +165,7 @@ const createGrnAndTransactions = async (formData) => {
     warehouseSupervisor,
     userId,
     grnNo,
-    jobIdentifier, // This will be scheduleOutboundId
+    jobIdentifier,
     driverSignature,
     warehouseStaffSignature,
     warehouseSupervisorSignature,
@@ -200,7 +174,6 @@ const createGrnAndTransactions = async (formData) => {
   const t = await db.sequelize.transaction();
 
   try {
-    // LOGIC CHANGE: Update the selected inbounds' status within the transaction
     await confirmSelectedInbounds(selectedInboundIds, t);
 
     const outboundInsertQuery = `
@@ -316,8 +289,8 @@ const createGrnAndTransactions = async (formData) => {
 
 module.exports = {
   getConfirmationDetailsById,
-  countTotalLotsInSchedule,
   getGrnDetailsForSelection,
   createGrnAndTransactions,
   getOperators,
+  confirmSelectedInbounds,
 };

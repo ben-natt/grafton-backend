@@ -21,7 +21,7 @@ const getConfirmationDetails = async (req, res) => {
 
 const confirmOutbound = async (req, res) => {
   try {
-    const { itemsToConfirm, scheduleOutboundId } = req.body;
+    const { itemsToConfirm, scheduleOutboundId, outboundJobNo } = req.body;
     if (
       !itemsToConfirm ||
       !Array.isArray(itemsToConfirm) ||
@@ -42,7 +42,9 @@ const confirmOutbound = async (req, res) => {
       message: "Selection confirmed. Proceed to GRN generation.",
       data: {
         confirmedIds: selectedInboundIds,
-        scheduleOutboundId: scheduleOutboundId, // Pass scheduleOutboundId to the next step
+        scheduleOutboundId: scheduleOutboundId,
+        outboundJobNo: outboundJobNo,
+        selectedLots: itemsToConfirm,
       },
     });
   } catch (error) {
@@ -85,7 +87,6 @@ const createGrnAndTransactions = async (req, res) => {
   try {
     const grnDataFromRequest = req.body;
 
-    // The jobIdentifier is now the scheduleOutboundId
     const { createdOutbound, lotsForPdf } =
       await outboundModel.createGrnAndTransactions(grnDataFromRequest);
 
@@ -96,28 +97,24 @@ const createGrnAndTransactions = async (req, res) => {
 
     const pdfData = {
       ...grnDataFromRequest,
-      ourReference: createdOutbound.jobIdentifier.replace("SINI", "SINO"),
+      ourReference: grnDataFromRequest.outboundJobNo,
       grnNo: createdOutbound.grnNo,
-      releaseDate: new Date(createdOutbound.releaseDate).toLocaleDateString(
+      releaseDate: new Date(createdOutbound.outboundedDate).toLocaleDateString(
         "en-GB",
         { day: "2-digit", month: "short", year: "numeric" }
       ),
       warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "",
-      transportVendor:
-        lotsForPdf.length > 0 ? lotsForPdf[0].transportVendor : "",
       cargoDetails: {
         commodity: aggregateDetails("commodity"),
         shape: aggregateDetails("shape"),
         brand: aggregateDetails("brand"),
       },
       lots: lotsForPdf.map((lot) => ({
-        lotNo: `${lot.jobNo.replace("SINI", "SINO")}-${lot.lotNo}`,
+        lotNo: `${lot.jobNo}-${lot.lotNo}`, // Correctly formats the inbound lot number
         bundles: lot.noOfBundle,
         grossWeightMt: parseFloat(lot.grossWeight * 0.907185).toFixed(2),
         netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
       })),
-      containerNo: lotsForPdf.length > 0 ? lotsForPdf[0].containerNo : "",
-      sealNo: lotsForPdf.length > 0 ? lotsForPdf[0].sealNo : "",
     };
 
     const pdfBytes = await pdfService.generateGrnPdf(pdfData);
