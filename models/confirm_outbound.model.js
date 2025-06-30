@@ -60,42 +60,48 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
   }
 };
 
-// Counts the total lot release weight for a given job number.
-const countTotalLotsInJob = async (jobNo) => {
+// ** UPDATED ** Now counts lots based on scheduleOutboundId
+const countTotalLotsInSchedule = async (scheduleOutboundId) => {
   try {
     const query = `
       SELECT SUM(so."lotReleaseWeight") as "totalReleaseWeight"
       FROM public.selectedinbounds si
       JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
-      WHERE si."jobNo" = :jobNo AND si."isOutbounded" = false;
+      WHERE si."scheduleOutboundId" = :scheduleOutboundId AND si."isOutbounded" = false;
     `;
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo },
+      replacements: { scheduleOutboundId },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
     return result ? result.totalReleaseWeight : 0;
   } catch (error) {
-    console.error("Error counting total lots in job:", error);
+    console.error("Error counting total lots in schedule:", error);
     throw error;
   }
 };
 
-// Fetches GRN details for a selection of inbounds based on the job number and selected inbound IDs.
-const getGrnDetailsForSelection = async (jobNo, selectedInboundIds) => {
+// ** UPDATED ** Fetches GRN details based on scheduleOutboundId
+const getGrnDetailsForSelection = async (
+  scheduleOutboundId,
+  selectedInboundIds
+) => {
   try {
+    const outboundJobNo = `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
+
+    // Count existing GRNs for this scheduleOutboundId to generate the correct index
     const grnCountQuery = `
       SELECT COUNT(*) as grn_count
       FROM public.outbounds
-      WHERE "jobIdentifier" = :jobNo;
+      WHERE "jobIdentifier" = :scheduleOutboundId::text;
     `;
     const grnCountResult = await db.sequelize.query(grnCountQuery, {
-      replacements: { jobNo },
+      replacements: { scheduleOutboundId },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
-    const grnNo = `${jobNo.replace("SINI", "SINO")}/${grnIndex}`;
+    const grnNo = `${outboundJobNo}/${grnIndex}`;
 
     const lotsQuery = `
       SELECT
@@ -120,22 +126,26 @@ const getGrnDetailsForSelection = async (jobNo, selectedInboundIds) => {
       return null;
     }
 
+    // Aggregate cargo details
+    const aggregateDetails = (key) =>
+      [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
+
     const firstLot = lots[0];
     return {
       releaseDate: firstLot.releaseDate,
-      ourReference: firstLot.jobNo.replace("SINI", "SINO"),
+      ourReference: outboundJobNo,
       grnNo,
       warehouse: firstLot.releaseWarehouse,
       cargoDetails: {
-        commodity: firstLot.commodity,
-        shape: firstLot.shape,
-        brand: firstLot.brand,
+        commodity: aggregateDetails("commodity"),
+        shape: aggregateDetails("shape"),
+        brand: aggregateDetails("brand"),
       },
       lots: lots.map((lot) => ({
         lotNo: `${lot.jobNo.replace("SINI", "SINO")}-${lot.lotNo}`,
         bundles: lot.noOfBundle,
-        grossWeightMt: (lot.grossWeight * 0.907185).toFixed(4),
-        netWeightMt: (lot.netWeight * 0.907185).toFixed(4),
+        grossWeightMt: parseFloat(lot.grossWeight * 0.907185).toFixed(2),
+        netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
       })),
     };
   } catch (error) {
@@ -169,7 +179,8 @@ const getOperators = async () => {
   }
 };
 
-// Creates a GRN and associated transactions based on the provided form data.
+// ** UPDATED ** Creates a GRN and associated transactions based on the provided form data.
+// jobIdentifier is now scheduleOutboundId
 const createGrnAndTransactions = async (formData) => {
   const {
     selectedInboundIds,
@@ -180,7 +191,7 @@ const createGrnAndTransactions = async (formData) => {
     warehouseSupervisor,
     userId,
     grnNo,
-    jobIdentifier,
+    jobIdentifier, // This will be scheduleOutboundId
     driverSignature,
     warehouseStaffSignature,
     warehouseSupervisorSignature,
@@ -305,7 +316,7 @@ const createGrnAndTransactions = async (formData) => {
 
 module.exports = {
   getConfirmationDetailsById,
-  countTotalLotsInJob,
+  countTotalLotsInSchedule,
   getGrnDetailsForSelection,
   createGrnAndTransactions,
   getOperators,

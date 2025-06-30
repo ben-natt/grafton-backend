@@ -115,7 +115,6 @@ const pendingTasksUserId = async (jobNo) => {
   }
 };
 
-
 // FOR OFICE VERSION
 const pendingTasksUserIdSingleDate = async (jobNo) => {
   try {
@@ -180,19 +179,19 @@ const getDetailsPendingTasksOrderByReport = async (jobNo) => {
 
     const result = await db.sequelize.query(query, {
       replacements: { jobNo },
-      type: db.sequelize.QueryTypes.SELECT
+      type: db.sequelize.QueryTypes.SELECT,
     });
 
     if (result.length > 0) {
-      console.log('Query result:', result);
-      console.log('First result keys:', Object.keys(result[0]));
+      console.log("Query result:", result);
+      console.log("First result keys:", Object.keys(result[0]));
     } else {
-      console.log('No pending tasks found for jobNo:', jobNo);
+      console.log("No pending tasks found for jobNo:", jobNo);
     }
     return result;
   } catch (error) {
-    console.error('Error in /pending-tasks route:', error);
-    console.error('Error fetching pending tasks records:', error);
+    console.error("Error in /pending-tasks route:", error);
+    console.error("Error fetching pending tasks records:", error);
     throw error;
   }
 };
@@ -217,29 +216,29 @@ const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
   }
 };
 
-
-
 // --- OUTBOUND ---
-const findJobNoPendingOutbound = async () => {
+const findScheduleIdPendingOutbound = async () => {
   try {
     const query = `
-            SELECT DISTINCT si."jobNo"
-            FROM public.selectedinbounds si
+            SELECT DISTINCT so."scheduleOutboundId",
+            CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo", so."releaseDate"
+            FROM public.scheduleoutbounds so
+            JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
             WHERE si."isOutbounded" = false
+            ORDER BY so."releaseDate" ASC
         `;
     const result = await db.sequelize.query(query, {
       type: db.sequelize.QueryTypes.SELECT,
     });
     return result;
   } catch (error) {
-    console.error("Error fetching pending outbound job numbers:", error);
+    console.error("Error fetching pending outbound schedule IDs:", error);
     throw error;
   }
 };
 
-const getDetailsPendingOutbound = async (jobNo) => {
+const getDetailsPendingOutbound = async (scheduleOutboundId) => {
   try {
-    // UPDATED QUERY: Added stuffingDate, containerNo, sealNo, and shapeName
     const query = `
             SELECT
                 si."selectedInboundId",
@@ -251,10 +250,7 @@ const getDetailsPendingOutbound = async (jobNo) => {
                 c."commodityName" AS "commodity",
                 w."exLmeWarehouseName" AS "exLmeWarehouse",
                 i."exWarehouseLot",
-                so."lotReleaseWeight",
-                TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate",
-                so."containerNo",
-                so."sealNo"
+                so."lotReleaseWeight"
             FROM public.selectedinbounds si
             JOIN public.inbounds i ON si."inboundId" = i."inboundId"
             JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
@@ -262,11 +258,11 @@ const getDetailsPendingOutbound = async (jobNo) => {
             LEFT JOIN public.brands b ON i."brandId" = b."brandId"
             LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
             LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
-            WHERE si."jobNo" = :jobNo AND si."isOutbounded" = false
+            WHERE si."scheduleOutboundId" = :scheduleOutboundId AND si."isOutbounded" = false
             ORDER BY i."lotNo" ASC
         `;
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo },
+      replacements: { scheduleOutboundId },
       type: db.sequelize.QueryTypes.SELECT,
     });
     return result;
@@ -276,27 +272,32 @@ const getDetailsPendingOutbound = async (jobNo) => {
   }
 };
 
-const pendingOutboundTasksUserId = async (jobNo) => {
+const pendingOutboundTasksUser = async (scheduleOutboundId) => {
   try {
     const query = `
             SELECT
                 u."username",
-                TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate"
-            FROM public.selectedinbounds si
-            JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
+                TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
+                TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate",
+                so."containerNo",
+                so."sealNo"
+            FROM public.scheduleoutbounds so
             JOIN public.users u ON so."userId" = u."userid"
-            WHERE si."jobNo" = :jobNo AND si."isOutbounded" = false
+            WHERE so."scheduleOutboundId" = :scheduleOutboundId
             LIMIT 1;
         `;
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo },
+      replacements: { scheduleOutboundId },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
 
     return {
       username: result?.username || "N/A",
-      dateRange: result?.releaseDate || "N/A",
+      releaseDate: result?.releaseDate || "N/A",
+      stuffingDate: result?.stuffingDate,
+      containerNo: result?.containerNo,
+      sealNo: result?.sealNo,
     };
   } catch (error) {
     console.error("Error fetching user info for outbound tasks:", error);
@@ -304,8 +305,9 @@ const pendingOutboundTasksUserId = async (jobNo) => {
   }
 };
 
-// SELECTEDINBOUNDS TABLE, INBOUND TABLE AAND (EXTRAS LIKE COMMODITIES, BRANDS, EXLMEWAREHOUSES)
-const getDetailsPendingOutboundOffice = async (jobNo) => {
+// OFFICE VERSION
+// ** UPDATED **
+const getDetailsPendingOutboundOffice = async (scheduleOutboundId) => {
   try {
     const query = `
             SELECT
@@ -323,14 +325,14 @@ const getDetailsPendingOutboundOffice = async (jobNo) => {
             JOIN public.inbounds i ON si."inboundId" = i."inboundId"
             JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
             LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
-            LEFT JOIN public.shapes sh ON sh."shapeName" = i."shape"
+            LEFT JOIN public.shapes sh ON i."shapeId" = sh."shapeId"
             LEFT JOIN public.brands b ON i."brandId" = b."brandId"
             LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
-            WHERE si."jobNo" = :jobNo AND si."isOutbounded" = false
+            WHERE si."scheduleOutboundId" = :scheduleOutboundId AND si."isOutbounded" = false
             ORDER BY i."lotNo" ASC
         `;
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo },
+      replacements: { scheduleOutboundId },
       type: db.sequelize.QueryTypes.SELECT,
     });
     return result;
@@ -340,37 +342,39 @@ const getDetailsPendingOutboundOffice = async (jobNo) => {
   }
 };
 
-const pendingOutboundTasksUserIdSingleDate = async (jobNo) => {
+// ** UPDATED **
+const pendingOutboundTasksUserIdSingleDate = async (scheduleOutboundId) => {
   try {
     const query = `
             SELECT
             u."username",
             TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD-MM-YYYY') AS "releaseDate"
-            FROM public.selectedinbounds si
-            JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
+            FROM public.scheduleoutbounds so
             JOIN public.users u ON so."userId" = u."userid"
-            WHERE si."jobNo" = :jobNo AND si."isOutbounded" = false;
+            WHERE so."scheduleOutboundId" = :scheduleOutboundId;
       `;
 
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo },
-      type: db.sequelize.QueryTypes.SELECT
+      replacements: { scheduleOutboundId },
+      type: db.sequelize.QueryTypes.SELECT,
     });
 
     if (result.length > 0) {
-      console.log('Query result:', result);
-      console.log('First result keys:', Object.keys(result[0]));
+      console.log("Query result:", result);
+      console.log("First result keys:", Object.keys(result[0]));
     } else {
-      console.log('No pending tasks found for jobNo:', jobNo);
+      console.log(
+        "No pending tasks found for scheduleOutboundId:",
+        scheduleOutboundId
+      );
     }
     return result;
   } catch (error) {
-    console.error('Error in /pending-tasks route:', error);
-    console.error('Error fetching pending tasks records:', error);
+    console.error("Error in /pending-tasks route:", error);
+    console.error("Error fetching pending tasks records:", error);
     throw error;
   }
 };
-
 
 module.exports = {
   // Inbound
@@ -382,9 +386,9 @@ module.exports = {
   getDetailsPendingTasksOrderByReport,
   pendingTasksUpdateQuantity,
   // Outbound
-  findJobNoPendingOutbound,
+  findScheduleIdPendingOutbound, // New function
   getDetailsPendingOutbound,
-  pendingOutboundTasksUserId,
+  pendingOutboundTasksUser,
   getDetailsPendingOutboundOffice,
   pendingOutboundTasksUserIdSingleDate,
 };

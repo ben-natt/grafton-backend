@@ -12,11 +12,6 @@ const getConfirmationDetails = async (req, res) => {
       return res.status(404).json({ error: "Confirmation details not found." });
     }
 
-    const totalLotsInJob = await outboundModel.countTotalLotsInJob(
-      details.jobNo
-    );
-    details.totalLotsToRelease = totalLotsInJob;
-
     res.status(200).json(details);
   } catch (error) {
     console.error("Error in getConfirmationDetails controller:", error);
@@ -26,7 +21,7 @@ const getConfirmationDetails = async (req, res) => {
 
 const confirmOutbound = async (req, res) => {
   try {
-    const { itemsToConfirm } = req.body;
+    const { itemsToConfirm, scheduleOutboundId } = req.body;
     if (
       !itemsToConfirm ||
       !Array.isArray(itemsToConfirm) ||
@@ -47,7 +42,7 @@ const confirmOutbound = async (req, res) => {
       message: "Selection confirmed. Proceed to GRN generation.",
       data: {
         confirmedIds: selectedInboundIds,
-        jobNo: itemsToConfirm[0]?.jobNo,
+        scheduleOutboundId: scheduleOutboundId, // Pass scheduleOutboundId to the next step
       },
     });
   } catch (error) {
@@ -58,19 +53,20 @@ const confirmOutbound = async (req, res) => {
 
 const getGrnDetails = async (req, res) => {
   try {
-    const { jobNo, selectedInboundIds } = req.body;
+    const { scheduleOutboundId, selectedInboundIds } = req.body;
     if (
-      !jobNo ||
+      !scheduleOutboundId ||
       !selectedInboundIds ||
       !Array.isArray(selectedInboundIds) ||
       selectedInboundIds.length === 0
     ) {
       return res.status(400).json({
-        error: "A jobNo and a list of selectedInboundIds are required.",
+        error:
+          "A scheduleOutboundId and a list of selectedInboundIds are required.",
       });
     }
     const grnDetails = await outboundModel.getGrnDetailsForSelection(
-      jobNo,
+      scheduleOutboundId,
       selectedInboundIds
     );
     if (!grnDetails) {
@@ -89,8 +85,14 @@ const createGrnAndTransactions = async (req, res) => {
   try {
     const grnDataFromRequest = req.body;
 
+    // The jobIdentifier is now the scheduleOutboundId
     const { createdOutbound, lotsForPdf } =
       await outboundModel.createGrnAndTransactions(grnDataFromRequest);
+
+    const aggregateDetails = (key) =>
+      [...new Set(lotsForPdf.map((lot) => lot[key]).filter(Boolean))].join(
+        ", "
+      );
 
     const pdfData = {
       ...grnDataFromRequest,
@@ -104,21 +106,20 @@ const createGrnAndTransactions = async (req, res) => {
       transportVendor:
         lotsForPdf.length > 0 ? lotsForPdf[0].transportVendor : "",
       cargoDetails: {
-        commodity: lotsForPdf.length > 0 ? lotsForPdf[0].commodity : "",
-        shape: lotsForPdf.length > 0 ? lotsForPdf[0].shape : "",
-        brand: lotsForPdf.length > 0 ? lotsForPdf[0].brand : "",
+        commodity: aggregateDetails("commodity"),
+        shape: aggregateDetails("shape"),
+        brand: aggregateDetails("brand"),
       },
       lots: lotsForPdf.map((lot) => ({
         lotNo: `${lot.jobNo.replace("SINI", "SINO")}-${lot.lotNo}`,
         bundles: lot.noOfBundle,
-        grossWeightMt: (lot.grossWeight * 0.907185).toFixed(4),
-        netWeightMt: (lot.netWeight * 0.907185).toFixed(4),
+        grossWeightMt: parseFloat(lot.grossWeight * 0.907185).toFixed(2),
+        netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
       })),
       containerNo: lotsForPdf.length > 0 ? lotsForPdf[0].containerNo : "",
       sealNo: lotsForPdf.length > 0 ? lotsForPdf[0].sealNo : "",
     };
 
-    // Call the new dynamic PDF generation service
     const pdfBytes = await pdfService.generateGrnPdf(pdfData);
 
     res.setHeader("Content-Type", "application/pdf");
