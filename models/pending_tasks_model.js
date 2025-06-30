@@ -306,7 +306,6 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
 };
 
 // OFFICE VERSION
-// ** UPDATED **
 const getDetailsPendingOutboundOffice = async (scheduleOutboundId) => {
   try {
     const query = `
@@ -314,10 +313,9 @@ const getDetailsPendingOutboundOffice = async (scheduleOutboundId) => {
               si."selectedInboundId",
                 i."jobNo",
                 i."lotNo",
-                i."noOfBundle" as "expectedBundleCount",
+                i."noOfBundle" as "quantity",
                 b."brandName" AS "brand",
-                c."commodityName" AS "commodity",
-                w."exLmeWarehouseName" AS "exLmeWarehouse",
+                c."commodityName" AS "metal",
                 i."exWarehouseLot",
                 sh."shapeName",
                 so."lotReleaseWeight"
@@ -342,15 +340,15 @@ const getDetailsPendingOutboundOffice = async (scheduleOutboundId) => {
   }
 };
 
-// ** UPDATED **
 const pendingOutboundTasksUserIdSingleDate = async (scheduleOutboundId) => {
   try {
     const query = `
-            SELECT
-            u."username",
-            TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD-MM-YYYY') AS "releaseDate"
-            FROM public.scheduleoutbounds so
-            JOIN public.users u ON so."userId" = u."userid"
+    SELECT
+        u."username",
+        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD-MM-YYYY') AS "releaseDate",
+        so."sealNo"
+    FROM public.scheduleoutbounds so
+    JOIN public.users u ON so."userId" = u."userid"
             WHERE so."scheduleOutboundId" = :scheduleOutboundId;
       `;
 

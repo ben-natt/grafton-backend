@@ -141,7 +141,6 @@ router.post("/tasks-outbound-user", async (req, res) => {
 });
 
 // OFFICE VERSION
-// ** UPDATED **
 router.post("/tasks-outbound-office", async (req, res) => {
   const { scheduleOutboundId } = req.body;
   if (!scheduleOutboundId) {
@@ -157,8 +156,7 @@ router.post("/tasks-outbound-office", async (req, res) => {
   }
 });
 
-// ** UPDATED **
-router.post("/tasks-outbound-single-date-user", async (req, res) => {
+router.post("/tasks-outbound-office-date", async (req, res) => {
   const { scheduleOutboundId } = req.body;
   if (!scheduleOutboundId) {
     return res.status(400).json({ error: "scheduleOutboundId is required." });
@@ -173,5 +171,8 @@ router.post("/tasks-outbound-single-date-user", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+
+
 
 module.exports = router;
