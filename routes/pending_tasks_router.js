@@ -5,8 +5,18 @@ const pendingTasksModel = require("../models/pending_tasks_model");
 // --- INBOUND ROUTES---
 router.get("/tasks-jobNo", async (req, res) => {
   try {
-    const result = await pendingTasksModel.findJobNoPendingTasks();
-    res.status(200).json(result);
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const result = await pendingTasksModel.findJobNoPendingTasks(
+      page,
+      pageSize
+    );
+    res.status(200).json({
+      data: result,
+      page,
+      pageSize,
+      totalPages: Math.ceil(result.totalCount / pageSize),
+    });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch pending tasks." });
   }
@@ -98,8 +108,18 @@ router.post("/quantity/update", async (req, res) => {
 // Fetch schedule IDs for pending outbound tasks
 router.get("/tasks-outbound-ids", async (req, res) => {
   try {
-    const result = await pendingTasksModel.findScheduleIdPendingOutbound();
-    res.status(200).json(result);
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const result = await pendingTasksModel.findScheduleIdPendingOutbound(
+      page,
+      pageSize
+    );
+    res.status(200).json({
+      data: result,
+      page,
+      pageSize,
+      totalPages: Math.ceil(result.totalCount / pageSize),
+    });
   } catch (error) {
     res
       .status(500)
@@ -171,8 +191,5 @@ router.post("/tasks-outbound-office-date", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
-
-
 
 module.exports = router;

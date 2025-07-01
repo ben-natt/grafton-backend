@@ -1,13 +1,17 @@
 const db = require("../database");
 
 // --- INBOUND ---
-const findJobNoPendingTasks = async () => {
+const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
   try {
+    const offset = (page - 1) * pageSize;
     const query = `
-            SELECT DISTINCT "jobNo" FROM public.lot
-                  WHERE "status" = 'Pending'
-        `;
+      SELECT DISTINCT "jobNo" FROM public.lot
+      WHERE "status" = 'Pending'
+      ORDER BY "jobNo" ASC
+      LIMIT :limit OFFSET :offset
+    `;
     const result = await db.sequelize.query(query, {
+      replacements: { limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
     });
     return result;
@@ -217,17 +221,20 @@ const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
 };
 
 // --- OUTBOUND ---
-const findScheduleIdPendingOutbound = async () => {
+const findScheduleIdPendingOutbound = async (page = 1, pageSize = 10) => {
   try {
+    const offset = (page - 1) * pageSize;
     const query = `
-            SELECT DISTINCT so."scheduleOutboundId",
-            CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo", so."releaseDate"
-            FROM public.scheduleoutbounds so
-            JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
-            WHERE si."isOutbounded" = false
-            ORDER BY so."releaseDate" ASC
-        `;
+      SELECT DISTINCT so."scheduleOutboundId",
+      CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo", so."releaseDate"
+      FROM public.scheduleoutbounds so
+      JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
+      WHERE si."isOutbounded" = false
+      ORDER BY so."releaseDate" ASC
+      LIMIT :limit OFFSET :offset
+    `;
     const result = await db.sequelize.query(query, {
+      replacements: { limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
     });
     return result;
