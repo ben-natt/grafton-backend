@@ -7,15 +7,16 @@ router.get("/tasks-jobNo", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 10;
-    const result = await pendingTasksModel.findJobNoPendingTasks(
+    const { totalCount, data } = await pendingTasksModel.findJobNoPendingTasks(
       page,
       pageSize
     );
     res.status(200).json({
-      data: result,
+      data: data,
       page,
       pageSize,
-      totalPages: Math.ceil(result.totalCount / pageSize),
+      totalPages: Math.ceil(totalCount / pageSize),
+      totalCount: totalCount,
     });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch pending tasks." });
@@ -114,20 +115,18 @@ router.get("/tasks-jobNo-office", async (req, res) => {
 });
 
 // --- OUTBOUND ROUTES ---
-// Fetch schedule IDs for pending outbound tasks
 router.get("/tasks-outbound-ids", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 10;
-    const result = await pendingTasksModel.findScheduleIdPendingOutbound(
-      page,
-      pageSize
-    );
+    const { totalCount, data } =
+      await pendingTasksModel.findScheduleIdPendingOutbound(page, pageSize);
     res.status(200).json({
-      data: result,
+      data: data,
       page,
       pageSize,
-      totalPages: Math.ceil(result.totalCount / pageSize),
+      totalPages: Math.ceil(totalCount / pageSize),
+      totalCount: totalCount,
     });
   } catch (error) {
     res
@@ -136,7 +135,6 @@ router.get("/tasks-outbound-ids", async (req, res) => {
   }
 });
 
-// Fetch details for pending outbound tasks based on scheduleOutboundId
 router.post("/tasks-outbound", async (req, res) => {
   const { scheduleOutboundId } = req.body;
   if (!scheduleOutboundId) {
@@ -152,7 +150,6 @@ router.post("/tasks-outbound", async (req, res) => {
   }
 });
 
-// Fetch user details for a pending outbound task based on scheduleOutboundId
 router.post("/tasks-outbound-user", async (req, res) => {
   const { scheduleOutboundId } = req.body;
   if (!scheduleOutboundId) {
@@ -203,7 +200,8 @@ router.post("/tasks-outbound-office-date", async (req, res) => {
 
 router.get("/tasks-outbound-ids-office", async (req, res) => {
   try {
-    const result = await pendingTasksModel.findScheduleIdPendingOutboundOffice();
+    const result =
+      await pendingTasksModel.findScheduleIdPendingOutboundOffice();
     res.status(200).json(result);
   } catch (error) {
     res
