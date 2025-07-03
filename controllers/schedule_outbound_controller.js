@@ -59,6 +59,7 @@ exports.uploadExcel = async (req, res) => {
 
     const headers = jsonData[0];
     const dataRows = jsonData.slice(1);
+    console.log('Headers:', headers);
     const processedLots = [];
     let totalLotsFound = 0;
 
@@ -74,6 +75,7 @@ exports.uploadExcel = async (req, res) => {
 
       const jobNoFromExcel = getCellValue('Job Number')?.toString().trim();
       const lotNoFromExcel = parseInt(getCellValue('Lot No'), 10);
+      console.log(getCellValue('Release Date'), getCellValue('Export Date'), getCellValue('Stuffing Date'), getCellValue('Delivery Date'));
 
       if (!jobNoFromExcel || isNaN(lotNoFromExcel)) {
         console.warn('Skipping row due to missing or invalid Job Number or Lot No:', row);
@@ -99,6 +101,12 @@ exports.uploadExcel = async (req, res) => {
         const exportDateExcel = excelDateToJSDate(getCellValue('Export Date'));
         const stuffingDateExcel = excelDateToJSDate(getCellValue('Stuffing Date'));
         const deliveryDateExcel = excelDateToJSDate(getCellValue('Delivery Date'));
+        console.log('Parsed Dates:', {
+          releaseDateExcel,
+          exportDateExcel,
+          stuffingDateExcel,
+          deliveryDateExcel
+        });
 
         const lotDataForFrontend = {
           inboundId: masterInbound.inboundId,
@@ -117,7 +125,7 @@ exports.uploadExcel = async (req, res) => {
           storageReleaseLocation: getCellValue('Storage Release Location')?.toString().trim() ?? null,
           releaseWarehouse: getCellValue('Release To Warehouse')?.toString().trim() ?? null,
           transportVendor: getCellValue('Transport Vendor')?.toString().trim() ?? null,
-
+          lotReleaseWeight:getCellValue('Lot Release Weight'),
           exportDate: toLocalYYYYMMDD(exportDateExcel),
           stuffingDate: toLocalYYYYMMDD(stuffingDateExcel),
           containerNo: getCellValue('Container No')?.toString().trim() ?? null,
@@ -127,6 +135,7 @@ exports.uploadExcel = async (req, res) => {
 
         processedLots.push(lotDataForFrontend);
         totalLotsFound++;
+        console.log('1',processedLots);
       } else {
         console.warn(`Inbound record with Job No: ${jobNoFromExcel} and Lot No: ${lotNoFromExcel} not found in inbounds table. Skipping.`);
       }
@@ -153,6 +162,7 @@ exports.uploadExcel = async (req, res) => {
 
 exports.createScheduleOutbound = async (req, res) => {
   const userId = 7;
+  
 
   const {
     releaseDate,
@@ -160,7 +170,6 @@ exports.createScheduleOutbound = async (req, res) => {
     releaseWarehouse,
     lotReleaseWeight,
     transportVendor,
-    outboundType,
     exportDate,
     stuffingDate,
     containerNo,
@@ -169,6 +178,8 @@ exports.createScheduleOutbound = async (req, res) => {
     selectedLots
   } = req.body;
 
+  const outboundType = (containerNo && containerNo.length > 0) ? 'container' : 'flatbed';
+  console.log('outboundType:', outboundType);
   console.log('request body for createScheduleOutbound:', req.body);
   if (!releaseDate || releaseDate.trim() === '' ||
       !storageReleaseLocation || storageReleaseLocation.trim() === '' ||
@@ -189,7 +200,7 @@ exports.createScheduleOutbound = async (req, res) => {
       releaseWarehouse,
       lotReleaseWeight,
       transportVendor,
-      outboundType,
+      outboundType: outboundType,
       exportDate: parseLocalDate(exportDate),
       stuffingDate: parseLocalDate(stuffingDate),
       containerNo,
