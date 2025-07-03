@@ -305,11 +305,11 @@ const createScheduleOutbound = async (scheduleData) => {
         const outboundType = (containerNo && containerNo.length > 0) ? 'container' : 'flatbed';
 
         const scheduleQuery = `
-                INSERT INTO public.scheduleoutbounds(
-                "releaseDate", "userId", "lotReleaseWeight", "outboundType", "exportDate", "stuffingDate", "containerNo", "sealNo", "createdAt", "updatedAt", "deliveryDate", "storageReleaseLocation", "releaseWarehouse", "transportVendor")
-                VALUES (:releaseDate, :userId, :lotReleaseWeight, :outboundType, :exportDate, :stuffingDate, :containerNo, :sealNo, NOW(), NOW(), :deliveryDate, :storageReleaseLocation, :releaseWarehouse, :transportVendor)
-                RETURNING "scheduleOutboundId";
-            `;
+            INSERT INTO public.scheduleoutbounds(
+            "releaseDate", "userId", "lotReleaseWeight", "outboundType", "exportDate", "stuffingDate", "containerNo", "sealNo", "createdAt", "updatedAt", "deliveryDate", "storageReleaseLocation", "releaseWarehouse", "transportVendor")
+            VALUES (:releaseDate, :userId, :lotReleaseWeight, :outboundType, :exportDate, :stuffingDate, :containerNo, :sealNo, NOW(), NOW(), :deliveryDate, :storageReleaseLocation, :releaseWarehouse, :transportVendor)
+            RETURNING "scheduleOutboundId";
+        `;
 
         const scheduleResult = await db.sequelize.query(scheduleQuery, {
             replacements: {
@@ -337,15 +337,23 @@ const createScheduleOutbound = async (scheduleData) => {
 
         if (selectedLots && selectedLots.length > 0) {
             const selectedInboundsQuery = `
-            INSERT INTO public.selectedinbounds(
-                "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt"
-            ) VALUES (
-                :inboundId, :scheduleOutboundId, :lotNo, :jobNo, NOW(), NOW()
-            );
-`;
+                INSERT INTO public.selectedinbounds(
+                    "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt"
+                ) VALUES (
+                    :inboundId, :scheduleOutboundId, :lotNo, :jobNo, NOW(), NOW()
+                );
+            `;
+
+            const updateInboundQuantityQuery = `
+                UPDATE public.inbounds 
+                SET "noOfBundle" = :quantity 
+                WHERE "inboundId" = :inboundId;
+            `;
 
             for (const lot of selectedLots) {
                 const inboundId = lot.id;
+                const quantity = lot.Qty; // Get quantity from lot object
+
                 if (!inboundId) {
                     console.warn('Skipping lot: missing inboundId', lot);
                     continue;
@@ -361,6 +369,7 @@ const createScheduleOutbound = async (scheduleData) => {
                     continue;
                 }
 
+          
                 await db.sequelize.query(selectedInboundsQuery, {
                     replacements: {
                         inboundId,
@@ -371,6 +380,18 @@ const createScheduleOutbound = async (scheduleData) => {
                     type: db.sequelize.QueryTypes.INSERT,
                     transaction: t
                 });
+
+
+                if (quantity !== undefined && quantity !== null) {
+                    await db.sequelize.query(updateInboundQuantityQuery, {
+                        replacements: {
+                            quantity: quantity,
+                            inboundId: inboundId
+                        },
+                        type: db.sequelize.QueryTypes.UPDATE,
+                        transaction: t
+                    });
+                }
             }
         }
 

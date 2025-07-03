@@ -5,15 +5,24 @@ const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
   try {
     const offset = (page - 1) * pageSize;
     const query = `
-      SELECT DISTINCT "jobNo" FROM public.lot
-      WHERE "status" = 'Pending'
-      ORDER BY "jobNo" ASC
-      LIMIT :limit OFFSET :offset
+SELECT *
+FROM (
+  SELECT DISTINCT ON (l."jobNo") l."jobNo", s."inboundDate"
+  FROM public.lot l
+  JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
+  WHERE l."status" = 'Pending' AND l."report" = 'False'
+  ORDER BY l."jobNo", s."inboundDate" ASC
+) AS distinct_jobs
+ORDER BY distinct_jobs."inboundDate" ASC
+LIMIT :limit OFFSET :offset;
+
+
     `;
     const result = await db.sequelize.query(query, {
       replacements: { limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
     });
+
     return result;
   } catch (error) {
     console.error("Error fetching pending tasks records:", error);
@@ -21,13 +30,14 @@ const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
   }
 };
 
+
 const getDetailsPendingTasks = async (jobNo) => {
   try {
     const query = `
     SELECT "lotId", "lotNo","jobNo", "commodity", "expectedBundleCount", "brand",
            "exWarehouseLot", "exLmeWarehouse", "shape", "report"
     FROM public.lot
-    WHERE "jobNo" = :jobNo AND "status" = 'Pending'
+    WHERE "jobNo" = :jobNo AND "status" = 'Pending' AND "report" = 'False'
     ORDER BY "exWarehouseLot" ASC;
     `;
 
