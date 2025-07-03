@@ -1,27 +1,38 @@
 const outboundModel = require("../models/confirm_outbound.model");
+const pendingTasksModel = require("../models/pending_tasks_model");
 const pdfService = require("../pdf.services");
+const fs = require("fs").promises;
+const path = require("path");
 
 const getConfirmationDetails = async (req, res) => {
+  console.log("CONTROLLER: Entering getConfirmationDetails");
   try {
     const { selectedInboundId } = req.params;
+    console.log(
+      `CONTROLLER: Fetching details for selectedInboundId: ${selectedInboundId}`
+    );
     const details = await outboundModel.getConfirmationDetailsById(
       selectedInboundId
     );
 
     if (!details) {
+      console.log("CONTROLLER: No confirmation details found.");
       return res.status(404).json({ error: "Confirmation details not found." });
     }
 
+    console.log("CONTROLLER: Successfully fetched confirmation details.");
     res.status(200).json(details);
   } catch (error) {
-    console.error("Error in getConfirmationDetails controller:", error);
+    console.error("CONTROLLER ERROR in getConfirmationDetails:", error);
     res.status(500).json({ error: "Failed to fetch confirmation details." });
   }
 };
 
 const confirmOutbound = async (req, res) => {
+  console.log("CONTROLLER: Entering confirmOutbound");
   try {
     const { itemsToConfirm, scheduleOutboundId, outboundJobNo } = req.body;
+    console.log("CONTROLLER: Received payload for confirmOutbound:", req.body);
     if (
       !itemsToConfirm ||
       !Array.isArray(itemsToConfirm) ||
@@ -38,6 +49,7 @@ const confirmOutbound = async (req, res) => {
       });
     }
 
+    console.log("CONTROLLER: Confirming outbound selection is valid.");
     res.status(200).json({
       message: "Selection confirmed. Proceed to GRN generation.",
       data: {
@@ -48,14 +60,16 @@ const confirmOutbound = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error in confirmOutbound controller:", error);
+    console.error("CONTROLLER ERROR in confirmOutbound:", error);
     res.status(500).json({ error: "Failed to confirm outbound selection." });
   }
 };
 
 const getGrnDetails = async (req, res) => {
+  console.log("CONTROLLER: Entering getGrnDetails");
   try {
     const { scheduleOutboundId, selectedInboundIds } = req.body;
+    console.log("CONTROLLER: Received payload for getGrnDetails:", req.body);
     if (
       !scheduleOutboundId ||
       !selectedInboundIds ||
@@ -72,28 +86,55 @@ const getGrnDetails = async (req, res) => {
       selectedInboundIds
     );
     if (!grnDetails) {
+      console.log("CONTROLLER: No GRN details found for selection.");
       return res
         .status(404)
         .json({ error: "GRN details not found for the given selection." });
     }
+    console.log("CONTROLLER: Successfully fetched GRN details.");
     res.status(200).json(grnDetails);
   } catch (error) {
-    console.error("Error in getGrnDetails controller:", error);
+    console.error("CONTROLLER ERROR in getGrnDetails:", error);
     res.status(500).json({ error: "Failed to generate GRN." });
   }
 };
 
 const createGrnAndTransactions = async (req, res) => {
+  console.log("\n--- CONTROLLER: Entering createGrnAndTransactions ---");
   try {
     const grnDataFromRequest = req.body;
+    console.log(
+      "CONTROLLER: Received GRN data from request:",
+      JSON.stringify(grnDataFromRequest, null, 2)
+    );
+    const scheduleId = parseInt(grnDataFromRequest.jobIdentifier, 10);
 
+    console.log("CONTROLLER: 1. Calling model to create DB records...");
     const { createdOutbound, lotsForPdf } =
       await outboundModel.createGrnAndTransactions(grnDataFromRequest);
+    console.log(
+      "CONTROLLER: 1. Model call successful. Created Outbound ID:",
+      createdOutbound.outboundId
+    );
 
+    console.log(
+      `CONTROLLER: 2. Fetching schedule info for scheduleId: ${scheduleId}`
+    );
+    const scheduleInfo = await pendingTasksModel.pendingOutboundTasksUser(
+      scheduleId
+    );
+    console.log("CONTROLLER: 2. Fetched schedule info:", scheduleInfo);
+
+    console.log("CONTROLLER: 3. Preparing data for PDF generation...");
     const aggregateDetails = (key) =>
       [...new Set(lotsForPdf.map((lot) => lot[key]).filter(Boolean))].join(
         ", "
       );
+
+    const containerAndSealNo =
+      scheduleInfo.containerNo && scheduleInfo.sealNo
+        ? `${scheduleInfo.containerNo} / ${scheduleInfo.sealNo}`
+        : "NA";
 
     const pdfData = {
       ...grnDataFromRequest,
@@ -104,21 +145,46 @@ const createGrnAndTransactions = async (req, res) => {
         { day: "2-digit", month: "short", year: "numeric" }
       ),
       warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "",
+      containerAndSealNo: containerAndSealNo,
       cargoDetails: {
         commodity: aggregateDetails("commodity"),
         shape: aggregateDetails("shape"),
         brand: aggregateDetails("brand"),
       },
       lots: lotsForPdf.map((lot) => ({
-        lotNo: `${lot.jobNo}-${lot.lotNo}`, // Correctly formats the inbound lot number
+        lotNo: `${lot.jobNo}-${lot.lotNo}`,
         bundles: lot.noOfBundle,
         grossWeightMt: parseFloat(lot.grossWeight * 0.907185).toFixed(2),
         netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
       })),
     };
+    console.log(
+      "CONTROLLER: 3. PDF data prepared:",
+      JSON.stringify(pdfData, null, 2)
+    );
 
-    const pdfBytes = await pdfService.generateGrnPdf(pdfData);
+    console.log("CONTROLLER: 4. Calling PDF service to generate PDF...");
+    const { pdfBytes, outputPath } = await pdfService.generateGrnPdf(pdfData);
+    console.log(
+      `CONTROLLER: 4. PDF service successful. PDF generated at: ${outputPath}`
+    );
 
+    console.log("CONTROLLER: 5. Getting file size and updating database...");
+    const stats = await fs.stat(outputPath);
+    const fileSizeInBytes = stats.size;
+    const relativePath = path.relative(path.join(__dirname, ".."), outputPath);
+    console.log(
+      `CONTROLLER: 5. PDF path: ${relativePath}, Size: ${fileSizeInBytes} bytes.`
+    );
+
+    await outboundModel.updateOutboundWithPdfDetails(
+      createdOutbound.outboundId,
+      relativePath,
+      fileSizeInBytes
+    );
+    console.log("CONTROLLER: 5. Database updated with PDF details.");
+
+    console.log("CONTROLLER: 6. Sending PDF back to client...");
     res.setHeader("Content-Type", "application/pdf");
     const safeGrnNo = pdfData.grnNo.replace(/[\/\\?%*:|"<>]/g, "_");
     res.setHeader(
@@ -126,8 +192,12 @@ const createGrnAndTransactions = async (req, res) => {
       `attachment; filename=GRN_${safeGrnNo}.pdf`
     );
     res.send(Buffer.from(pdfBytes));
+    console.log(
+      "--- CONTROLLER: createGrnAndTransactions finished successfully. ---"
+    );
   } catch (error) {
-    console.error("Error in createGrnAndTransactions controller:", error);
+    console.error("--- CONTROLLER ERROR in createGrnAndTransactions: ---");
+    console.error(error);
     res.status(500).json({
       error: "Failed to create GRN.",
       details: error.message,
@@ -136,13 +206,17 @@ const createGrnAndTransactions = async (req, res) => {
 };
 
 const getOperators = async (req, res) => {
+  console.log("CONTROLLER: Entering getOperators");
   try {
     const users = await outboundModel.getOperators();
     const staff = users.filter((user) => user.roleId === 1);
     const supervisors = users.filter((user) => user.roleId === 2);
+    console.log(
+      `CONTROLLER: Found ${staff.length} staff and ${supervisors.length} supervisors.`
+    );
     res.status(200).json({ staff, supervisors });
   } catch (error) {
-    console.error("Error in getOperators controller:", error);
+    console.error("CONTROLLER ERROR in getOperators:", error);
     res.status(500).json({ error: "Failed to fetch operators." });
   }
 };

@@ -1,6 +1,11 @@
 const db = require("../database");
 
 const confirmSelectedInbounds = async (selectedInboundIds, transaction) => {
+  console.log(
+    `MODEL (confirmSelectedInbounds): Updating selectedInboundIds: ${selectedInboundIds.join(
+      ", "
+    )}`
+  );
   try {
     const query = `
       UPDATE public.selectedinbounds
@@ -13,13 +18,17 @@ const confirmSelectedInbounds = async (selectedInboundIds, transaction) => {
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
     });
+    console.log("MODEL (confirmSelectedInbounds): Update successful.");
   } catch (error) {
-    console.error("Error updating outbound status in model:", error);
+    console.error("MODEL ERROR in confirmSelectedInbounds:", error);
     throw error;
   }
 };
 
 const getConfirmationDetailsById = async (selectedInboundId) => {
+  console.log(
+    `MODEL (getConfirmationDetailsById): Fetching details for ID: ${selectedInboundId}`
+  );
   try {
     const query = `
       SELECT
@@ -51,9 +60,12 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
+    console.log(
+      "MODEL (getConfirmationDetailsById): Details fetched successfully."
+    );
     return result;
   } catch (error) {
-    console.error("Error fetching confirmation details from model:", error);
+    console.error("MODEL ERROR in getConfirmationDetailsById:", error);
     throw error;
   }
 };
@@ -62,6 +74,9 @@ const getGrnDetailsForSelection = async (
   scheduleOutboundId,
   selectedInboundIds
 ) => {
+  console.log(
+    `MODEL (getGrnDetailsForSelection): Fetching for scheduleOutboundId: ${scheduleOutboundId}`
+  );
   try {
     const outboundJobNo = `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
 
@@ -76,7 +91,10 @@ const getGrnDetailsForSelection = async (
       plain: true,
     });
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
-    const grnNo = `${outboundJobNo}/${grnIndex}`;
+    const grnNo = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    console.log(
+      `MODEL (getGrnDetailsForSelection): Generated GRN No: ${grnNo}`
+    );
 
     const lotsQuery = `
       SELECT
@@ -99,14 +117,18 @@ const getGrnDetailsForSelection = async (
     });
 
     if (lots.length === 0) {
+      console.log("MODEL (getGrnDetailsForSelection): No lots found.");
       return null;
     }
+    console.log(
+      `MODEL (getGrnDetailsForSelection): Found ${lots.length} lots.`
+    );
 
     const aggregateDetails = (key) =>
       [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
 
     const firstLot = lots[0];
-    return {
+    const result = {
       releaseDate: firstLot.releaseDate,
       ourReference: outboundJobNo,
       grnNo,
@@ -125,16 +147,18 @@ const getGrnDetailsForSelection = async (
         netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
       })),
     };
-  } catch (error) {
-    console.error(
-      "Error fetching GRN details for selection from model:",
-      error
+    console.log(
+      "MODEL (getGrnDetailsForSelection): Successfully aggregated details."
     );
+    return result;
+  } catch (error) {
+    console.error("MODEL ERROR in getGrnDetailsForSelection:", error);
     throw error;
   }
 };
 
 const getOperators = async () => {
+  console.log("MODEL (getOperators): Fetching operators.");
   try {
     const query = `
       SELECT 
@@ -148,34 +172,28 @@ const getOperators = async () => {
     const users = await db.sequelize.query(query, {
       type: db.sequelize.QueryTypes.SELECT,
     });
+    console.log(`MODEL (getOperators): Found ${users.length} operators.`);
     return users;
   } catch (error) {
-    console.error("Error fetching operators from model:", error);
+    console.error("MODEL ERROR in getOperators:", error);
     throw error;
   }
 };
 
 const createGrnAndTransactions = async (formData) => {
-  const {
-    selectedInboundIds,
-    driverName,
-    driverIdentityNo,
-    truckPlateNo,
-    warehouseStaff,
-    warehouseSupervisor,
-    userId,
-    grnNo,
-    jobIdentifier,
-    driverSignature,
-    warehouseStaffSignature,
-    warehouseSupervisorSignature,
-  } = formData;
-
+  console.log("MODEL (createGrnAndTransactions): Starting transaction.");
+  const { selectedInboundIds } = formData;
   const t = await db.sequelize.transaction();
 
   try {
+    console.log(
+      "MODEL (createGrnAndTransactions): 1. Confirming selected inbounds..."
+    );
     await confirmSelectedInbounds(selectedInboundIds, t);
 
+    console.log(
+      "MODEL (createGrnAndTransactions): 2. Inserting into outbounds table..."
+    );
     const outboundInsertQuery = `
       INSERT INTO public.outbounds (
           "releaseDate", "driverName", "driverIdentityNo", "truckPlateNo",
@@ -190,27 +208,20 @@ const createGrnAndTransactions = async (formData) => {
       ) RETURNING "outboundId", "createdAt" AS "outboundedDate", "jobIdentifier", "grnNo";
     `;
     const outboundResult = await db.sequelize.query(outboundInsertQuery, {
-      replacements: {
-        driverName,
-        driverIdentityNo,
-        truckPlateNo,
-        warehouseStaff,
-        warehouseSupervisor,
-        userId,
-        grnNo,
-        jobIdentifier,
-        driverSignature,
-        warehouseStaffSignature,
-        warehouseSupervisorSignature,
-      },
+      replacements: formData,
       type: db.sequelize.QueryTypes.INSERT,
       transaction: t,
     });
 
     const createdOutbound = outboundResult[0][0];
-    const outboundId = createdOutbound.outboundId;
-    const outboundedDate = createdOutbound.outboundedDate;
+    console.log(
+      "MODEL (createGrnAndTransactions): 2. Outbound record created with ID:",
+      createdOutbound.outboundId
+    );
 
+    console.log(
+      "MODEL (createGrnAndTransactions): 3. Fetching lot details for transactions..."
+    );
     const lotsDetailsQuery = `
       SELECT
           si."inboundId", si."scheduleOutboundId",
@@ -235,7 +246,13 @@ const createGrnAndTransactions = async (formData) => {
       type: db.sequelize.QueryTypes.SELECT,
       transaction: t,
     });
+    console.log(
+      `MODEL (createGrnAndTransactions): 3. Found ${lotsToProcess.length} lots to process for transactions.`
+    );
 
+    console.log(
+      "MODEL (createGrnAndTransactions): 4. Inserting outbound transactions..."
+    );
     for (const lot of lotsToProcess) {
       const transactionQuery = `
         INSERT INTO public.outboundtransactions (
@@ -257,32 +274,63 @@ const createGrnAndTransactions = async (formData) => {
       await db.sequelize.query(transactionQuery, {
         replacements: {
           ...lot,
-          outboundId,
-          outboundedDate,
-          driverName,
-          driverIdentityNo,
-          truckPlateNo,
-          warehouseStaff,
-          warehouseSupervisor,
-          userId,
+          outboundId: createdOutbound.outboundId,
+          outboundedDate: createdOutbound.outboundedDate,
+          ...formData,
         },
         type: db.sequelize.QueryTypes.INSERT,
         transaction: t,
       });
     }
+    console.log(
+      "MODEL (createGrnAndTransactions): 4. All transactions inserted."
+    );
 
     await t.commit();
+    console.log(
+      "MODEL (createGrnAndTransactions): Transaction committed successfully."
+    );
 
     return {
       createdOutbound: {
         ...createdOutbound,
-        releaseDate: outboundedDate,
+        outboundedDate: createdOutbound.outboundedDate,
       },
       lotsForPdf: lotsToProcess,
     };
   } catch (error) {
     await t.rollback();
-    console.error("Error creating GRN and transactions in model:", error);
+    console.error(
+      "MODEL ERROR in createGrnAndTransactions (Transaction rolled back):",
+      error
+    );
+    throw error;
+  }
+};
+
+const updateOutboundWithPdfDetails = async (
+  outboundId,
+  grnImagePath,
+  fileSize
+) => {
+  console.log(
+    `MODEL (updateOutboundWithPdfDetails): Updating outboundId ${outboundId} with path: ${grnImagePath}, size: ${fileSize}`
+  );
+  try {
+    const query = `
+      UPDATE public.outbounds
+      SET "grnImage" = :grnImagePath, "fileSize" = :fileSize, "updatedAt" = NOW()
+      WHERE "outboundId" = :outboundId;
+    `;
+    await db.sequelize.query(query, {
+      replacements: { outboundId, grnImagePath, fileSize },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+    console.log(
+      `MODEL (updateOutboundWithPdfDetails): Successfully updated outboundId ${outboundId}.`
+    );
+  } catch (error) {
+    console.error("MODEL ERROR in updateOutboundWithPdfDetails:", error);
     throw error;
   }
 };
@@ -293,4 +341,5 @@ module.exports = {
   createGrnAndTransactions,
   getOperators,
   confirmSelectedInbounds,
+  updateOutboundWithPdfDetails,
 };
