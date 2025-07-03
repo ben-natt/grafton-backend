@@ -4,30 +4,42 @@ const db = require("../database");
 const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
   try {
     const offset = (page - 1) * pageSize;
-    const query = `
-SELECT *
-FROM (
-  SELECT DISTINCT ON (l."jobNo") l."jobNo", s."inboundDate"
-  FROM public.lot l
-  JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
-  WHERE l."status" = 'Pending' AND l."report" = 'False'
-  ORDER BY l."jobNo", s."inboundDate" ASC
-) AS distinct_jobs
-ORDER BY distinct_jobs."inboundDate" ASC
-LIMIT :limit OFFSET :offset;
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT l."jobNo")::int
+      FROM public.lot l
+      JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
+      WHERE l."status" = 'Pending' AND l."report" = 'False'
     `;
-    const result = await db.sequelize.query(query, {
+    const countResult = await db.sequelize.query(countQuery, {
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+    const totalCount = countResult.count;
+
+    const dataQuery = `
+      SELECT *
+      FROM (
+        SELECT DISTINCT ON (l."jobNo") l."jobNo", s."inboundDate"
+        FROM public.lot l
+        JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
+        WHERE l."status" = 'Pending' AND l."report" = 'False'
+        ORDER BY l."jobNo", s."inboundDate" ASC
+      ) AS distinct_jobs
+      ORDER BY distinct_jobs."inboundDate" ASC
+      LIMIT :limit OFFSET :offset;
+    `;
+    const data = await db.sequelize.query(dataQuery, {
       replacements: { limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-    return result;
+    return { totalCount, data };
   } catch (error) {
     console.error("Error fetching pending tasks records:", error);
     throw error;
   }
 };
-
 
 const getDetailsPendingTasks = async (jobNo) => {
   try {
@@ -68,7 +80,7 @@ const pendingTasksUserId = async (jobNo) => {
           JOIN public.lot l ON s."jobNo" = l."jobNo"
           JOIN public.users u ON s."userId" = u."userid"
           WHERE l."jobNo" = :jobNo AND l."status" = 'Pending'
-      `;
+        `;
 
     const result = await db.sequelize.query(query, {
       replacements: { jobNo },
@@ -127,7 +139,6 @@ const pendingTasksUserId = async (jobNo) => {
   }
 };
 
-// FOR OFICE VERSION
 const pendingTasksUserIdSingleDate = async (jobNo) => {
   try {
     const query = `
@@ -138,7 +149,7 @@ const pendingTasksUserIdSingleDate = async (jobNo) => {
           JOIN public.lot l ON s."jobNo" = l."jobNo"
           JOIN public.users u ON s."userId" = u."userid"
           WHERE l."jobNo" = :jobNo AND l."status" = 'Pending'
-      `;
+        `;
 
     const result = await db.sequelize.query(query, {
       replacements: { jobNo },
@@ -260,12 +271,24 @@ const findJobNoOfficePendingTasks = async () => {
   }
 };
 
-
 // --- OUTBOUND ---
 const findScheduleIdPendingOutbound = async (page = 1, pageSize = 10) => {
   try {
     const offset = (page - 1) * pageSize;
-    const query = `
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT so."scheduleOutboundId")::int
+      FROM public.scheduleoutbounds so
+      JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
+      WHERE si."isOutbounded" = false
+    `;
+    const countResult = await db.sequelize.query(countQuery, {
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+    const totalCount = countResult.count;
+
+    const dataQuery = `
       SELECT DISTINCT so."scheduleOutboundId",
       CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo", so."releaseDate"
       FROM public.scheduleoutbounds so
@@ -274,11 +297,11 @@ const findScheduleIdPendingOutbound = async (page = 1, pageSize = 10) => {
       ORDER BY so."releaseDate" ASC
       LIMIT :limit OFFSET :offset
     `;
-    const result = await db.sequelize.query(query, {
+    const data = await db.sequelize.query(dataQuery, {
       replacements: { limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
     });
-    return result;
+    return { totalCount, data };
   } catch (error) {
     console.error("Error fetching pending outbound schedule IDs:", error);
     throw error;
@@ -353,7 +376,6 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
   }
 };
 
-// OFFICE VERSION
 const getDetailsPendingOutboundOffice = async (scheduleOutboundId) => {
   try {
     const query = `
@@ -422,7 +444,6 @@ const pendingOutboundTasksUserIdSingleDate = async (scheduleOutboundId) => {
   }
 };
 
-
 const findScheduleIdPendingOutboundOffice = async () => {
   try {
     const query = `
@@ -454,10 +475,10 @@ module.exports = {
   pendingTasksUpdateQuantity,
   findJobNoOfficePendingTasks,
   // Outbound
-  findScheduleIdPendingOutbound, // New function
+  findScheduleIdPendingOutbound,
   getDetailsPendingOutbound,
   pendingOutboundTasksUser,
   getDetailsPendingOutboundOffice,
   pendingOutboundTasksUserIdSingleDate,
-  findScheduleIdPendingOutboundOffice
+  findScheduleIdPendingOutboundOffice,
 };
