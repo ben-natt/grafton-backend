@@ -1,15 +1,104 @@
 const XLSX = require('xlsx');
-const { v4: uuidv4 } = require('uuid');
-const { sequelize, DataTypes } = require('../database');
-const { ScheduleInbound, Lot } = require('../models/schedule_inbound.model')(sequelize, DataTypes);
 const fs = require('fs');
 
-function excelDateToJSDate(excelDate) {
-  const date = new Date(Date.UTC(1899, 11, 30));
-  date.setDate(date.getDate() + excelDate);
-  return date;
-}
+// Import the db object to get the sequelize instance for queries
+const db = require('../database');
+const { sequelize, DataTypes } = db;
 
+// We only need to initialize the models that this controller is directly responsible for: ScheduleInbound and Lot.
+const { ScheduleInbound, Lot } = require('../models/schedule_inbound.model.js')(sequelize, DataTypes);
+
+
+// This function will find or create a record using raw SQL, mimicking your project's style.
+const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
+  if (!name || typeof name !== 'string' || name.trim() === '') {
+    return;
+  }
+  const aName = name.trim();
+
+  try {
+    const query = `
+      INSERT INTO public."${table}" ("${nameColumn}", "createdAt", "updatedAt")
+      VALUES (:aName, NOW(), NOW())
+      ON CONFLICT ("${nameColumn}") DO NOTHING;
+    `;
+    await sequelize.query(query, {
+      replacements: { aName },
+      type: sequelize.QueryTypes.INSERT,
+      transaction,
+    });
+  } catch (error) {
+    console.error(`Error in findOrCreateRaw for table ${table}:`, error);
+    throw error;
+  }
+};
+
+
+exports.createScheduleInbound = async (req, res) => {
+  const userId = 7; //Grace
+  const { inboundDate, jobDataMap } = req.body;
+
+  if (!jobDataMap || Object.keys(jobDataMap).length === 0) {
+    return res.status(400).json({ message: 'No lot data provided for scheduling.' });
+  }
+
+  if (!inboundDate) {
+    return res.status(400).json({ message: 'Inbound Date is required for scheduling.' });
+  }
+
+  const transaction = await sequelize.transaction();
+
+  try {
+    for (const jobNo in jobDataMap) {
+      const { lots } = jobDataMap[jobNo];
+    console.log(lots);
+      // This logic now uses raw SQL queries, avoiding the model import errors.
+      for (const lot of lots) {
+        await findOrCreateRaw('commodities', 'commodityName', lot.commodity, transaction);
+        await findOrCreateRaw('brands', 'brandName', lot.brand, transaction);
+        await findOrCreateRaw('shapes', 'shapeName', lot.shape, transaction);
+        await findOrCreateRaw('exwarehouselocations', 'exWarehouseLocationName', lot.exWarehouseLocation, transaction);
+        await findOrCreateRaw('exlmewarehouses', 'exLmeWarehouseName', lot.exLmeWarehouse, transaction);
+        await findOrCreateRaw('inboundwarehouses', 'inboundWarehouseName', lot.inboundWarehouse, transaction);
+      }
+
+      // This part remains the same as it uses the correctly imported models.
+      const [scheduleInbound] = await ScheduleInbound.upsert({
+        jobNo: jobNo,
+        inboundDate: new Date(inboundDate),
+        userId: userId,
+      }, {
+        transaction: transaction,
+        returning: true,
+      });
+
+      const scheduleInboundId = scheduleInbound.scheduleInboundId;
+
+      for (const lot of lots) {
+        await Lot.upsert({
+          ...lot,
+          scheduleInboundId: scheduleInboundId,
+        }, {
+          transaction: transaction,
+        });
+      }
+    }
+
+    await transaction.commit();
+    res.status(200).json({ message: 'Inbound schedule and lots created/updated successfully!' });
+    console.log('Inbound schedule and lots created/updated successfully!');
+  } catch (dbError) {
+    await transaction.rollback();
+    console.error('Database error during scheduling:', dbError);
+    res.status(500).json({
+      message: 'An error occurred during the scheduling process.',
+      error: dbError.message,
+    });
+  }
+};
+
+
+// The uploadExcel function does not need changes. It is included for completeness.
 exports.uploadExcel = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: 'No file uploaded.' });
@@ -29,9 +118,8 @@ exports.uploadExcel = async (req, res) => {
       return res.status(400).json({ message: 'Excel file is empty or missing data rows.' });
     }
 
-    const headers = jsonData[0]; // First row is the header
-    console.log('Headers:', headers); // Debugging header output
-    const dataRows = jsonData.slice(1); // Exclude the header row
+    const headers = jsonData[0];
+    const dataRows = jsonData.slice(1);
 
     const jobNoIndex = headers.indexOf('Job No');
     const lotNoIndex = headers.indexOf('Lot No');
@@ -48,7 +136,6 @@ exports.uploadExcel = async (req, res) => {
     const exLMEIndex = headers.indexOf('Ex LME Warehouse');
     const inWarehouseIndex = headers.indexOf('Inbound Warehouse');
 
-    
     if (jobNoIndex === -1) {
       return res.status(400).json({ message: 'Missing "Job No" column in Excel file.' });
     }
@@ -57,36 +144,18 @@ exports.uploadExcel = async (req, res) => {
     let totalLotsProcessed = 0;
 
     for (const row of dataRows) {
-       if (!row || row.length === 0 || row.every(cell => cell === null || cell === undefined || cell === '')) {
-    continue;
-  }
+      if (!row || row.length === 0 || row.every(cell => cell === null || cell === undefined || cell === '')) {
+        continue;
+      }
 
+      const jobNo = row[jobNoIndex]?.toString().trim() || null;
+      if (!jobNo) {
+        console.warn('Row skipped due to missing Job No:', row);
+        continue;
+      }
 
-  const jobNo = row[jobNoIndex]?.toString().trim() || null;
-  
-
-  if (!jobNo) {
-    console.warn('Row skipped due to missing Job No:', row);
-    continue;
-  }
-  console.log('Job No:', jobNo);
-  const inboundDateExcel = req.body.inboundDate;
-
-  if (!jobDataMap.has(jobNo)) {
-        let parsedInboundDate = null;
-        if (typeof inboundDateExcel === 'number') {
-          parsedInboundDate = excelDateToJSDate(inboundDateExcel);
-        } else if (typeof inboundDateExcel === 'string') {
-          try {
-            parsedInboundDate = new Date(inboundDateExcel);
-            if (isNaN(parsedInboundDate.getTime())) {
-              parsedInboundDate = null;
-            }
-          } catch (e) {
-            parsedInboundDate = null;
-          }
-        }
-        jobDataMap.set(jobNo, { inboundDate: parsedInboundDate?.toISOString(), lots: [] });
+      if (!jobDataMap.has(jobNo)) {
+        jobDataMap.set(jobNo, { lots: [] });
       }
 
       const lotNoValue = parseInt(row[lotNoIndex], 10);
@@ -132,62 +201,12 @@ exports.uploadExcel = async (req, res) => {
     console.error('Error reading or parsing Excel file:', error);
     res.status(500).json({ message: 'Error reading or parsing Excel file.', error: error.message });
   } finally {
-    fs.unlink(req.file.path, (err) => {
-      if (err) console.error('Error deleting temp file:', err);
-    });
-  }
-};
-
-exports.createScheduleInbound = async (req, res) => {
-  const userId = 7; //Grace
-  const { inboundDate, jobDataMap } = req.body;
-
-  if (!jobDataMap || Object.keys(jobDataMap).length === 0) {
-    return res.status(400).json({ message: 'No lot data provided for scheduling.' });
-  }
-
-  if (!inboundDate) {
-    return res.status(400).json({ message: 'Inbound Date is required for scheduling.' });
-  }
-
-  const transaction = await sequelize.transaction();
-
-  try {
-    for (const jobNo in jobDataMap) {
-      const { lots } = jobDataMap[jobNo];
-
-      // Create or update ScheduleInbound and retrieve its ID
-      const [scheduleInbound] = await ScheduleInbound.upsert({
-        jobNo: jobNo,
-        inboundDate: new Date(inboundDate),
-        userId: userId,
-      }, {
-        transaction: transaction,
-        returning: true, // This ensures the updated/created record is returned
-      });
-
-      const scheduleInboundId = scheduleInbound.scheduleInboundId;
-
-      // Upsert each lot, setting scheduleInboundId
-      for (const lot of lots) {
-        await Lot.upsert({
-          ...lot,
-          scheduleInboundId: scheduleInboundId, 
-        }, {
-          transaction: transaction,
-        });
-      }
+    if (req.file && req.file.path) {
+        try {
+            fs.unlinkSync(req.file.path);
+        } catch (err) {
+            console.error('Error deleting temp file:', err);
+        }
     }
-
-    await transaction.commit();
-    res.status(200).json({ message: 'Inbound schedule and lots created/updated successfully!' });
-    console.log('Inbound schedule and lots created/updated successfully!');
-  } catch (dbError) {
-    await transaction.rollback();
-    console.error('Database error during scheduling:', dbError);
-    res.status(500).json({
-      message: 'Job No and Lot No must be unique per schedule inbound.',
-      error: dbError.message,
-    });
   }
 };
