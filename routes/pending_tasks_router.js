@@ -104,6 +104,15 @@ router.post("/quantity/update", async (req, res) => {
   }
 });
 
+router.get("/tasks-jobNo-office", async (req, res) => {
+  try {
+    const result = await pendingTasksModel.findJobNoOfficePendingTasks();
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch pending tasks." });
+  }
+});
+
 // --- OUTBOUND ROUTES ---
 // Fetch schedule IDs for pending outbound tasks
 router.get("/tasks-outbound-ids", async (req, res) => {
@@ -189,6 +198,17 @@ router.post("/tasks-outbound-office-date", async (req, res) => {
   } catch (error) {
     console.error("Error fetching stock records:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+router.get("/tasks-outbound-ids-office", async (req, res) => {
+  try {
+    const result = await pendingTasksModel.findScheduleIdPendingOutboundOffice();
+    res.status(200).json(result);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ error: "Failed to fetch pending outbound schedule IDs." });
   }
 });
 

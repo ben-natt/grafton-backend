@@ -15,8 +15,6 @@ FROM (
 ) AS distinct_jobs
 ORDER BY distinct_jobs."inboundDate" ASC
 LIMIT :limit OFFSET :offset;
-
-
     `;
     const result = await db.sequelize.query(query, {
       replacements: { limit: pageSize, offset },
@@ -184,11 +182,20 @@ const updateReportStatus = async (lotId) => {
 const getDetailsPendingTasksOrderByReport = async (jobNo) => {
   try {
     const query = `
-    SELECT "lotId", "lotNo","jobNo", "commodity", "expectedBundleCount", "brand",
-           "exWarehouseLot", "exLmeWarehouse", "shape", "report"
-    FROM public.lot
-    WHERE "jobNo" = :jobNo AND "status" = 'Pending'
-    ORDER BY "report" DESC;
+SELECT 
+    "lotId", 
+    LPAD("lotNo"::text, 2, '0') AS "lotNo", 
+    "jobNo", 
+    "commodity", 
+    "expectedBundleCount", 
+    "brand",
+    "exWarehouseLot", 
+    "exLmeWarehouse", 
+    "shape", 
+    "report"
+FROM public.lot
+WHERE "jobNo" = :jobNo AND "status" = 'Pending'
+ORDER BY "report" DESC;
     `;
 
     const result = await db.sequelize.query(query, {
@@ -229,6 +236,30 @@ const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
     throw error;
   }
 };
+
+const findJobNoOfficePendingTasks = async () => {
+  try {
+    const query = `
+    SELECT *
+    FROM (
+      SELECT DISTINCT ON (l."jobNo") l."jobNo", s."inboundDate"
+      FROM public.lot l
+      JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
+      WHERE l."status" = 'Pending'
+      ORDER BY l."jobNo", s."inboundDate" ASC
+    ) AS distinct_jobs
+    ORDER BY distinct_jobs."inboundDate" ASC;
+        `;
+    const result = await db.sequelize.query(query, {
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    return result;
+  } catch (error) {
+    console.error("Error fetching pending tasks records:", error);
+    throw error;
+  }
+};
+
 
 // --- OUTBOUND ---
 const findScheduleIdPendingOutbound = async (page = 1, pageSize = 10) => {
@@ -391,6 +422,27 @@ const pendingOutboundTasksUserIdSingleDate = async (scheduleOutboundId) => {
   }
 };
 
+
+const findScheduleIdPendingOutboundOffice = async () => {
+  try {
+    const query = `
+            SELECT DISTINCT so."scheduleOutboundId",
+            CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo", so."releaseDate"
+            FROM public.scheduleoutbounds so
+            JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
+            WHERE si."isOutbounded" = false
+            ORDER BY so."releaseDate" ASC
+        `;
+    const result = await db.sequelize.query(query, {
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    return result;
+  } catch (error) {
+    console.error("Error fetching pending outbound schedule IDs:", error);
+    throw error;
+  }
+};
+
 module.exports = {
   // Inbound
   getDetailsPendingTasks,
@@ -400,10 +452,12 @@ module.exports = {
   updateReportStatus,
   getDetailsPendingTasksOrderByReport,
   pendingTasksUpdateQuantity,
+  findJobNoOfficePendingTasks,
   // Outbound
   findScheduleIdPendingOutbound, // New function
   getDetailsPendingOutbound,
   pendingOutboundTasksUser,
   getDetailsPendingOutboundOffice,
   pendingOutboundTasksUserIdSingleDate,
+  findScheduleIdPendingOutboundOffice
 };
