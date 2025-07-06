@@ -243,6 +243,168 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
 };
 
 
+const getAllScheduleInbound = async () => {
+    try {
+        const query = `
+            SELECT
+             l."lotId" AS id,
+             TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+             l."jobNo" AS "Job No",
+             l."lotNo" AS "Lot No",
+             l."exWarehouseLot" AS  "Ex-W Lot",
+        l."commodity" AS "Metal",
+        l."brand"  AS "Brand",
+        l."shape"  AS "Shape",
+        l."expectedBundleCount" AS "Qty", 
+        u."username" AS "Scheduled By"
+            from public.lot l 
+            JOIN public.scheduleinbounds i ON l."scheduleInboundId" = i."scheduleInboundId"
+            LEFT JOIN public.users u ON i."userId" = u.userid
+        ORDER BY i."inboundDate" DESC
+
+        `;
+        const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT
+        });
+
+        return result;
+    } catch (error) {
+        console.error('Error fetching all schedule inbound records:', error);
+        throw error;
+    }
+};
+
+
+const getAllScheduleOutbound = async () => {
+    try {
+        const query = `
+            SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+        si."inboundId" AS id,
+		i."jobNo" AS "Job No",
+        i."lotNo" AS "Lot No",
+		i."exWarehouseLot" AS  "Ex-W Lot",
+		c."commodityName" AS "Metal",
+		b."brandName"  AS "Brand",
+		s."shapeName" AS "Shape",
+		i."noOfBundle" AS "Qty",
+		u."username" AS "Scheduled By"
+		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
+		ON o."scheduleOutboundId" = si."scheduleOutboundId"
+		LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
+		LEFT JOIN public.commodities c on i."commodityId" = c."commodityId"
+		LEFT JOIN public.brands b on i."brandId" = b."brandId"
+		LEFT JOIN public.shapes s on i."shapeId" = s."shapeId"
+		LEFT JOIN public.users u ON o."userId" = u.userid
+        ORDER BY o."releaseDate" DESC
+        `;
+        const result = await db.sequelize.query(query, {
+            type: db.sequelize.QueryTypes.SELECT
+        });
+
+        return result;
+    } catch (error) {
+        console.error('Error fetching all schedule outbound records:', error);
+        throw error;
+    }
+};
+
+// MODIFICATION: Added 'ProcessedBy' user and ensured all fields are present.
+const getScheduleInboundRecordByLotId = async (lotId) => {
+    try {
+        const query = `
+           SELECT
+    l."jobNo" AS "JobNo",
+    l."lotNo" AS "LotNo",
+    l."expectedBundleCount" AS "NoOfBundle",
+    l."lotId",
+    l."commodity" AS "Commodity",
+    l."brand" AS "Brand",
+    l."shape" AS "Shape",
+    l."exLmeWarehouse" AS "ExLMEWarehouse",
+    l."exWarehouseLot" AS "ExWarehouseLot",
+    l."exWarehouseWarrant" AS "ExWarehouseWarrant",
+    l."exWarehouseLocation" AS "ExWarehouseLocation",
+    l."inboundWarehouse" AS "InboundWarehouse",
+    TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "InboundDate",
+    TO_CHAR(si."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
+    l."grossWeight" AS "GrossWeight",
+    l."netWeight" AS "NetWeight",
+    l."actualWeight" AS "ActualWeight",
+    u."username" AS "ScheduledBy",
+    NULL AS "ProcessedBy",
+    TO_CHAR(l."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
+    FROM public.lot l
+    LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
+    LEFT JOIN public.users u ON u.userid = si."userId"
+    WHERE l."lotId" = :lotId
+    LIMIT 1;
+        `;
+
+        const result = await db.sequelize.query(query, {
+            replacements: { lotId },
+            type: db.sequelize.QueryTypes.SELECT
+        });
+
+        return result;
+    } catch (error) {
+        console.error('Error fetching inbound record by lotId:', error);
+        throw error;
+    }
+};
+
+const getScheduleOutboundRecordById = async (id) => {
+    try {
+        const query = `
+          SELECT
+                i."jobNo" AS "JobNo", 
+				i."lotNo" AS "LotNo", 
+				i."noOfBundle" AS "NoOfBundle",
+				so."lotReleaseWeight" AS "LotReleaseWeight",
+                i."inboundId", 
+				c."commodityName" AS "Commodity", 
+				b."brandName" AS "Brand",
+                s."shapeName" AS "Shape", 
+				exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
+                i."exWarehouseLot" AS "ExWarehouseLot",
+				i."exWarehouseWarrant" AS "ExWarehouseWarrant",
+				so."releaseWarehouse" AS "ReleaseWarehouse",
+				TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleOutboundDate",
+				TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
+				TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
+				TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
+				i."netWeight" AS "TotalReleaseWeight",
+				so."storageReleaseLocation" AS "StorageReleaseLocation",
+				so."transportVendor" AS "TransportVendor",
+				scheduler."username" AS "ScheduledBy",
+				TO_CHAR(so."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
+			FROM public.selectedinbounds selin
+			LEFT JOIN public.inbounds i ON i."inboundId" = selin."inboundId"
+            LEFT JOIN public.brands b ON b."brandId" = i."brandId"
+            LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
+            LEFT JOIN public.shapes s ON s."shapeId" = i."shapeId"
+            LEFT JOIN public.exlmewarehouses exlme ON exlme."exLmeWarehouseId" = i."exLmeWarehouseId"
+			LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = selin."scheduleOutboundId"
+            LEFT JOIN public.users scheduler ON scheduler.userid = so."userId"
+            
+            WHERE selin."inboundId" = :id
+            LIMIT 1;
+        `;
+
+        const result = await db.sequelize.query(query, {
+            replacements: { id },
+            type: db.sequelize.QueryTypes.SELECT
+        });
+
+        return result;
+    } catch (error) {
+        console.error('Error fetching outbound record by outboundId:', error);
+        throw error;
+    }
+};
+
+
+
+
 module.exports = {
     getInboundSummary,
     getOutboundSummary,
@@ -250,5 +412,9 @@ module.exports = {
     getOutboundRecord,
     getFilterOptions,
     getInboundRecordByInboundId,
-    getOutboundRecordByOutboundId
+    getOutboundRecordByOutboundId,
+    getAllScheduleInbound,
+    getAllScheduleOutbound,
+    getScheduleInboundRecordByLotId,
+    getScheduleOutboundRecordById
 };  

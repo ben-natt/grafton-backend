@@ -75,4 +75,46 @@ router.get('/outbound-records/:outboundId', async (req, res) => {
     }
 });
 
+router.get('/scheduled-inbound', async (req, res) => {
+    try {
+        const scheduledInbounds = await activitiesModel.getAllScheduleInbound();
+        res.json(scheduledInbounds);
+    } catch (error) {
+        console.error('Error fetching scheduled inbound records:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+router.get('/scheduled-outbound', async (req, res) => {
+    try {
+        const scheduledOutbounds = await activitiesModel.getAllScheduleOutbound();
+        res.json(scheduledOutbounds);
+    } catch (error) {
+        console.error('Error fetching scheduled outbound records:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+router.get('/scheduled-inbound/:lotId', async (req, res) => {
+    try {
+        const lotId = req.params.lotId;
+        const scheduledInbound = await activitiesModel.getScheduleInboundRecordByLotId(lotId);
+        res.json(scheduledInbound);
+    } catch (error) {
+        console.error('Error fetching scheduled inbound record by lot ID:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+router.get('/scheduled-outbound/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        const scheduledOutbound = await activitiesModel.getScheduleOutboundRecordById(id);
+        res.json(scheduledOutbound);
+    } catch (error) {
+        console.error('Error fetching scheduled outbound record by ID:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 module.exports = router;
