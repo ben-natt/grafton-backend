@@ -153,8 +153,12 @@ const getInventory = async () => {
                 COUNT(*) AS count
             FROM 
                 public.inbounds i
+             LEFT JOIN 
+            public.selectedInbounds o ON o."inboundId" = i."inboundId"
             JOIN 
                 public.commodities c ON i."commodityId" = c."commodityId"
+            WHERE 
+                o."inboundId" IS NULL
             GROUP BY 
                 c."commodityName";
         `;

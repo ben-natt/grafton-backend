@@ -3,7 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { sequelize, DataTypes } = require('../database');
 const { ScheduleOutbound, SelectedInbounds, ScheduleInbound, Lot, Inbounds, Brand, Commodity, Shape } = require('../models/schedule_outbound.model')(sequelize, DataTypes);
 const fs = require('fs');
-
+const auth = require('../middleware/auth')
 
 function excelDateToJSDate(excelDate) {
   if (excelDate === null || excelDate === undefined || excelDate === '') return null;
@@ -161,9 +161,7 @@ exports.uploadExcel = async (req, res) => {
 
 
 exports.createScheduleOutbound = async (req, res) => {
-  const userId = 7;
-  
-
+  const userId = req.user.userId;
   const {
     releaseDate,
     storageReleaseLocation,
@@ -223,6 +221,7 @@ exports.createScheduleOutbound = async (req, res) => {
         scheduleOutboundId: newScheduleOutbound.scheduleOutboundId,
         inboundId: masterInboundRecord.inboundId,
         lotNo: lot.lotNo,
+        jobNo: lot.jobNo,
         isOutbounded: false,
       }, { transaction });
     }

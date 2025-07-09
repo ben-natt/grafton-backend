@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const scheduleInboundController = require("../controllers/schedule_inbound_controller"); // Correct path to your controller
+const auth = require("../middleware/auth");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -18,6 +19,6 @@ router.post(
   upload.single("excelFile"),
   scheduleInboundController.uploadExcel
 );
-router.post("/create", scheduleInboundController.createScheduleInbound);
+router.post("/create", auth, scheduleInboundController.createScheduleInbound);
 
 module.exports = router;
