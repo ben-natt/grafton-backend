@@ -36,7 +36,6 @@ router.post(
   outboundController.createGrnAndTransactions
 );
 
-// --- NEW ROUTE ---
 /*
  * GET /confirm-outbound/operators
  * Fetches warehouse staff (roleId 1) and supervisors (roleId 2) for dropdowns.

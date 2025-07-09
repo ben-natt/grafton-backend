@@ -164,7 +164,7 @@ const createGrnAndTransactions = async (req, res) => {
     );
 
     console.log("CONTROLLER: 4. Calling PDF service to generate PDF...");
-    const { pdfBytes, outputPath } = await pdfService.generateGrnPdf(pdfData);
+    const { outputPath } = await pdfService.generateGrnPdf(pdfData);
     console.log(
       `CONTROLLER: 4. PDF service successful. PDF generated at: ${outputPath}`
     );
@@ -184,24 +184,30 @@ const createGrnAndTransactions = async (req, res) => {
     );
     console.log("CONTROLLER: 5. Database updated with PDF details.");
 
-    console.log("CONTROLLER: 6. Sending PDF back to client...");
-    res.setHeader("Content-Type", "application/pdf");
-    const safeGrnNo = pdfData.grnNo.replace(/[\/\\?%*:|"<>]/g, "_");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=GRN_${safeGrnNo}.pdf`
-    );
-    res.send(Buffer.from(pdfBytes));
+    // --- MODIFICATION: Base64 Encoding and JSON Response ---
+    console.log("CONTROLLER: 6. Reading file and encoding to Base64...");
+    const pdfBuffer = await fs.readFile(outputPath);
+    const base64Pdf = pdfBuffer.toString("base64");
+
     console.log(
-      "--- CONTROLLER: createGrnAndTransactions finished successfully. ---"
+      `CONTROLLER: 6. Base64 encoding complete. String length: ${base64Pdf.length}.`
+    );
+    console.log(`CONTROLLER: 6. Sending JSON response with Base64 PDF data.`);
+
+    res.status(200).json({ pdf: base64Pdf });
+
+    console.log(
+      "--- CONTROLLER: createGrnAndTransactions finished successfully (Base64 sent). ---"
     );
   } catch (error) {
     console.error("--- CONTROLLER ERROR in createGrnAndTransactions: ---");
     console.error(error);
-    res.status(500).json({
-      error: "Failed to create GRN.",
-      details: error.message,
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Failed to create GRN.",
+        details: error.message,
+      });
+    }
   }
 };
 
