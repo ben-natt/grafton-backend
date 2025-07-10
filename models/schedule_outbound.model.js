@@ -118,6 +118,11 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true, // Can be null
       field: 'lotNo',
     },
+    jobNo: { // Job number from the original 'inbounds' table
+      type: DataTypes.STRING(16),
+      allowNull: true, // Can be null
+      field: 'jobNo',
+    },
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,

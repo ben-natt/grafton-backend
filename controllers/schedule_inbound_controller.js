@@ -35,7 +35,7 @@ const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
 
 
 exports.createScheduleInbound = async (req, res) => {
-  const userId = 7; //Grace
+  const userId = req.user.userId; 
   const { inboundDate, jobDataMap } = req.body;
 
   if (!jobDataMap || Object.keys(jobDataMap).length === 0) {

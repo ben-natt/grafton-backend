@@ -11,14 +11,10 @@ const getInboundSummary = async () => {
     SUM(i."netWeight") AS "totalWeight"
         FROM 
             public.inbounds i
-        LEFT JOIN 
-            public.outboundtransactions o ON o."inboundId" = i."inboundId"
         JOIN 
             public.commodities c ON i."commodityId" = c."commodityId"
         JOIN 
             public.shapes s ON i."shapeId" = s."shapeId"
-        WHERE 
-            o."inboundId" IS NULL
         GROUP BY 
             c."commodityName", s."shapeName"
         ORDER BY 
@@ -88,10 +84,6 @@ const getInboundRecord = async () => {
                 public.shapes s ON s."shapeId" = i."shapeId"
             JOIN 
                 public.users u ON u.userid = i."userId"
-            WHERE 
-                i."inboundDate" IS NOT NULL 
-            ORDER BY 
-                i."inboundId" limit 100
         `;
         
       const result = await db.sequelize.query(query, {
@@ -110,7 +102,7 @@ const getOutboundRecord = async () => {
         const query = `
             SELECT 
                 o."outboundTransactionId" AS id,
-                TO_CHAR(o."outboundedDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+                TO_CHAR(o."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
                 o."jobNo" AS "Job No",
                 o."lotNo" AS "Lot No",
                 o."exWarehouseLot" AS  "Ex-W Lot",
@@ -121,9 +113,12 @@ const getOutboundRecord = async () => {
                 u."username" AS "Scheduled By"
             FROM 
                 public.outboundtransactions o
+            LEFT JOIN
+                public.scheduleoutbounds so ON so."scheduleOutboundId" = o."scheduleOutboundId"
             LEFT JOIN 
-                public.users u ON o."scheduledBy" = u.userid
-            LIMIT 100
+                public.users u ON u.userid = so."userId"
+            ORDER BY
+                o."outboundedDate" DESC
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT
@@ -224,7 +219,7 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
                 o."updatedAt" AS "UpdatedAt"
             FROM public.outboundtransactions o
             LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = o."scheduleOutboundId"
-            LEFT JOIN public.users scheduler ON scheduler.userid = o."scheduledBy"
+            LEFT JOIN public.users scheduler ON scheduler.userid = so."userId"
             LEFT JOIN public.users processor ON processor.userid = o."outboundedBy"
             WHERE o."outboundTransactionId" = :outboundId
             LIMIT 1;

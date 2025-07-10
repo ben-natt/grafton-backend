@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const stockModel = require('../models/stock.model');
+const auth = require('../middleware/auth'); // Assuming auth.js is in a middleware folder
 
 router.get('/', async (req, res) => {
     try {
@@ -26,7 +27,7 @@ router.get('/lots', async (req, res) => {
     try {
         const filters = req.query; // Pass all query params to the model
         console.log('Fetching lots with filters:', filters);
-        const lots = await stockModel.getLotDetails(filters); 
+        const lots = await stockModel.getLotDetails(filters);
         res.json(lots);
     } catch (error) {
         console.error('Error fetching lots by metal and shape', error);
@@ -40,7 +41,7 @@ router.get('/filter-options', async (req, res) => {
 
         res.json(options);
     } catch (error)
-    {   
+    {
         console.error('Error fetching filter options:', error);
         res.status(500).json({ error: 'Internal Server Error' });
     }
@@ -49,14 +50,14 @@ router.get('/filter-options', async (req, res) => {
 router.get('/lot-summary', async (req, res) => {
   try {
     // FIX: Change from req.body to req.query for GET request
-    const { jobNo, lotNo } = req.query; 
+    const { jobNo, lotNo } = req.query;
 
     if (!jobNo || !lotNo) {
       return res.status(400).json({ error: 'Missing jobNo or lotNo query parameters' });
     }
 
     const result = await stockModel.getLotSummary(jobNo, lotNo);
-    
+
     // If no result found, return a 404
     if (!result) {
       return res.status(404).json({ error: 'Lot not found' });
@@ -71,11 +72,12 @@ router.get('/lot-summary', async (req, res) => {
 
 
 // --- NEW ROUTE for Scheduling Outbounds ---
-router.post('/schedule-outbound', async (req, res) => {
+router.post('/schedule-outbound',auth, async (req, res) => {
     try {
         // The request body will contain the form data and the list of selected lots
         const scheduleData = req.body;
-        const result = await stockModel.createScheduleOutbound(scheduleData);
+        const userId = req.user.userId; 
+        const result = await stockModel.createScheduleOutbound(scheduleData, userId);
         res.status(201).json(result);
     } catch (error) {
         console.error('Error in /schedule-outbound route:', error.message);
@@ -103,4 +105,22 @@ router.put('/update/:inboundId', async (req, res) => {
     }
 });
 
+
+router.get('/lots-by-job/:jobNo/:brand/:shape', async (req, res) => { // Updated route to include brand and shape
+    try {
+        const { jobNo, brand,shape } = req.params; 
+
+        if (!jobNo || !brand) {
+            return res.status(400).json({ error: 'Missing jobNo or brand parameter in URL' });
+        }
+
+        // Pass both to the model function
+        const lots = await stockModel.getLotsByJobNo(jobNo, brand, shape);
+        res.json(lots);
+
+    } catch (error) {
+        console.error('Error fetching lots by job number and brand:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
 module.exports = router;
