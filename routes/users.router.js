@@ -207,7 +207,7 @@ router.post("/login", async (req, res) => {
     const token = jwt.sign(
       { userid: user.userid, email: user.email }, // Payload for JWT
       process.env.JWT_SECRET, // Secret key from environment variables
-      { expiresIn: "1h" } // Token expires in 1 hour
+      { expiresIn: "20m" } // Token expires in 20 minutes
     );
 
     console.log("Token: " + token); // Log before sending response
@@ -220,6 +220,15 @@ router.post("/login", async (req, res) => {
     console.error("Login Error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
+});
+
+// ADDED: Logout route
+router.post("/logout", authenticate, (req, res) => {
+  // For stateless JWT, the main responsibility of logging out is on the client
+  // (i.e., deleting the token). This endpoint is useful for tasks like
+  // adding the token to a blacklist if you implement that strategy.
+  // For now, it just confirms the logout action.
+  res.status(200).json({ message: "Logout successful." });
 });
 
 router.get("/", (req, res) => {
