@@ -14,6 +14,10 @@ const pendingTasks = require("./routes/pending_tasks_router");
 const confirmOutboundRoutes = require("./routes/confirm_outbound.router");
 const confirmInboundRoutes = require("./routes/confirm_inbound_router");
 
+
+const actualWeightRoutes = require("./routes/actualWeight.router");
+
+
 const { sequelize, DataTypes } = require("./database"); // Correctly import from database.js
 
 const app = express();
@@ -36,6 +40,7 @@ app.use("/schedule-outbounds", scheduleOutboundRoutes); // Uncomment if outbound
 app.use("/stocks", stockRoutes);
 
 app.use("/activities", activitiesRoutes);
+app.use("/actualWeight", actualWeightRoutes);
 
 app.use("/pending", pendingTasks);
 app.use("/confirm-outbound", confirmOutboundRoutes);
