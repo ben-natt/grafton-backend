@@ -1,237 +1,358 @@
-const express = require("express");
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { InboundBundle, Inbound, BeforeImage, AfterImage } = require('../models/repack.model');
+const { Op } = require('sequelize');
+const { v4: uuidv4 } = require('uuid'); // Make sure you import this at the top
 const router = express.Router();
-const repackModel = require("../models/repack.model");
-const db = require("../database");
 
-// POST route for saving inbound bundle data (single bundle)
-router.post("/save-inbound-bundle", async (req, res) => {
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = 'uploads/img/repacked/';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    const tempFilename = `${uuidv4()}${ext}`;
+    console.log(`Saving temp file: ${tempFilename} (original: ${file.originalname})`);
+    cb(null, tempFilename);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  fileFilter: (req, file, cb) => {
+    console.log('Received file:', file.originalname, 'Mimetype:', file.mimetype);
+    
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024 // Limit file size to 5MB
+  }
+});
+
+// POST /api/bundle-repack
+router.post('/desktop/bundle-repack', upload.fields([
+  { name: 'beforeImage', maxCount: 10 },
+  { name: 'afterImage', maxCount: 10 }
+]), async (req, res) => {
   try {
     const {
-      inboundBundleId, // For updates
-      inboundId, // For new records
-      bundleNo, // For new records
-      weight, // Optional for new records
+      inboundId,
+      noOfBundle,
+      netWeight,
       isRelabelled,
       isRebundled,
       isRepackProvided,
       noOfMetalStrap,
-      repackDescription,
-      beforeImagesId,
-      afterImagesId,
-      meltNo
     } = req.body;
 
     // Validate required fields
-    if (!inboundBundleId && (!inboundId || !bundleNo)) {
-      return res.status(400).json({ 
-        error: "Either inboundBundleId (for update) or inboundId and bundleNo (for create) is required" 
+    if (!inboundId || !noOfBundle || !netWeight) {
+      return res.status(400).json({
+        error: 'Missing required fields: inboundId, noOfBundle, netWeight'
       });
     }
 
-    // Prepare data object
+    // Get inbound record for jobNo and lotNo
+    const inbound = await Inbound.findByPk(inboundId);
+    if (!inbound) {
+      return res.status(404).json({ error: 'Inbound record not found' });
+    }
+
+    const { jobNo, lotNo } = inbound;
+
+    // Check if bundle already exists
+    let inboundBundle = await InboundBundle.findOne({
+      where: {
+        inboundId: parseInt(inboundId),
+        bundleNo: parseInt(noOfBundle)
+      }
+    });
+
     const bundleData = {
-      inboundBundleId: inboundBundleId || null,
-      inboundId: inboundId || null,
-      bundleNo: bundleNo || null,
-      weight: weight || null,
-      isRelabelled: isRelabelled || false,
-      isRebundled: isRebundled || false,
-      isRepackProvided: isRepackProvided || false,
-      noOfMetalStrap: noOfMetalStrap || null,
-      repackDescription: repackDescription || null,
-      beforeImagesId: beforeImagesId || null,
-      afterImagesId: afterImagesId || null,
-      meltNo: meltNo || null
+      inboundId: parseInt(inboundId),
+      bundleNo: parseInt(noOfBundle),
+      weight: parseFloat(netWeight),
+      isRelabelled: isRelabelled === 'true',
+      isRebundled: isRebundled === 'true',
+      isRepackProvided: isRepackProvided === 'true',
+      noOfMetalStrap: noOfMetalStrap ? parseInt(noOfMetalStrap) : null,
     };
 
-    // Call the modal function
-    const result = await repackModel.saveInboundBundleData(bundleData);
+    if (inboundBundle) {
+      // Update existing bundle
+      await inboundBundle.update(bundleData);
+    } else {
+      // Create new bundle
+      inboundBundle = await InboundBundle.create(bundleData);
+    }
+
+    // Handle image uploads only if isRepackProvided is true
+    if (isRepackProvided === 'true') {
+      const beforeFiles = req.files?.beforeImage || [];
+      const afterFiles = req.files?.afterImage || [];
+
+      // Process before images
+      for (const file of beforeFiles) {
+        const uniqueName = `${jobNo}-${lotNo}-${noOfBundle}/before-${uuidv4()}${path.extname(file.originalname)}`;
+        const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
+
+        // Ensure directory exists
+        const dir = path.dirname(newPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+
+        fs.renameSync(file.path, newPath);
+
+        await BeforeImage.create({
+          inboundId: parseInt(inboundId),
+          inboundBundleId: inboundBundle.inboundBundleId,
+          imageUrl: `uploads/img/repacked/${uniqueName}`,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+      }
+
+      // Process after images
+      for (const file of afterFiles) {
+        const uniqueName = `${jobNo}-${lotNo}-${noOfBundle}/after-${uuidv4()}${path.extname(file.originalname)}`;
+        const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
+
+        // Ensure directory exists
+        const dir = path.dirname(newPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+
+        fs.renameSync(file.path, newPath);
+
+        await AfterImage.create({
+          inboundId: parseInt(inboundId),
+          inboundBundleId: inboundBundle.inboundBundleId,
+          imageUrl: `uploads/img/repacked/${uniqueName}`,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+      }
+    }
+
+    // Return the saved bundle with images
+    const savedBundle = await InboundBundle.findByPk(inboundBundle.inboundBundleId, {
+      include: [
+        {
+          model: BeforeImage,
+          as: 'beforeImages'
+        },
+        {
+          model: AfterImage,
+          as: 'afterImages'
+        }
+      ]
+    });
 
     res.status(200).json({
-      success: true,
-      data: result,
-      message: result.message
+      message: 'Bundle repack saved successfully',
+      data: savedBundle
     });
 
   } catch (error) {
-    console.error("Error in save-inbound-bundle route:", error);
-    
-    // Handle specific error cases
-    if (error.message.includes('not found')) {
-      return res.status(404).json({ 
-        error: "Record not found",
-        details: error.message 
-      });
-    }
-
-    if (error.message.includes('already exists')) {
-      return res.status(409).json({ 
-        error: "Conflict - Bundle already exists",
-        details: error.message 
-      });
-    }
-
-    if (error.message.includes('required')) {
-      return res.status(400).json({ 
-        error: "Bad Request - Missing required fields",
-        details: error.message 
-      });
-    }
-
-    res.status(500).json({ 
-      error: "Internal Server Error",
-      details: error.message 
+    console.error('Error in bundle repack:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
     });
   }
 });
 
-// GET route to check if inbound bundles exist for a specific inboundId
-router.get("/check-inbound-bundles/:inboundId", async (req, res) => {
+// POST /api/bundle-repack
+router.post('/mobile/bundle-repack', upload.fields([
+  { name: 'beforeImage', maxCount: 10 },
+  { name: 'afterImage', maxCount: 10 }
+]), async (req, res) => {
   try {
-    const { inboundId } = req.params;
+    const {
+      inboundId,
+      noOfBundle,
+      netWeight,
+      isRelabelled,
+      isRebundled,
+      isRepackProvided,
+      noOfMetalStrap,
+      repackDescription
+    } = req.body;
 
-    if (!inboundId) {
-      return res.status(400).json({ 
-        error: "inboundId is required" 
+    // Validate required fields
+    if (!inboundId || !noOfBundle || !netWeight) {
+      return res.status(400).json({
+        error: 'Missing required fields: inboundId, noOfBundle, netWeight'
       });
     }
 
-    const checkQuery = `
-      SELECT COUNT(*) as count, 
-             array_agg("inboundBundleId") as bundleIds
-      FROM public.inboundbundles 
-      WHERE "inboundId" = :inboundId
-    `;
+    // Get inbound record for jobNo and lotNo
+    const inbound = await Inbound.findByPk(inboundId);
+    if (!inbound) {
+      return res.status(404).json({ error: 'Inbound record not found' });
+    }
+    const { jobNo, lotNo } = inbound;
 
-    const result = await db.sequelize.query(checkQuery, {
-      replacements: { inboundId },
-      type: db.sequelize.QueryTypes.SELECT,
+    // Check if bundle already exists
+    let inboundBundle = await InboundBundle.findOne({
+      where: {
+        inboundId: parseInt(inboundId),
+        bundleNo: parseInt(noOfBundle)
+      }
     });
 
-    const count = parseInt(result[0].count);
-    
+
+    const bundleData = {
+      inboundId: parseInt(inboundId),
+      bundleNo: parseInt(noOfBundle),
+      weight: parseFloat(netWeight),
+      isRelabelled: isRelabelled === 'true',
+      isRebundled: isRebundled === 'true',
+      isRepackProvided: isRepackProvided === 'true',
+      noOfMetalStrap: noOfMetalStrap ? parseInt(noOfMetalStrap) : null,
+      repackDescription: repackDescription || null
+    };
+
+    if (inboundBundle) {
+      // Update existing bundle
+      await inboundBundle.update(bundleData);
+    } else {
+      // Create new bundle
+      inboundBundle = await InboundBundle.create(bundleData);
+    }
+
+    // Handle image uploads only if isRepackProvided is true
+    if (isRepackProvided === 'true') {
+      const beforeFiles = req.files?.beforeImage || [];
+      const afterFiles = req.files?.afterImage || [];
+
+      // Process before images
+      for (const file of beforeFiles) {
+        const uniqueName = `${jobNo}-${lotNo}-${noOfBundle}/before-${uuidv4()}${path.extname(file.originalname)}`;
+        const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
+
+        // Ensure directory exists
+        const dir = path.dirname(newPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+
+        fs.renameSync(file.path, newPath);
+
+        await BeforeImage.create({
+          inboundId: parseInt(inboundId),
+          inboundBundleId: inboundBundle.inboundBundleId,
+          imageUrl: `uploads/img/repacked/${uniqueName}`,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+      }
+
+      // Process after images
+      for (const file of afterFiles) {
+        const uniqueName = `${jobNo}-${lotNo}-${noOfBundle}-after-${uuidv4()}${path.extname(file.originalname)}`;
+        const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
+
+        // Ensure directory exists
+        const dir = path.dirname(newPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+
+        fs.renameSync(file.path, newPath);
+
+        await AfterImage.create({
+          inboundId: parseInt(inboundId),
+          inboundBundleId: inboundBundle.inboundBundleId,
+          imageUrl: `uploads/img/repacked/${uniqueName}`,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        });
+      }
+    }
+
+    // Return the saved bundle with images
+    const savedBundle = await InboundBundle.findByPk(inboundBundle.inboundBundleId, {
+      include: [
+        {
+          model: BeforeImage,
+          as: 'beforeImages'
+        },
+        {
+          model: AfterImage,
+          as: 'afterImages'
+        }
+      ]
+    });
+
     res.status(200).json({
-      exists: count > 0,
-      count: count,
-      bundleIds: result[0].bundleIds || []
+      message: 'Bundle repack saved successfully',
+      data: savedBundle
     });
 
   } catch (error) {
-    console.error("Error in check-inbound-bundles route:", error);
-    res.status(500).json({ 
-      error: "Internal Server Error",
-      details: error.message 
+    console.error('Error in bundle repack:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
     });
   }
 });
 
-// GET route to fetch existing bundle data for editing
-router.get("/inbound-bundles/:inboundId", async (req, res) => {
+// GET /api/bundle-repack/:inboundId/:bundleNo
+router.get('/bundle-repack/:inboundId/:bundleNo', async (req, res) => {
   try {
-    const { inboundId } = req.params;
+    const { inboundId, bundleNo } = req.params;
 
-    if (!inboundId) {
-      return res.status(400).json({ 
-        error: "inboundId is required" 
-      });
-    }
-
-    const query = `
-      SELECT 
-        "inboundBundleId",
-        "inboundId",
-        "bundleNo",
-        "weight",
-        "meltNo",
-        "isOutbounded",
-        "isRelabelled",
-        "isRebundled",
-        "isRepackProvided",
-        "noOfMetalStrap",
-        "repackDescription",
-        "beforeImagesId",
-        "afterImagesId",
-        "createdAt",
-        "updatedAt"
-      FROM public.inboundbundles 
-      WHERE "inboundId" = :inboundId
-      ORDER BY "bundleNo"
-    `;
-
-    const result = await db.sequelize.query(query, {
-      replacements: { inboundId },
-      type: db.sequelize.QueryTypes.SELECT,
+    const bundle = await InboundBundle.findOne({
+      where: {
+        inboundId: parseInt(inboundId),
+        bundleNo: parseInt(bundleNo)
+      },
+      include: [
+        {
+          model: BeforeImage,
+          as: 'beforeImages'
+        },
+        {
+          model: AfterImage,
+          as: 'afterImages'
+        },
+        {
+          model: Inbound,
+          as: 'inbound',
+          attributes: ['jobNo', 'lotNo']
+        }
+      ]
     });
 
-    res.status(200).json({
-      success: true,
-      data: result,
-      count: result.length
-    });
-
-  } catch (error) {
-    console.error("Error in get inbound-bundles route:", error);
-    res.status(500).json({ 
-      error: "Internal Server Error",
-      details: error.message 
-    });
-  }
-});
-
-// GET route to fetch a specific bundle by inboundBundleId
-router.get("/inbound-bundle/:inboundBundleId", async (req, res) => {
-  try {
-    const { inboundBundleId } = req.params;
-
-    if (!inboundBundleId) {
-      return res.status(400).json({ 
-        error: "inboundBundleId is required" 
-      });
-    }
-
-    const query = `
-      SELECT 
-        "inboundBundleId",
-        "inboundId",
-        "bundleNo",
-        "weight",
-        "meltNo",
-        "isOutbounded",
-        "isRelabelled",
-        "isRebundled",
-        "isRepackProvided",
-        "noOfMetalStrap",
-        "repackDescription",
-        "beforeImagesId",
-        "afterImagesId",
-        "createdAt",
-        "updatedAt"
-      FROM public.inboundbundles 
-      WHERE "inboundBundleId" = :inboundBundleId
-    `;
-
-    const result = await db.sequelize.query(query, {
-      replacements: { inboundBundleId },
-      type: db.sequelize.QueryTypes.SELECT,
-    });
-
-    if (result.length === 0) {
-      return res.status(404).json({
-        error: "Bundle not found",
-        message: `No bundle found with inboundBundleId: ${inboundBundleId}`
-      });
+    if (!bundle) {
+      return res.status(404).json({ error: 'Bundle not found' });
     }
 
     res.status(200).json({
-      success: true,
-      data: result[0]
+      message: 'Bundle found',
+      data: bundle
     });
 
   } catch (error) {
-    console.error("Error in get inbound-bundle route:", error);
-    res.status(500).json({ 
-      error: "Internal Server Error",
-      details: error.message 
+    console.error('Error fetching bundle:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
     });
   }
 });

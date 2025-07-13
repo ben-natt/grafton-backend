@@ -1,162 +1,323 @@
-const db = require("../database");
+const { sequelize, DataTypes } = require('../database');
 
-// Modal
-const saveInboundBundleData = async (bundleData) => {
-  try {
-    // Check if inboundBundleId exists in inboundbundles table
-    if (bundleData.inboundBundleId) {
-      // Update existing record by inboundBundleId
-      const existingBundleQuery = `
-        SELECT "inboundBundleId", "inboundId", "bundleNo"
-        FROM public.inboundbundles 
-        WHERE "inboundBundleId" = :inboundBundleId
-      `;
+const models = {};
 
-      const existingBundle = await db.sequelize.query(existingBundleQuery, {
-        replacements: { inboundBundleId: bundleData.inboundBundleId },
-        type: db.sequelize.QueryTypes.SELECT,
-      });
-
-      if (existingBundle.length > 0) {
-        // Update existing record
-        const updateQuery = `
-          UPDATE public.inboundbundles 
-          SET 
-            "isRelabelled" = :isRelabelled,
-            "isRebundled" = :isRebundled,
-            "isRepackProvided" = :isRepackProvided,
-            "noOfMetalStrap" = :noOfMetalStrap,
-            "repackDescription" = :repackDescription,
-            "beforeImagesId" = :beforeImagesId,
-            "afterImagesId" = :afterImagesId,
-            "meltNo" = :meltNo,
-            "updatedAt" = NOW()
-          WHERE "inboundBundleId" = :inboundBundleId
-        `;
-
-        await db.sequelize.query(updateQuery, {
-          replacements: {
-            inboundBundleId: bundleData.inboundBundleId,
-            isRelabelled: bundleData.isRelabelled || false,
-            isRebundled: bundleData.isRebundled || false,
-            isRepackProvided: bundleData.isRepackProvided || false,
-            noOfMetalStrap: bundleData.noOfMetalStrap || null,
-            repackDescription: bundleData.repackDescription || null,
-            beforeImagesId: bundleData.beforeImagesId || null,
-            afterImagesId: bundleData.afterImagesId || null,
-            meltNo: bundleData.meltNo || null,
-          },
-          type: db.sequelize.QueryTypes.UPDATE,
-        });
-
-        console.log(`Updated bundle with inboundBundleId: ${bundleData.inboundBundleId}`);
-        return {
-          success: true,
-          action: 'updated',
-          recordsAffected: 1,
-          inboundBundleId: bundleData.inboundBundleId,
-          message: `Successfully updated bundle with ID: ${bundleData.inboundBundleId}`
-        };
-
-      } else {
-        throw new Error(`Inbound bundle not found for inboundBundleId: ${bundleData.inboundBundleId}`);
-      }
-
-    } else {
-      // Create new record - need inboundId and bundleNo
-      if (!bundleData.inboundId || !bundleData.bundleNo) {
-        throw new Error('inboundId and bundleNo are required for creating new bundle');
-      }
-
-      // Check if inbound exists
-      const inboundQuery = `
-        SELECT "inboundId", "noOfBundle", "netWeight"
-        FROM public.inbounds 
-        WHERE "inboundId" = :inboundId
-      `;
-
-      const inboundRecord = await db.sequelize.query(inboundQuery, {
-        replacements: { inboundId: bundleData.inboundId },
-        type: db.sequelize.QueryTypes.SELECT,
-      });
-
-      if (inboundRecord.length === 0) {
-        throw new Error(`Inbound record not found for inboundId: ${bundleData.inboundId}`);
-      }
-
-      // Check if bundle number already exists
-      const bundleCheckQuery = `
-        SELECT "inboundBundleId"
-        FROM public.inboundbundles 
-        WHERE "inboundId" = :inboundId AND "bundleNo" = :bundleNo
-      `;
-
-      const existingBundleNo = await db.sequelize.query(bundleCheckQuery, {
-        replacements: { 
-          inboundId: bundleData.inboundId, 
-          bundleNo: bundleData.bundleNo 
-        },
-        type: db.sequelize.QueryTypes.SELECT,
-      });
-
-      if (existingBundleNo.length > 0) {
-        throw new Error(`Bundle number ${bundleData.bundleNo} already exists for inboundId: ${bundleData.inboundId}`);
-      }
-
-      const { noOfBundle, netWeight } = inboundRecord[0];
-      const weightPerBundle = bundleData.weight || (netWeight / noOfBundle);
-
-      // Create single bundle record
-      const insertQuery = `
-        INSERT INTO public.inboundbundles 
-        ("inboundId", "bundleNo", "weight", "meltNo", "isOutbounded", "isRelabelled", 
-         "isRebundled", "isRepackProvided", "noOfMetalStrap", "repackDescription", 
-         "beforeImagesId", "afterImagesId", "createdAt", "updatedAt")
-        VALUES 
-        (:inboundId, :bundleNo, :weight, :meltNo, :isOutbounded, :isRelabelled, 
-         :isRebundled, :isRepackProvided, :noOfMetalStrap, :repackDescription, 
-         :beforeImagesId, :afterImagesId, :createdAt, :updatedAt)
-        RETURNING "inboundBundleId"
-      `;
-
-      const result = await db.sequelize.query(insertQuery, {
-        replacements: {
-          inboundId: bundleData.inboundId,
-          bundleNo: bundleData.bundleNo,
-          weight: weightPerBundle,
-          meltNo: bundleData.meltNo || null,
-          isOutbounded: false,
-          isRelabelled: bundleData.isRelabelled || false,
-          isRebundled: bundleData.isRebundled || false,
-          isRepackProvided: bundleData.isRepackProvided || false,
-          noOfMetalStrap: bundleData.noOfMetalStrap || null,
-          repackDescription: bundleData.repackDescription || null,
-          beforeImagesId: bundleData.beforeImagesId || null,
-          afterImagesId: bundleData.afterImagesId || null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        type: db.sequelize.QueryTypes.INSERT,
-      });
-
-      const newInboundBundleId = result[0][0].inboundBundleId;
-
-      console.log(`Created new bundle with inboundBundleId: ${newInboundBundleId}`);
-      return {
-        success: true,
-        action: 'created',
-        recordsAffected: 1,
-        inboundBundleId: newInboundBundleId,
-        message: `Successfully created bundle with ID: ${newInboundBundleId}`
-      };
-    }
-
-  } catch (error) {
-    console.error("Error in saveInboundBundleData:", error);
-    throw error;
+// Inbound Model
+models.Inbound = sequelize.define('Inbound', {
+  inboundId: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  jobNo: {
+    type: DataTypes.STRING(16),
+    allowNull: false
+  },
+  lotNo: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  noOfBundle: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  barcodeNo: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  commodityId: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  shapeId: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  exLmeWarehouseId: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  exWarehouseWarrant: {
+    type: DataTypes.STRING(20),
+    allowNull: false
+  },
+  inboundWarehouseId: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  grossWeight: {
+    type: DataTypes.DOUBLE,
+    allowNull: false
+  },
+  netWeight: {
+    type: DataTypes.DOUBLE,
+    allowNull: false
+  },
+  actualWeight: {
+    type: DataTypes.DOUBLE,
+    allowNull: true
+  },
+  isWeighted: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true
+  },
+  isRelabelled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true
+  },
+  isRebundled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true
+  },
+  noOfMetalStraps: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  isRepackProvided: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true
+  },
+  repackDescription: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  userId: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  brandId: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  inboundDate: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  exWarehouseLot: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  scheduleInboundDate: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  exWarehouseLocationId: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: false
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: false
   }
-};
+}, {
+  tableName: 'inbounds',
+  timestamps: true
+});
 
-module.exports = {
-  saveInboundBundleData,
-};
+// InboundBundle Model
+models.InboundBundle = sequelize.define('InboundBundle', {
+  inboundBundleId: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  inboundId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: 'inbounds',
+      key: 'inboundId'
+    }
+  },
+  bundleNo: {
+    type: DataTypes.INTEGER,
+    allowNull: false
+  },
+  weight: {
+    type: DataTypes.DOUBLE,
+    allowNull: false
+  },
+  meltNo: {
+    type: DataTypes.STRING(20),
+    allowNull: true
+  },
+  isOutbounded: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  isRelabelled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  isRebundled: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  isRepackProvided: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  noOfMetalStrap: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  repackDescription: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: false
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: false
+  }
+}, {
+  tableName: 'inboundbundles',
+  timestamps: true
+});
+
+// BeforeImage Model
+models.BeforeImage = sequelize.define('BeforeImage', {
+  beforeImagesId: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  inboundId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: 'inbounds',
+      key: 'inboundId'
+    }
+  },
+  imageUrl: {
+    type: DataTypes.STRING(255),
+    allowNull: false
+  },
+  inboundBundleId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'inboundbundles',
+      key: 'inboundBundleId'
+    }
+  },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: false
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: false
+  }
+}, {
+  tableName: 'beforeimages',
+  timestamps: true
+});
+
+// AfterImage Model
+models.AfterImage = sequelize.define('AfterImage', {
+  afterImagesId: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  inboundId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: 'inbounds',
+      key: 'inboundId'
+    }
+  },
+  imageUrl: {
+    type: DataTypes.STRING(255),
+    allowNull: false
+  },
+  inboundBundleId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'inboundbundles',
+      key: 'inboundBundleId'
+    }
+  },
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: false
+  },
+  updatedAt: {
+    type: DataTypes.DATE,
+    allowNull: false
+  }
+}, {
+  tableName: 'afterimages',
+  timestamps: true
+});
+
+// Define Associations
+models.Inbound.hasMany(models.InboundBundle, {
+  foreignKey: 'inboundId',
+  as: 'bundles'
+});
+
+models.InboundBundle.belongsTo(models.Inbound, {
+  foreignKey: 'inboundId',
+  as: 'inbound'
+});
+
+models.Inbound.hasMany(models.BeforeImage, {
+  foreignKey: 'inboundId',
+  as: 'beforeImages'
+});
+
+models.BeforeImage.belongsTo(models.Inbound, {
+  foreignKey: 'inboundId',
+  as: 'inbound'
+});
+
+models.Inbound.hasMany(models.AfterImage, {
+  foreignKey: 'inboundId',
+  as: 'afterImages'
+});
+
+models.AfterImage.belongsTo(models.Inbound, {
+  foreignKey: 'inboundId',
+  as: 'inbound'
+});
+
+models.InboundBundle.hasMany(models.BeforeImage, {
+  foreignKey: 'inboundBundleId',
+  as: 'beforeImages'
+});
+
+models.BeforeImage.belongsTo(models.InboundBundle, {
+  foreignKey: 'inboundBundleId',
+  as: 'inboundBundle'
+});
+
+models.InboundBundle.hasMany(models.AfterImage, {
+  foreignKey: 'inboundBundleId',
+  as: 'afterImages'
+});
+
+models.AfterImage.belongsTo(models.InboundBundle, {
+  foreignKey: 'inboundBundleId',
+  as: 'inboundBundle'
+});
+
+// Add sequelize instance to models
+models.sequelize = sequelize;
+
+module.exports = models;
