@@ -22,7 +22,6 @@ router.get("/outbound-summary", async (req, res) => {
   }
 });
 
-// MODIFIED: /inbound-records now handles pagination and filtering
 router.get("/inbound-records", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -35,11 +34,18 @@ router.get("/inbound-records", async (req, res) => {
       jobNo: req.query.jobNo,
       brand: req.query.brand,
       search: req.query.search,
+      sortBy: req.query.sortBy,
+      sortOrder: req.query.sortOrder,
+      // **FIX: Added date range filters**
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
     };
     // Remove null/undefined filters so we don't pass them to the model
     Object.keys(filters).forEach(
       (key) =>
-        (filters[key] === undefined || filters[key] === null) &&
+        (filters[key] === undefined ||
+          filters[key] === null ||
+          filters[key] === "") &&
         delete filters[key]
     );
 
@@ -62,7 +68,6 @@ router.get("/inbound-records", async (req, res) => {
   }
 });
 
-// MODIFIED: /outbound-records now handles pagination and filtering
 router.get("/outbound-records", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -74,10 +79,17 @@ router.get("/outbound-records", async (req, res) => {
       jobNo: req.query.jobNo,
       brand: req.query.brand,
       search: req.query.search,
+      sortBy: req.query.sortBy,
+      sortOrder: req.query.sortOrder,
+      // **FIX: Added date range filters**
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
     };
     Object.keys(filters).forEach(
       (key) =>
-        (filters[key] === undefined || filters[key] === null) &&
+        (filters[key] === undefined ||
+          filters[key] === null ||
+          filters[key] === "") &&
         delete filters[key]
     );
 

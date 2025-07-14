@@ -1,20 +1,22 @@
 const db = require("../database");
+
 //Display in inbound summary card
 const getInboundSummary = async () => {
   try {
     const query = `
         SELECT 
-    c."commodityName" AS "Metal",
-    SUM(i."noOfBundle") AS "Bundles",
-    COUNT(DISTINCT i."inboundId") AS "Lots",
-    s."shapeName" AS "Shape",
-    SUM(i."netWeight") AS "totalWeight"
+            c."commodityName" AS "Metal",
+            SUM(i."noOfBundle") AS "Bundles",
+            COUNT(DISTINCT i."inboundId") AS "Lots",
+            s."shapeName" AS "Shape",
+            SUM(i."netWeight") AS "totalWeight"
         FROM 
             public.inbounds i
         JOIN 
             public.commodities c ON i."commodityId" = c."commodityId"
         JOIN 
             public.shapes s ON i."shapeId" = s."shapeId"
+        WHERE i."inboundDate" IS NOT NULL
         GROUP BY 
             c."commodityName", s."shapeName"
         ORDER BY 
@@ -36,13 +38,14 @@ const getOutboundSummary = async () => {
   try {
     const query = `
           SELECT 
-        o."commodity" AS "Metal",
-        SUM(o."noOfBundle") AS "Bundles",
-        COUNT(DISTINCT o."outboundTransactionId") AS "Lots",
-        o."shape" AS "Shape",
-        SUM(o."netWeight") AS "totalWeight"
+            o."commodity" AS "Metal",
+            SUM(o."noOfBundle") AS "Bundles",
+            COUNT(DISTINCT o."outboundTransactionId") AS "Lots",
+            o."shape" AS "Shape",
+            SUM(o."netWeight") AS "totalWeight"
         FROM 
             public.outboundtransactions o
+        WHERE o."releaseDate" IS NOT NULL
         GROUP BY 
             o."commodity", o."shape"
         ORDER BY 
@@ -79,18 +82,26 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       replacements.jobNo = `%${filters.jobNo}%`;
     }
     if (filters.brand) {
-      // Assuming brand filter can be a single value for now
       whereClauses.push(`b."brandName" ILIKE :brand`);
       replacements.brand = `%${filters.brand}%`;
     }
+    // **FIX: Added date range filter**
+    if (filters.startDate && filters.endDate) {
+      whereClauses.push(`i."inboundDate" BETWEEN :startDate AND :endDate`);
+      replacements.startDate = filters.startDate;
+      replacements.endDate = filters.endDate;
+    }
+
     if (filters.search) {
       whereClauses.push(`(
         i."jobNo" ILIKE :searchQuery OR
-        i."lotNo" ILIKE :searchQuery OR
+        i."lotNo"::text ILIKE :searchQuery OR
+        i."noOfBundle"::text ILIKE :searchQuery OR
         c."commodityName" ILIKE :searchQuery OR
         b."brandName" ILIKE :searchQuery OR
         s."shapeName" ILIKE :searchQuery OR
-        u."username" ILIKE :searchQuery
+        u."username" ILIKE :searchQuery OR
+        i."exWarehouseLot" ILIKE :searchQuery
       )`);
       replacements.searchQuery = `%${filters.search}%`;
     }
@@ -98,16 +109,36 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
     const whereString =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
+    // --- SORTING LOGIC ---
+    const sortableColumns = {
+      Date: 'i."inboundDate"',
+      "Job No": 'i."jobNo"',
+      "Lot No": 'i."lotNo"',
+      "Ex-W Lot": 'i."exWarehouseLot"',
+      Metal: 'c."commodityName"',
+      Brand: 'b."brandName"',
+      Shape: 's."shapeName"',
+      Qty: 'i."noOfBundle"',
+      "Scheduled By": 'u."username"',
+    };
+
+    let orderByClause = 'ORDER BY i."inboundDate" DESC NULLS LAST'; // Default sort
+    if (filters.sortBy && sortableColumns[filters.sortBy]) {
+      const sortColumn = sortableColumns[filters.sortBy];
+      const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
+      orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
+    }
+
     const baseQuery = `
         FROM 
             public.inbounds i 
-        JOIN 
+        LEFT JOIN 
             public.brands b ON b."brandId" = i."brandId"
-        JOIN 
+        LEFT JOIN 
             public.commodities c ON c."commodityId" = i."commodityId"
-        JOIN 
+        LEFT JOIN 
             public.shapes s ON s."shapeId" = i."shapeId"
-        JOIN 
+        LEFT JOIN 
             public.users u ON u.userid = i."userId"
         ${whereString}
     `;
@@ -133,7 +164,7 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
             i."noOfBundle" AS "Qty", 
             u."username" AS "Scheduled By"
         ${baseQuery}
-        ORDER BY i."inboundDate" DESC
+        ${orderByClause}
         LIMIT :limit OFFSET :offset;
     `;
     const data = await db.sequelize.query(dataQuery, {
@@ -171,14 +202,23 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       whereClauses.push(`o."brands" ILIKE :brand`);
       replacements.brand = `%${filters.brand}%`;
     }
+    // **FIX: Added date range filter**
+    if (filters.startDate && filters.endDate) {
+      // **FIX: Use the correct date column 'releaseDate'**
+      whereClauses.push(`o."releaseDate" BETWEEN :startDate AND :endDate`);
+      replacements.startDate = filters.startDate;
+      replacements.endDate = filters.endDate;
+    }
     if (filters.search) {
       whereClauses.push(`(
                 o."jobNo" ILIKE :searchQuery OR
-                o."lotNo" ILIKE :searchQuery OR
+                o."lotNo"::text ILIKE :searchQuery OR
+                o."noOfBundle"::text ILIKE :searchQuery OR
                 o."commodity" ILIKE :searchQuery OR
                 o."brands" ILIKE :searchQuery OR
                 o."shape" ILIKE :searchQuery OR
-                u."username" ILIKE :searchQuery
+                u."username" ILIKE :searchQuery OR
+                o."exWarehouseLot" ILIKE :searchQuery
             )`);
       replacements.searchQuery = `%${filters.search}%`;
     }
@@ -186,13 +226,32 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
     const whereString =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
+    // --- SORTING LOGIC ---
+    // **FIX: Use correct date column 'releaseDate' and other columns from 'outboundtransactions'**
+    const sortableColumns = {
+      Date: 'o."releaseDate"',
+      "Job No": 'o."jobNo"',
+      "Lot No": 'o."lotNo"',
+      "Ex-W Lot": 'o."exWarehouseLot"',
+      Metal: 'o."commodity"',
+      Brand: 'o."brands"',
+      Shape: 'o."shape"',
+      Qty: 'o."noOfBundle"',
+      "Scheduled By": 'u."username"',
+    };
+
+    let orderByClause = 'ORDER BY o."releaseDate" DESC NULLS LAST'; // Default sort
+    if (filters.sortBy && sortableColumns[filters.sortBy]) {
+      const sortColumn = sortableColumns[filters.sortBy];
+      const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
+      orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
+    }
+
     const baseQuery = `
             FROM 
                 public.outboundtransactions o
             LEFT JOIN
-                public.scheduleoutbounds so ON so."scheduleOutboundId" = o."scheduleOutboundId"
-            LEFT JOIN 
-                public.users u ON u.userid = so."userId"
+                public.users u ON u.userid = o."scheduledBy"
             ${whereString}
         `;
 
@@ -207,7 +266,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
     const dataQuery = `
             SELECT 
                 o."outboundTransactionId" AS id,
-                TO_CHAR(o."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
                 o."jobNo" AS "Job No",
                 o."lotNo" AS "Lot No",
                 o."exWarehouseLot" AS "Ex-W Lot",
@@ -217,7 +276,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
                 o."noOfBundle" AS "Qty",
                 u."username" AS "Scheduled By"
             ${baseQuery}
-            ORDER BY o."outboundedDate" DESC
+            ${orderByClause}
             LIMIT :limit OFFSET :offset;
         `;
     const data = await db.sequelize.query(dataQuery, {
@@ -240,8 +299,13 @@ const getFilterOptions = async () => {
       'SELECT DISTINCT "shapeName" FROM public.shapes WHERE "shapeName" IS NOT NULL ORDER BY "shapeName";';
     const commoditiesQuery =
       'SELECT DISTINCT "commodityName" FROM public.commodities WHERE "commodityName" IS NOT NULL ORDER BY "commodityName";';
-    const jobNosQuery =
-      'SELECT DISTINCT "jobNo" FROM public.inbounds WHERE "jobNo" IS NOT NULL ORDER BY "jobNo";';
+    // **FIX: Query both inbound and outbound tables for job numbers for a complete list**
+    const jobNosQuery = `
+      SELECT "jobNo" FROM public.inbounds WHERE "jobNo" IS NOT NULL
+      UNION
+      SELECT "jobNo" FROM public.outboundtransactions WHERE "jobNo" IS NOT NULL
+      ORDER BY "jobNo";
+    `;
 
     const [brands, shapes, commodities, jobNos] = await Promise.all([
       db.sequelize.query(brandsQuery, { type: db.sequelize.QueryTypes.SELECT }),
@@ -267,7 +331,6 @@ const getFilterOptions = async () => {
   }
 };
 
-// MODIFICATION: Added 'ProcessedBy' user and ensured all fields are present.
 const getInboundRecordByInboundId = async (inboundId) => {
   try {
     const query = `
@@ -281,8 +344,7 @@ const getInboundRecordByInboundId = async (inboundId) => {
                 i."grossWeight" AS "GrossWeight", i."netWeight" AS "NetWeight", i."actualWeight" AS "ActualWeight",
                 i."isRebundled" AS "IsRebundled", i."isRepackProvided" AS "IsRepackProvided",
                 u_scheduler."username" AS "ScheduledBy",
-                -- Assuming there is no 'processedBy' for inbound, returning NULL
-                NULL AS "ProcessedBy",
+                u_processor."username" AS "ProcessedBy",
                 i."updatedAt" AS "UpdatedAt"
             FROM public.inbounds i
             LEFT JOIN public.brands b ON b."brandId" = i."brandId"
@@ -292,6 +354,8 @@ const getInboundRecordByInboundId = async (inboundId) => {
             LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
             LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
             LEFT JOIN public.users u_scheduler ON u_scheduler.userid = i."userId"
+            -- **FIX: Assuming the user who created the record is the processor**
+            LEFT JOIN public.users u_processor ON u_processor.userid = i."userId"
             WHERE i."inboundId" = :inboundId
             LIMIT 1;
         `;
@@ -308,7 +372,6 @@ const getInboundRecordByInboundId = async (inboundId) => {
   }
 };
 
-// MODIFICATION: Corrected user joins to fetch both scheduler and processor.
 const getOutboundRecordByOutboundId = async (outboundId) => {
   try {
     const query = `
@@ -317,7 +380,8 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
                 o."outboundTransactionId", o."commodity" AS "Commodity", o."brands" AS "Brand",
                 o."shape" AS "Shape", o."exLmeWarehouse" AS "ExLMEWarehouse",
                 o."exWarehouseLot" AS "ExWarehouseLot", o."releaseWarehouse" AS "ReleaseWarehouse",
-                so."releaseDate" AS "ReleaseDate", so."createdAt" AS "ScheduleOutboundDate",
+                o."releaseDate" AS "ReleaseDate", 
+                o."createdAt" AS "ScheduleOutboundDate",
                 o."exportDate" AS "ExportDate", o."deliveyDate" AS "DeliveryDate",
                 o."netWeight" AS "TotalReleaseWeight",
                 o."storageReleaseLocation" AS "StorageReleaseLocation", o."transportVendor" AS "TransportVendor",
@@ -325,8 +389,7 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
                 processor."username" AS "ProcessedBy",
                 o."updatedAt" AS "UpdatedAt"
             FROM public.outboundtransactions o
-            LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = o."scheduleOutboundId"
-            LEFT JOIN public.users scheduler ON scheduler.userid = so."userId"
+            LEFT JOIN public.users scheduler ON scheduler.userid = o."scheduledBy"
             LEFT JOIN public.users processor ON processor.userid = o."outboundedBy"
             WHERE o."outboundTransactionId" = :outboundId
             LIMIT 1;
@@ -348,21 +411,20 @@ const getAllScheduleInbound = async () => {
   try {
     const query = `
             SELECT
-             l."lotId" AS id,
-             TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-             l."jobNo" AS "Job No",
-             l."lotNo" AS "Lot No",
-             l."exWarehouseLot" AS  "Ex-W Lot",
-        l."commodity" AS "Metal",
-        l."brand"  AS "Brand",
-        l."shape"  AS "Shape",
-        l."expectedBundleCount" AS "Qty", 
-        u."username" AS "Scheduled By"
-            from public.lot l 
+              l."lotId" AS id,
+              TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+              l."jobNo" AS "Job No",
+              l."lotNo" AS "Lot No",
+              l."exWarehouseLot" AS  "Ex-W Lot",
+              l."commodity" AS "Metal",
+              l."brand"  AS "Brand",
+              l."shape"  AS "Shape",
+              l."expectedBundleCount" AS "Qty", 
+              u."username" AS "Scheduled By"
+            FROM public.lot l 
             JOIN public.scheduleinbounds i ON l."scheduleInboundId" = i."scheduleInboundId"
             LEFT JOIN public.users u ON i."userId" = u.userid
-        ORDER BY i."inboundDate" DESC
-
+            ORDER BY i."inboundDate" DESC NULLS LAST
         `;
     const result = await db.sequelize.query(query, {
       type: db.sequelize.QueryTypes.SELECT,
@@ -378,24 +440,25 @@ const getAllScheduleInbound = async () => {
 const getAllScheduleOutbound = async () => {
   try {
     const query = `
-            SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-        si."inboundId" AS id,
-		i."jobNo" AS "Job No",
-        i."lotNo" AS "Lot No",
-		i."exWarehouseLot" AS  "Ex-W Lot",
-		c."commodityName" AS "Metal",
-		b."brandName"  AS "Brand",
-		s."shapeName" AS "Shape",
-		i."noOfBundle" AS "Qty",
-		u."username" AS "Scheduled By"
-		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
-		ON o."scheduleOutboundId" = si."scheduleOutboundId"
-		LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
-		LEFT JOIN public.commodities c on i."commodityId" = c."commodityId"
-		LEFT JOIN public.brands b on i."brandId" = b."brandId"
-		LEFT JOIN public.shapes s on i."shapeId" = s."shapeId"
-		LEFT JOIN public.users u ON o."userId" = u.userid
-        ORDER BY o."releaseDate" DESC
+            SELECT 
+                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+                si."inboundId" AS id,
+                i."jobNo" AS "Job No",
+                i."lotNo" AS "Lot No",
+                i."exWarehouseLot" AS  "Ex-W Lot",
+                c."commodityName" AS "Metal",
+                b."brandName"  AS "Brand",
+                s."shapeName" AS "Shape",
+                i."noOfBundle" AS "Qty",
+                u."username" AS "Scheduled By"
+            FROM public.scheduleoutbounds o 
+            JOIN public.selectedinbounds si ON o."scheduleOutboundId" = si."scheduleOutboundId"
+            LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
+            LEFT JOIN public.commodities c on i."commodityId" = c."commodityId"
+            LEFT JOIN public.brands b on i."brandId" = b."brandId"
+            LEFT JOIN public.shapes s on i."shapeId" = s."shapeId"
+            LEFT JOIN public.users u ON o."userId" = u.userid
+            ORDER BY o."releaseDate" DESC NULLS LAST
         `;
     const result = await db.sequelize.query(query, {
       type: db.sequelize.QueryTypes.SELECT,
@@ -408,36 +471,35 @@ const getAllScheduleOutbound = async () => {
   }
 };
 
-// MODIFICATION: Added 'ProcessedBy' user and ensured all fields are present.
 const getScheduleInboundRecordByLotId = async (lotId) => {
   try {
     const query = `
            SELECT
-    l."jobNo" AS "JobNo",
-    l."lotNo" AS "LotNo",
-    l."expectedBundleCount" AS "NoOfBundle",
-    l."lotId",
-    l."commodity" AS "Commodity",
-    l."brand" AS "Brand",
-    l."shape" AS "Shape",
-    l."exLmeWarehouse" AS "ExLMEWarehouse",
-    l."exWarehouseLot" AS "ExWarehouseLot",
-    l."exWarehouseWarrant" AS "ExWarehouseWarrant",
-    l."exWarehouseLocation" AS "ExWarehouseLocation",
-    l."inboundWarehouse" AS "InboundWarehouse",
-    TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "InboundDate",
-    TO_CHAR(si."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
-    l."grossWeight" AS "GrossWeight",
-    l."netWeight" AS "NetWeight",
-    l."actualWeight" AS "ActualWeight",
-    u."username" AS "ScheduledBy",
-    NULL AS "ProcessedBy",
-    TO_CHAR(l."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
-    FROM public.lot l
-    LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
-    LEFT JOIN public.users u ON u.userid = si."userId"
-    WHERE l."lotId" = :lotId
-    LIMIT 1;
+                l."jobNo" AS "JobNo",
+                l."lotNo" AS "LotNo",
+                l."expectedBundleCount" AS "NoOfBundle",
+                l."lotId",
+                l."commodity" AS "Commodity",
+                l."brand" AS "Brand",
+                l."shape" AS "Shape",
+                l."exLmeWarehouse" AS "ExLMEWarehouse",
+                l."exWarehouseLot" AS "ExWarehouseLot",
+                l."exWarehouseWarrant" AS "ExWarehouseWarrant",
+                l."exWarehouseLocation" AS "ExWarehouseLocation",
+                l."inboundWarehouse" AS "InboundWarehouse",
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "InboundDate",
+                TO_CHAR(si."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
+                l."grossWeight" AS "GrossWeight",
+                l."netWeight" AS "NetWeight",
+                l."actualWeight" AS "ActualWeight",
+                u."username" AS "ScheduledBy",
+                NULL AS "ProcessedBy",
+                TO_CHAR(l."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
+            FROM public.lot l
+            LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
+            LEFT JOIN public.users u ON u.userid = si."userId"
+            WHERE l."lotId" = :lotId
+            LIMIT 1;
         `;
 
     const result = await db.sequelize.query(query, {
@@ -457,35 +519,34 @@ const getScheduleOutboundRecordById = async (id) => {
     const query = `
           SELECT
                 i."jobNo" AS "JobNo", 
-				i."lotNo" AS "LotNo", 
-				i."noOfBundle" AS "NoOfBundle",
-				so."lotReleaseWeight" AS "LotReleaseWeight",
+                i."lotNo" AS "LotNo", 
+                i."noOfBundle" AS "NoOfBundle",
+                so."lotReleaseWeight" AS "LotReleaseWeight",
                 i."inboundId", 
-				c."commodityName" AS "Commodity", 
-				b."brandName" AS "Brand",
+                c."commodityName" AS "Commodity", 
+                b."brandName" AS "Brand",
                 s."shapeName" AS "Shape", 
-				exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
+                exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
                 i."exWarehouseLot" AS "ExWarehouseLot",
-				i."exWarehouseWarrant" AS "ExWarehouseWarrant",
-				so."releaseWarehouse" AS "ReleaseWarehouse",
-				TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleOutboundDate",
-				TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
-				TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
-				TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
-				i."netWeight" AS "TotalReleaseWeight",
-				so."storageReleaseLocation" AS "StorageReleaseLocation",
-				so."transportVendor" AS "TransportVendor",
-				scheduler."username" AS "ScheduledBy",
-				TO_CHAR(so."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
-			FROM public.selectedinbounds selin
-			LEFT JOIN public.inbounds i ON i."inboundId" = selin."inboundId"
+                i."exWarehouseWarrant" AS "ExWarehouseWarrant",
+                so."releaseWarehouse" AS "ReleaseWarehouse",
+                TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleOutboundDate",
+                TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
+                TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
+                TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
+                i."netWeight" AS "TotalReleaseWeight",
+                so."storageReleaseLocation" AS "StorageReleaseLocation",
+                so."transportVendor" AS "TransportVendor",
+                scheduler."username" AS "ScheduledBy",
+                TO_CHAR(so."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
+            FROM public.selectedinbounds selin
+            LEFT JOIN public.inbounds i ON i."inboundId" = selin."inboundId"
             LEFT JOIN public.brands b ON b."brandId" = i."brandId"
             LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
             LEFT JOIN public.shapes s ON s."shapeId" = i."shapeId"
             LEFT JOIN public.exlmewarehouses exlme ON exlme."exLmeWarehouseId" = i."exLmeWarehouseId"
-			LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = selin."scheduleOutboundId"
+            LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = selin."scheduleOutboundId"
             LEFT JOIN public.users scheduler ON scheduler.userid = so."userId"
-            
             WHERE selin."inboundId" = :id
             LIMIT 1;
         `;
@@ -497,7 +558,7 @@ const getScheduleOutboundRecordById = async (id) => {
 
     return result;
   } catch (error) {
-    console.error("Error fetching outbound record by outboundId:", error);
+    console.error("Error fetching schedule outbound record by id:", error);
     throw error;
   }
 };
