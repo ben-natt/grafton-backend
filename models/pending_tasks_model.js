@@ -92,12 +92,16 @@ const pendingTasksUserId = async (jobNo) => {
       return {
         username: "",
         dateRange: "",
+        inboundDates: [], // Add empty array
       };
     }
 
     const dates = result.map((r) => new Date(r.inboundDate));
     const minDate = new Date(Math.min(...dates));
     const maxDate = new Date(Math.max(...dates));
+
+    // Get array of all inbound dates in YYYY-MM-DD format
+    const inboundDates = result.map((r) => r.inboundDate);
 
     let formattedRange;
 
@@ -128,10 +132,13 @@ const pendingTasksUserId = async (jobNo) => {
     console.log("Returning result:", {
       username: result[0].username || "",
       dateRange: formattedRange || "",
+      inboundDates: inboundDates, // Include the dates array
     });
+    
     return {
       username: result[0].username || "",
       dateRange: formattedRange || "",
+      inboundDates: inboundDates, // Return array of dates
     };
   } catch (error) {
     console.error("Error fetching pending tasks records:", error);

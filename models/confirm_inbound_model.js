@@ -21,7 +21,6 @@ const reportConfirmation = async (lotIds) => {
   }
 };
 
-
 // MODAL TO CHANGE THE LOT STATUS AND INSERT INTO INBOUND
 const insertInboundFromLots = async (lotsArray, userId) => {
   const transaction = await db.sequelize.transaction();
@@ -97,14 +96,18 @@ const insertInboundFromLots = async (lotsArray, userId) => {
 
       // Update lot status
       await db.sequelize.query(
-        `UPDATE public.lot SET status = 'Received', "updatedAt" = NOW()
-         WHERE "lotId" = :lotId`,
+        `UPDATE public.lot
+   SET status = 'Received',
+       "isConfirm" = true,
+       "updatedAt" = NOW()
+   WHERE "lotId" = :lotId`,
         {
           replacements: { lotId },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
         }
       );
+
 
       // Insert into inbounds
       const insertQuery = `

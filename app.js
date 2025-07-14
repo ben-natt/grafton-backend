@@ -18,6 +18,7 @@ const grnRouter = require("./routes/grn.router");
 
 const actualWeightRoutes = require("./routes/actualWeight.router");
 const repackRoutes = require("./routes/repack.router");
+const pendingTasksCrew = require("./routes/pendingtasks_crew.router");
 
 
 const { sequelize, DataTypes } = require("./database"); // Correctly import from database.js
@@ -44,6 +45,7 @@ app.use("/stocks", stockRoutes);
 app.use("/activities", activitiesRoutes);
 app.use("/actualWeight", actualWeightRoutes);
 app.use("/repack", repackRoutes);
+app.use("/pending-crew", pendingTasksCrew);
 
 
 
