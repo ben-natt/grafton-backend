@@ -308,22 +308,33 @@ const createGrnAndTransactions = async (formData) => {
   }
 };
 
+// --- MODIFIED FUNCTION ---
+// Now accepts grnPreviewImagePath to store the path to the generated image.
 const updateOutboundWithPdfDetails = async (
   outboundId,
   grnImagePath,
-  fileSize
+  fileSize,
+  grnPreviewImagePath // New parameter
 ) => {
   console.log(
-    `MODEL (updateOutboundWithPdfDetails): Updating outboundId ${outboundId} with path: ${grnImagePath}, size: ${fileSize}`
+    `MODEL (updateOutboundWithPdfDetails): Updating outboundId ${outboundId} with PDF path: ${grnImagePath}, Preview path: ${grnPreviewImagePath}, size: ${fileSize}`
   );
   try {
     const query = `
       UPDATE public.outbounds
-      SET "grnImage" = :grnImagePath, "fileSize" = :fileSize, "updatedAt" = NOW()
+      SET "grnImage" = :grnImagePath, 
+          "fileSize" = :fileSize, 
+          "grnPreviewImage" = :grnPreviewImagePath, -- Added field
+          "updatedAt" = NOW()
       WHERE "outboundId" = :outboundId;
     `;
     await db.sequelize.query(query, {
-      replacements: { outboundId, grnImagePath, fileSize },
+      replacements: {
+        outboundId,
+        grnImagePath,
+        fileSize,
+        grnPreviewImagePath,
+      }, // New replacement
       type: db.sequelize.QueryTypes.UPDATE,
     });
     console.log(

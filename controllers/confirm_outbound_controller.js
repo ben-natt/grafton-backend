@@ -163,41 +163,63 @@ const createGrnAndTransactions = async (req, res) => {
       JSON.stringify(pdfData, null, 2)
     );
 
-    console.log("CONTROLLER: 4. Calling PDF service to generate PDF...");
-    const { outputPath } = await pdfService.generateGrnPdf(pdfData);
     console.log(
-      `CONTROLLER: 4. PDF service successful. PDF generated at: ${outputPath}`
+      "CONTROLLER: 4. Calling PDF service to generate PDF and Image..."
+    );
+    const { outputPath, previewImagePath } = await pdfService.generateGrnPdf(
+      pdfData
+    );
+    console.log(
+      `CONTROLLER: 4. PDF service successful. PDF: ${outputPath}, Preview Image: ${previewImagePath}`
     );
 
     console.log("CONTROLLER: 5. Getting file size and updating database...");
     const stats = await fs.stat(outputPath);
     const fileSizeInBytes = stats.size;
-    const relativePath = path.relative(path.join(__dirname, ".."), outputPath);
+    const relativePdfPath = path.relative(
+      path.join(__dirname, ".."),
+      outputPath
+    );
+    const relativePreviewPath = path.relative(
+      path.join(__dirname, ".."),
+      previewImagePath
+    );
+
     console.log(
-      `CONTROLLER: 5. PDF path: ${relativePath}, Size: ${fileSizeInBytes} bytes.`
+      `CONTROLLER: 5. PDF path: ${relativePdfPath}, Preview path: ${relativePreviewPath}, Size: ${fileSizeInBytes} bytes.`
     );
 
     await outboundModel.updateOutboundWithPdfDetails(
       createdOutbound.outboundId,
-      relativePath,
-      fileSizeInBytes
+      relativePdfPath,
+      fileSizeInBytes,
+      relativePreviewPath
     );
-    console.log("CONTROLLER: 5. Database updated with PDF details.");
+    console.log(
+      "CONTROLLER: 5. Database updated with PDF and Preview Image details."
+    );
 
-    // --- MODIFICATION: Base64 Encoding and JSON Response ---
-    console.log("CONTROLLER: 6. Reading file and encoding to Base64...");
+    console.log("CONTROLLER: 6. Reading files and encoding to Base64...");
     const pdfBuffer = await fs.readFile(outputPath);
     const base64Pdf = pdfBuffer.toString("base64");
 
+    // --- NEW: Read preview image and encode it ---
+    const previewImageBuffer = await fs.readFile(previewImagePath);
+    const base64PreviewImage = previewImageBuffer.toString("base64");
+
+    console.log("CONTROLLER: 6. Base64 encoding complete.");
     console.log(
-      `CONTROLLER: 6. Base64 encoding complete. String length: ${base64Pdf.length}.`
+      `CONTROLLER: 6. Sending JSON response with Base64 PDF and Image data.`
     );
-    console.log(`CONTROLLER: 6. Sending JSON response with Base64 PDF data.`);
 
-    res.status(200).json({ pdf: base64Pdf });
+    // --- MODIFICATION: Return both PDF and image data ---
+    res.status(200).json({
+      pdf: base64Pdf,
+      previewImage: base64PreviewImage,
+    });
 
     console.log(
-      "--- CONTROLLER: createGrnAndTransactions finished successfully (Base64 sent). ---"
+      "--- CONTROLLER: createGrnAndTransactions finished successfully. ---"
     );
   } catch (error) {
     console.error("--- CONTROLLER ERROR in createGrnAndTransactions: ---");

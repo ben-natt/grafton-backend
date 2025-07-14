@@ -1,14 +1,11 @@
 const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
 const fs = require("fs").promises;
 const path = require("path");
+const poppler = require("pdf-poppler");
 
 async function generateGrnPdf(data) {
-  console.log("\n--- PDF SERVICE: Starting PDF generation ---");
   try {
-    console.log("PDF SERVICE: Received data:", JSON.stringify(data, null, 2));
-
     const templatePath = path.join(__dirname, "./grn/GRN Template.pdf");
-    console.log(`PDF SERVICE: Loading template from: ${templatePath}`);
     try {
       await fs.access(templatePath);
     } catch (error) {
@@ -22,7 +19,6 @@ async function generateGrnPdf(data) {
     const pdfTemplateBytes = await fs.readFile(templatePath);
     const pdfDoc = await PDFDocument.load(pdfTemplateBytes);
     const page = pdfDoc.getPages()[0];
-    console.log("PDF SERVICE: Template loaded and parsed successfully.");
 
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -134,16 +130,59 @@ async function generateGrnPdf(data) {
     console.log("PDF SERVICE: Saving PDF to bytes...");
     const pdfBytes = await pdfDoc.save();
     const grnDir = path.join(__dirname, "../grafton-backend/grn");
-    await fs.mkdir(grnDir, { recursive: true });
+    const previewDir = path.join(grnDir, "preview");
+    await fs.mkdir(previewDir, { recursive: true });
 
     const safeGrnNo = data.grnNo.replace(/[\/\\?%*:|"<>]/g, "_");
-    const outputPath = path.join(grnDir, `GRN_${safeGrnNo}.pdf`);
+    const pdfFileName = `GRN_${safeGrnNo}.pdf`;
+    const previewImageFileName = `GRN_${safeGrnNo}_preview`; // Base name for the image
+
+    const outputPath = path.join(grnDir, pdfFileName);
+    const previewImagePath = path.join(
+      previewDir,
+      `${previewImageFileName}.png`
+    );
 
     console.log(`PDF SERVICE: Writing PDF file to: ${outputPath}`);
     await fs.writeFile(outputPath, pdfBytes);
 
     console.log("--- PDF SERVICE: PDF generation complete. ---");
-    return { pdfBytes, outputPath };
+
+    // --- NEW: Generate Preview Image ---
+    console.log(`PDF SERVICE: Generating preview image for ${outputPath}`);
+    let opts = {
+      format: "png",
+      out_dir: previewDir,
+      out_prefix: previewImageFileName,
+      page: 1, // Explicitly convert only the first page
+      singleFile: true, // Prevent adding the page number suffix
+    };
+
+    await poppler.convert(outputPath, opts);
+
+    // Rename the generated file if it has a '-1' suffix
+    const generatedImagePath = path.join(
+      previewDir,
+      `${previewImageFileName}-1.png`
+    );
+    if (
+      await fs
+        .access(generatedImagePath)
+        .then(() => true)
+        .catch(() => false)
+    ) {
+      await fs.rename(generatedImagePath, previewImagePath);
+      console.log(
+        `PDF SERVICE: Renamed ${generatedImagePath} to ${previewImagePath}`
+      );
+    }
+
+    console.log(`PDF SERVICE: Preview image generated at ${previewImagePath}`);
+    // --- END NEW ---
+
+    console.log("--- PDF SERVICE: PDF and Image generation complete. ---");
+    // --- MODIFICATION: Return both PDF and image paths ---
+    return { pdfBytes, outputPath, previewImagePath };
   } catch (error) {
     console.error("--- PDF SERVICE FATAL ERROR during PDF generation: ---");
     console.error(error);

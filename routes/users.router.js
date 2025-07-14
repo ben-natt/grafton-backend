@@ -207,7 +207,7 @@ router.post("/login", async (req, res) => {
     const token = jwt.sign(
       { userid: user.userid, email: user.email }, // Payload for JWT
       process.env.JWT_SECRET, // Secret key from environment variables
-      { expiresIn: "20m" } // Token expires in 20 minutes
+      { expiresIn: "2h" } // Token expires in 2 hours
     );
 
     console.log("Token: " + token); // Log before sending response
@@ -255,9 +255,12 @@ router.get("/profile", authenticate, async (req, res) => {
     }
 
     //  Construct the full URL for the profile image
+    const protocol =
+      req.headers["x-forwarded-proto"]?.split(",")[0] || req.protocol; // Use the first protocol if multiple are present
     const fullProfileImageUrl = user.profileimageurl
-      ? `${req.protocol}://${req.get("host")}/${user.profileimageurl}` // Use req.protocol and req.get("host") is needed to construct the full URL
+      ? `${protocol}://${req.get("host")}/${user.profileimageurl}`
       : null;
+    console.log("Full profile image URL:", fullProfileImageUrl);
 
     res.status(200).json({
       success: true,
