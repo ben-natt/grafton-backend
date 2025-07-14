@@ -43,7 +43,7 @@ router.post("/tasks-complete-inbound", async (req, res) => {
   }
 
   try {
-    const result = await confirmInboundModel.insertInboundFromLots(selectedLots, userId);
+    const result = await insertInboundFromLots(selectedLots, userId);
     res.status(200).json({ success: true, inserted: result });
   } catch (error) {
     console.error("Error inserting inbounds:", error);

@@ -33,6 +33,37 @@ router.post("/tasks-inbound", async (req, res) => {
   }
 });
 
+router.post("/pending/tasks-inbound-crew", async (req, res) => {
+  const { jobNo, lotNo } = req.body;
+
+  if (!jobNo || !lotNo) {
+    return res.status(400).json({ error: "jobNo and lotNo are required." });
+  }
+
+  try {
+    const result = await pendingTasksModel.getDetailsPendingTasksCrew(jobNo, lotNo);
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch pending tasks for crew." });
+  }
+});
+
+router.get("/tasks-lotNos", async (req, res) => {
+  const { jobNo } = req.query;
+
+  if (!jobNo) {
+    return res.status(400).json({ error: "jobNo is required." });
+  }
+
+  try {
+    const result = await pendingTasksModel.getLotNosForJob(jobNo);
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch lotNos." });
+  }
+});
+
+
 router.post("/tasks-user", async (req, res) => {
   const { jobNo } = req.body;
   try {
