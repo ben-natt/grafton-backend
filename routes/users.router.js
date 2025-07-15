@@ -5,11 +5,14 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { sendEmail } = require("../nodemailler"); // Assuming your nodemailer setup is here
 const otpStore = {};
+const passwordResetOtpStore = {}; // Separate store for password reset OTPs
 const OTP_EXPIRATION_MINUTES = 10;
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const authenticate = require("../middleware/auth"); // Assuming you have an authentication middleware
+
+console.log("--- users.router.js has been loaded ---");
 
 function generateOtp() {
   return Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit OTP
@@ -18,33 +21,79 @@ function generateOtp() {
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "../uploads/img/profile"));
+    cb(null, path.join(__dirname, "../uploads"));
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9); // Unique suffix to avoid filename collisions
-    cb(null, "profile-" + uniqueSuffix + path.extname(file.originalname)); // Use original file extension
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, "profile-" + uniqueSuffix + path.extname(file.originalname));
   },
 });
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 1 * 1024 * 1024 }, // 1MB limit
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png|gif/; // Allowed file types
-    const mimetype = filetypes.test(file.mimetype); // Check MIME type -- MIME full form is "Multipurpose Internet Mail Extensions"
-    // Check file extension
+    const filetypes = /jpeg|jpg|png|gif/;
+    const mimetype = filetypes.test(file.mimetype);
     const extname = filetypes.test(
       path.extname(file.originalname).toLowerCase()
     );
-
     if (mimetype && extname) {
-      // If both MIME type and extension are valid
-      return cb(null, true); // Accept the file
+      return cb(null, true);
     }
     cb(new Error("Only image files are allowed!"));
   },
-}).single("profileImage"); // 'profileImage' is the field name in the form data
+}).single("profileImage");
 
+// Route to handle "Forgot Password" OTP request
+router.post("/forgot-password-otp", async (req, res) => {
+    console.log("--- Received request on /forgot-password-otp ---");
+    const { email } = req.body;
+    if (!email) {
+        return res.status(400).json({ message: "Email is required" });
+    }
+    try {
+        const user = await usersModel.getUserByEmail(email);
+        if (user) {
+            const otp = generateOtp();
+            const expiresAt = Date.now() + OTP_EXPIRATION_MINUTES * 60 * 1000;
+            passwordResetOtpStore[email] = { otp, expiresAt, verified: false };
+            await sendEmail(email, otp, "Password Reset OTP");
+            console.log(`Password reset OTP sent to ${email}: ${otp}`);
+        } else {
+            console.log(`Password reset request for non-existent email: ${email}`);
+        }
+        res.status(200).json({ message: "If your email is registered, you will receive a password reset OTP." });
+    } catch (error) {
+        console.error("Error in /forgot-password-otp:", error);
+        res.status(500).json({ message: "Server error while sending OTP." });
+    }
+});
+
+// Route to verify the OTP for the password reset flow
+router.post("/verify-password-reset-otp", async (req, res) => {
+    console.log("--- Received request on /verify-password-reset-otp ---");
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+        return res.status(400).json({ message: "Email and OTP are required." });
+    }
+    const storedOtpData = passwordResetOtpStore[email];
+    if (!storedOtpData) {
+        return res.status(400).json({ message: "Invalid OTP. Please request a new one." });
+    }
+    if (Date.now() > storedOtpData.expiresAt) {
+        delete passwordResetOtpStore[email];
+        return res.status(400).json({ message: "OTP has expired." });
+    }
+    if (storedOtpData.otp === otp) {
+        passwordResetOtpStore[email].verified = true;
+        res.status(200).json({ message: "OTP verified successfully." });
+    } else {
+        res.status(400).json({ message: "Invalid OTP." });
+    }
+});
+
+// Route for registration OTP
 router.post("/send-otp", async (req, res) => {
   const { email } = req.body;
   if (!email) {
@@ -63,7 +112,7 @@ router.post("/send-otp", async (req, res) => {
   const otp = generateOtp();
   const expiresAt = Date.now() + OTP_EXPIRATION_MINUTES * 60 * 1000; // 10 minutes expiration
   try {
-    const emailSent = await sendEmail(email, otp);
+    const emailSent = await sendEmail(email, otp, "Registration OTP");
     if (emailSent) {
       otpStore[email] = { otp, expiresAt, verified: false };
       console.log(`OTP sent to ${email}: ${otp}`);
@@ -79,6 +128,7 @@ router.post("/send-otp", async (req, res) => {
   }
 });
 
+// Route for registration OTP verification
 router.post("/verify-otp", async (req, res) => {
   const { email, otp } = req.body;
   if (!email || !otp) {
@@ -104,10 +154,44 @@ router.post("/verify-otp", async (req, res) => {
   }
 });
 
-router.post("/register", async (req, res) => {
-  const { email, password } = req.body; // Email here is sent by frontend after OTP verification
-  console.log("Create user request received for email:", email);
+// Route to reset the password after OTP verification
+router.post("/reset-password", async (req, res) => {
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword) {
+        return res.status(400).json({ message: "Email and new password are required." });
+    }
+    const storedOtpData = passwordResetOtpStore[email];
+    if (!storedOtpData || !storedOtpData.verified) {
+        return res.status(400).json({ message: "OTP not verified. Please complete the verification step first." });
+    }
 
+    if (newPassword.length < 8) {
+      return res
+        .status(400)
+        .json({ message: "Password must be at least 8 characters long" });
+    } else if (
+      !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/.test(newPassword)
+    ) {
+      return res.status(400).json({
+        message:
+          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character.",
+      });
+    }
+
+    try {
+        // The users.model.js needs a function to update password
+        await usersModel.updateUserPassword(email, newPassword);
+        delete passwordResetOtpStore[email]; // Clean up the used OTP
+        res.status(200).json({ message: "Password has been reset successfully." });
+    } catch (error) {
+        console.error("Error resetting password:", error);
+        res.status(500).json({ message: "Server error while resetting password." });
+    }
+});
+
+// Route for user registration
+router.post("/register", async (req, res) => {
+  const { email, password } = req.body;
   if (!email || !password) {
     return res
       .status(400)
@@ -125,7 +209,6 @@ router.post("/register", async (req, res) => {
   try {
     const existingUser = await usersModel.getUserByEmail(email);
     if (existingUser) {
-      console.log("User already exists with this email:", email);
       return res
         .status(400)
         .json({ message: "User already exists with this email." });
@@ -143,12 +226,11 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    // Fetch the default role ID for "Warehouse Crew"
     const roles = await usersModel.getAllRoles();
     const warehouseCrewRole = roles.find(
       (role) => role.rolename === "Warehouse Crew"
     );
-    const defaultRoleId = warehouseCrewRole ? warehouseCrewRole.roleid : 1; // Fallback to 1 if not found
+    const defaultRoleId = warehouseCrewRole ? warehouseCrewRole.roleid : 1;
 
     const newUser = await usersModel.createUser(email, password, defaultRoleId);
 
@@ -164,7 +246,6 @@ router.post("/register", async (req, res) => {
     });
   } catch (error) {
     console.error("Create User Error:", error);
-    // Check for unique constraint violation for email (though OTP flow should mitigate this for new users)
     if (
       error.code === "23505" &&
       error.constraint &&
@@ -179,13 +260,11 @@ router.post("/register", async (req, res) => {
   }
 });
 
+// Route for user login
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  console.log("Login request received:", req.body);
   try {
     const user = await usersModel.getUserByEmail(email);
-    console.log("Users fetched:", user);
-
     if (!user) {
       return res.status(401).json({ message: "Invalid Email or Password." });
     }
@@ -196,24 +275,20 @@ router.post("/login", async (req, res) => {
     }
 
     if (!user.userid) {
-      console.error(
-        "User object from DB does not contain 'userid'. Please ensure your SQL query in users.model.js returns the userid column."
-      );
       return res
         .status(500)
         .json({ message: "Server configuration error: User ID not found." });
     }
 
     const token = jwt.sign(
-      { userid: user.userid, email: user.email }, // Payload for JWT
-      process.env.JWT_SECRET, // Secret key from environment variables
-      { expiresIn: "2h" } // Token expires in 2 hours
+      { userid: user.userid, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
     );
 
-    console.log("Token: " + token); // Log before sending response
     res.status(200).json({
       message: "Login successful",
-      token: token, // Send the JWT back to the client
+      token: token,
       user: { id: user.userid, email: user.email, username: user.username },
     });
   } catch (error) {
@@ -222,15 +297,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ADDED: Logout route
-router.post("/logout", authenticate, (req, res) => {
-  // For stateless JWT, the main responsibility of logging out is on the client
-  // (i.e., deleting the token). This endpoint is useful for tasks like
-  // adding the token to a blacklist if you implement that strategy.
-  // For now, it just confirms the logout action.
-  res.status(200).json({ message: "Logout successful." });
-});
-
+// Get all users
 router.get("/", (req, res) => {
   usersModel
     .getAllUsers()
@@ -245,22 +312,16 @@ router.get("/", (req, res) => {
 router.get("/profile", authenticate, async (req, res) => {
   try {
     const userId = req.user.userId;
-
     const user = await usersModel.getUserById(userId);
-
     if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
     }
 
-    //  Construct the full URL for the profile image
-    const protocol =
-      req.headers["x-forwarded-proto"]?.split(",")[0] || req.protocol; // Use the first protocol if multiple are present
     const fullProfileImageUrl = user.profileimageurl
-      ? `${protocol}://${req.get("host")}/${user.profileimageurl}`
+      ? `${req.protocol}://${req.get("host")}/${user.profileimageurl}`
       : null;
-    console.log("Full profile image URL:", fullProfileImageUrl);
 
     res.status(200).json({
       success: true,
@@ -268,8 +329,8 @@ router.get("/profile", authenticate, async (req, res) => {
         username: user.username,
         email: user.email,
         roleid: user.roleid,
-        rolename: user.rolename, // Include the role name
-        profileimageurl: fullProfileImageUrl, // Send full URL here
+        rolename: user.rolename,
+        profileimageurl: fullProfileImageUrl,
       },
     });
   } catch (error) {
@@ -278,7 +339,7 @@ router.get("/profile", authenticate, async (req, res) => {
   }
 });
 
-// Update user profile - now protected by `authenticate` middleware
+// Update user profile
 router.put("/profile", authenticate, (req, res) => {
   upload(req, res, async (err) => {
     try {
@@ -286,12 +347,10 @@ router.put("/profile", authenticate, (req, res) => {
         return res.status(400).json({ message: err.message });
       }
 
-      const userId = req.user.userId; // Correct casing: req.user.userId
+      const userId = req.user.userId;
       const updates = {};
 
-      // Handle text fields
       if (req.body.username) updates.username = req.body.username;
-      // If roleid is passed in the update, allow it to be updated (e.g., by an admin)
       if (req.body.roleid) updates.roleid = req.body.roleid;
       if (req.body.password) {
         if (req.body.password.length < 8) {
@@ -312,39 +371,29 @@ router.put("/profile", authenticate, (req, res) => {
         updates.password = await bcrypt.hash(req.body.password, 10);
       }
 
-      // Handle file upload
       if (req.file) {
         const user = await usersModel.getUserById(userId);
         if (user.profileimageurl) {
-          // Extract filename from the URL, not the full path
           const oldFilename = path.basename(user.profileimageurl);
           const oldImagePath = path.join(
             __dirname,
-            "../uploads/img/profile", // Point to the uploads directory
+            "../../uploads",
             oldFilename
           );
           if (fs.existsSync(oldImagePath)) {
             fs.unlinkSync(oldImagePath);
-            console.log(`Deleted old profile image: ${oldImagePath}`);
-          } else {
-            console.log(
-              `Old profile image not found to delete: ${oldImagePath}`
-            );
           }
         }
-
-        updates.profileimageurl = `uploads/img/profile/${req.file.filename}`;
+        updates.profileimageurl = `uploads/${req.file.filename}`;
       }
 
       if (Object.keys(updates).length === 0) {
-        return res.status(400).json({ message: "No updates provided" }); // Ensure updates object is not empty
+        return res.status(400).json({ message: "No updates provided" });
       }
 
-      const updatedUser = await usersModel.updateUserProfile(userId, updates);
-      // After updating, fetch the user again to get the updated role name
+      await usersModel.updateUserProfile(userId, updates);
       const userWithUpdatedRole = await usersModel.getUserById(userId);
 
-      // Construct the user profile object to return
       const userProfile = {
         userid: userWithUpdatedRole.userid,
         email: userWithUpdatedRole.email,
@@ -355,7 +404,7 @@ router.put("/profile", authenticate, (req, res) => {
             }`
           : null,
         roleid: userWithUpdatedRole.roleid,
-        rolename: userWithUpdatedRole.rolename, // Include the updated role name
+        rolename: userWithUpdatedRole.rolename,
       };
 
       res.status(200).json(userProfile);

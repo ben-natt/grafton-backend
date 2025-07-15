@@ -4,7 +4,7 @@ const path = require("path");
 const fs = require("fs");
 
 // Create uploads directory if not exists
-const uploadDir = path.join(__dirname, "../uploads/img/profile");
+const uploadDir = path.join(__dirname, "../uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -151,6 +151,25 @@ const updateUserProfile = async (userId, updates) => {
   }
 };
 
+//++++++++++++++ NEW FUNCTION ADDED HERE ++++++++++++++
+// Update user password by email
+const updateUserPassword = async (email, newPassword) => {
+    try {
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await db.sequelize.query(
+            "UPDATE users SET password = :hashedPassword, updatedat = CURRENT_TIMESTAMP WHERE email = :email",
+            {
+                replacements: { hashedPassword, email },
+                type: db.sequelize.QueryTypes.UPDATE,
+            }
+        );
+    } catch (error) {
+        console.error("Error updating user password:", error);
+        throw error;
+    }
+};
+//++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 module.exports = {
   getAllUsers,
   getUserByEmail,
@@ -159,4 +178,5 @@ module.exports = {
   getUserById,
   createUser,
   updateUserProfile,
+  updateUserPassword, // Export the new function
 };
