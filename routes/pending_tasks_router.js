@@ -86,29 +86,61 @@ router.post("/tasks-user-single-date", async (req, res) => {
   }
 });
 
-// OFFICE VERSION
+// OFFICE VERSION 
 router.post("/acknowledge-report", async (req, res) => {
   try {
-    const { lotId } = req.body;
+    const { lotId, reportStatus, resolvedBy } = req.body;
+
+    if (!lotId || !reportStatus || !resolvedBy) {
+      return res.status(400).json({ error: "lotId, reportStatus, and resolvedBy are required" });
+    }
+
+    if (!["accepted", "declined"].includes(reportStatus)) {
+      return res.status(400).json({ error: "Invalid reportStatus. Must be 'accepted' or 'declined'" });
+    }
+
+    const updatedReports = await pendingTasksModel.updateReportStatus({
+      lotId,
+      reportStatus,
+      resolvedBy,
+    });
+
+    if (!updatedReports || updatedReports.length === 0) {
+      return res.status(404).json({ error: "No pending report found to update for this lotId." });
+    }
+
+    res.status(200).json({
+      message: `Report ${reportStatus} successfully.`,
+      updatedReport: updatedReports[0],
+    });
+  } catch (error) {
+    console.error("Error resolving report:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/report-supervisor/:lotId", async (req, res) => {
+  try {
+  const lotId = parseInt(req.params.lotId);
 
     if (!lotId) {
       return res.status(400).json({ error: "lotId is required" });
     }
-    const updatedLots = await pendingTasksModel.updateReportStatus(lotId);
-    if (!updatedLots || updatedLots.length === 0) {
-      return res
-        .status(404)
-        .json({ error: "Lot not found or already updated" });
+
+    const result = await pendingTasksModel.getReportSupervisorUsername(lotId);
+
+    if (!result) {
+      return res.status(404).json({ error: "No report found for this lotId" });
     }
-    res.status(200).json({
-      message: "Lot report status updated successfully.",
-      updatedLot: updatedLots[0],
-    });
+
+    res.status(200).json({ username: result.username });
   } catch (error) {
-    console.error("Error updating report status:", error);
+    console.error("Error fetching report supervisor username:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+
 
 router.post("/tasks-inbound/sortReport", async (req, res) => {
   const { jobNo } = req.body;

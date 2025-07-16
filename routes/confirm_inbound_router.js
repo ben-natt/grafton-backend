@@ -1,33 +1,35 @@
 const express = require("express");
-const confirmInboundModel = require('../models/confirm_inbound_model');
 const {reportConfirmation,insertInboundFromLots } = require('../models/confirm_inbound_model');
 const router = express.Router();
 
 // ROUTER TO DO REPORT
 router.post('/tasks-report-confirmation', async (req, res) => {
   try {
-    const { lotIds } = req.body;
+    const { lotIds, reportedBy} = req.body;
 
     if (!Array.isArray(lotIds) || lotIds.length === 0) {
       return res.status(400).json({ error: 'lotIds must be a non-empty array' });
     }
 
-    const updatedLots = await reportConfirmation(lotIds);
+    if (!reportedBy) {
+      return res.status(400).json({ error: 'reportedBy is required' });
+    }
 
-    if (!updatedLots || updatedLots.length === 0) {
-      return res.status(404).json({ error: 'No lots were updated. Please check lotIds.' });
+    const createdReports = await reportConfirmation(lotIds, reportedBy);
+
+    if (!createdReports || createdReports.length === 0) {
+      return res.status(404).json({ error: 'No reports were created. Please check lotIds.' });
     }
 
     res.status(200).json({
-      message: 'Lot report statuses updated successfully.',
-      updatedLots,
+      message: 'Lot reports created successfully.',
+      createdReports,
     });
   } catch (error) {
-    console.error('Error updating report status:', error);
+    console.error('Error creating reports:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 
 // ROUTER TO DO THE UPDATE AND ADDING OF INBOUND

@@ -1,25 +1,48 @@
 const db = require("../database");
 
 // MODAL TO REPORT
-const reportConfirmation = async (lotIds) => {
+const reportConfirmation = async (lotIds, reportedBy = null) => {
   try {
-    const query = `
-      UPDATE public.lot
-      SET "report" = true
-      WHERE "lotId" IN (:lotIds)
-      RETURNING *;
-    `;
-    const result = await db.sequelize.query(query, {
-      replacements: { lotIds },
-      type: db.sequelize.QueryTypes.UPDATE,
-    });
+    const results = [];
 
-    return result; // Returns updated rows
+    for (const lotId of lotIds) {
+      const insertQuery = `
+        INSERT INTO public.lot_reports 
+        ("lotId", "reportedBy", "reportStatus", "reportedOn")
+        VALUES (:lotId, :reportedBy, 'pending', CURRENT_TIMESTAMP)
+        RETURNING *;
+      `;
+
+      const insertResult = await db.sequelize.query(insertQuery, {
+        replacements: {
+          lotId,
+          reportedBy,
+        },
+        type: db.sequelize.QueryTypes.INSERT,
+      });
+
+      const createdReport = insertResult[0][0];
+      results.push(createdReport);
+
+      const updateQuery = `
+        UPDATE public.lot
+        SET "report" = true
+        WHERE "lotId" = :lotId;
+      `;
+
+      await db.sequelize.query(updateQuery, {
+        replacements: { lotId },
+        type: db.sequelize.QueryTypes.UPDATE,
+      });
+    }
+
+    return results;
   } catch (error) {
-    console.error("Error updating report status:", error);
+    console.error("Error creating reports and updating lot table:", error);
     throw error;
   }
 };
+
 
 // MODAL TO CHANGE THE LOT STATUS AND INSERT INTO INBOUND
 const insertInboundFromLots = async (lotsArray, userId) => {
