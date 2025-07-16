@@ -36,11 +36,15 @@ router.get("/inbound-records", async (req, res) => {
       search: req.query.search,
       sortBy: req.query.sortBy,
       sortOrder: req.query.sortOrder,
-      // **FIX: Added date range filters**
+      // **FIX: Added all new filters**
       startDate: req.query.startDate,
       endDate: req.query.endDate,
+      quantity: req.query.quantity,
+      inboundWarehouse: req.query.inboundWarehouse,
+      exWarehouseLocation: req.query.exWarehouseLocation,
+      exLmeWarehouse: req.query.exLmeWarehouse,
     };
-    // Remove null/undefined filters so we don't pass them to the model
+    // Remove null/undefined/empty filters so we don't pass them to the model
     Object.keys(filters).forEach(
       (key) =>
         (filters[key] === undefined ||
@@ -81,9 +85,13 @@ router.get("/outbound-records", async (req, res) => {
       search: req.query.search,
       sortBy: req.query.sortBy,
       sortOrder: req.query.sortOrder,
-      // **FIX: Added date range filters**
+      // **FIX: Added all new filters**
       startDate: req.query.startDate,
       endDate: req.query.endDate,
+      quantity: req.query.quantity,
+      inboundWarehouse: req.query.inboundWarehouse,
+      exWarehouseLocation: req.query.exWarehouseLocation,
+      exLmeWarehouse: req.query.exLmeWarehouse,
     };
     Object.keys(filters).forEach(
       (key) =>
