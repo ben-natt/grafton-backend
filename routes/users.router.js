@@ -121,17 +121,20 @@ router.post("/forgot-password-otp", async (req, res) => {
     }
     try {
         const user = await usersModel.getUserByEmail(email);
-        // Always send a success message to prevent user enumeration attacks.
-        if (user) {
-            const otp = generateOtp();
-            const expiresAt = Date.now() + OTP_EXPIRATION_MINUTES * 60 * 1000;
-            passwordResetOtpStore[email] = { otp, expiresAt, verified: false };
-            await sendEmail(email, otp, "Password Reset OTP");
-            console.log(`Password reset OTP sent to ${email}: ${otp}`);
-        } else {
-            console.log(`Password reset request for non-existent email: ${email}`);
+        // If user does not exist, return an error.
+        if (!user) {
+            return res.status(404).json({ message: "Email is not registered. Please create an account." });
         }
-        res.status(200).json({ message: "If your email is registered, you will receive a password reset OTP." });
+        
+        // If user exists, proceed with sending OTP.
+        const otp = generateOtp();
+        const expiresAt = Date.now() + OTP_EXPIRATION_MINUTES * 60 * 1000;
+        passwordResetOtpStore[email] = { otp, expiresAt, verified: false };
+        
+        await sendEmail(email, otp, "Password Reset OTP");
+        console.log(`Password reset OTP sent to ${email}: ${otp}`);
+        
+        res.status(200).json({ message: "A password reset OTP has been sent to your email." });
     } catch (error) {
         console.error("Error in /forgot-password-otp:", error);
         res.status(500).json({ message: "Server error while sending OTP." });
