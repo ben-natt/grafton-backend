@@ -177,25 +177,62 @@ const pendingTasksUserIdSingleDate = async (jobNo) => {
   }
 };
 
-const updateReportStatus = async (lotId) => {
+const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
   try {
     const query = `
-      UPDATE public.lot
-      SET "report" = false
+      WITH updated_lot AS (
+        UPDATE public.lot
+        SET "report" = false
+        WHERE "lotId" = :lotId
+        RETURNING *
+      )
+      UPDATE public.lot_reports
+      SET "reportStatus" = :reportStatus,
+          "resolvedBy" = :resolvedBy,
+          "resolvedOn" = NOW(),
+          "updatedAt" = NOW()
       WHERE "lotId" = :lotId
+        AND "reportStatus" = 'pending'
       RETURNING *;
     `;
+
     const result = await db.sequelize.query(query, {
-      replacements: { lotId },
+      replacements: { lotId, reportStatus, resolvedBy },
       type: db.sequelize.QueryTypes.UPDATE,
     });
 
-    return result[0];
+    return result[0]; // updated report(s)
   } catch (error) {
-    console.error("Error updating report status:", error);
+    console.error("Error updating report resolution:", error);
     throw error;
   }
 };
+
+const getReportSupervisorUsername = async (lotId) => {
+  try {
+    const query = `
+      SELECT u.username
+      FROM public.lot_reports r
+      JOIN public.users u ON CAST(r."reportedBy" AS INTEGER) = u."userid"
+      WHERE r."lotId" = :lotId
+      ORDER BY r."reportedOn" DESC
+      LIMIT 1;
+    `;
+
+    const result = await db.sequelize.query(query, {
+      replacements: { lotId },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+
+    return result[0]; // { username: 'john.doe' }
+  } catch (error) {
+    console.error("Error fetching report supervisor username:", error);
+    throw error;
+  }
+};
+
+
+
 
 const getDetailsPendingTasksOrderByReport = async (jobNo) => {
   try {
@@ -481,6 +518,7 @@ module.exports = {
   getDetailsPendingTasksOrderByReport,
   pendingTasksUpdateQuantity,
   findJobNoOfficePendingTasks,
+  getReportSupervisorUsername,
   // Outbound
   findScheduleIdPendingOutbound,
   getDetailsPendingOutbound,

@@ -49,7 +49,6 @@ router.post('/desktop/bundle-repack', upload.fields([
     const {
       inboundId,
       noOfBundle,
-      netWeight,
       isRelabelled,
       isRebundled,
       isRepackProvided,
@@ -57,9 +56,9 @@ router.post('/desktop/bundle-repack', upload.fields([
     } = req.body;
 
     // Validate required fields
-    if (!inboundId || !noOfBundle || !netWeight) {
+    if (!inboundId || !noOfBundle) {
       return res.status(400).json({
-        error: 'Missing required fields: inboundId, noOfBundle, netWeight'
+        error: 'Missing required fields: inboundId, noOfBundle,'
       });
     }
 
@@ -82,7 +81,6 @@ router.post('/desktop/bundle-repack', upload.fields([
     const bundleData = {
       inboundId: parseInt(inboundId),
       bundleNo: parseInt(noOfBundle),
-      weight: parseFloat(netWeight),
       isRelabelled: isRelabelled === 'true',
       isRebundled: isRebundled === 'true',
       isRepackProvided: isRepackProvided === 'true',
@@ -184,7 +182,6 @@ router.post('/mobile/bundle-repack', upload.fields([
     const {
       inboundId,
       noOfBundle,
-      netWeight,
       isRelabelled,
       isRebundled,
       isRepackProvided,
@@ -193,9 +190,9 @@ router.post('/mobile/bundle-repack', upload.fields([
     } = req.body;
 
     // Validate required fields
-    if (!inboundId || !noOfBundle || !netWeight) {
+    if (!inboundId || !noOfBundle) {
       return res.status(400).json({
-        error: 'Missing required fields: inboundId, noOfBundle, netWeight'
+        error: 'Missing required fields: inboundId, noOfBundle,'
       });
     }
 
@@ -218,7 +215,6 @@ router.post('/mobile/bundle-repack', upload.fields([
     const bundleData = {
       inboundId: parseInt(inboundId),
       bundleNo: parseInt(noOfBundle),
-      weight: parseFloat(netWeight),
       isRelabelled: isRelabelled === 'true',
       isRebundled: isRebundled === 'true',
       isRepackProvided: isRepackProvided === 'true',

@@ -49,10 +49,6 @@ models.Inbound = sequelize.define('Inbound', {
     type: DataTypes.DOUBLE,
     allowNull: false
   },
-  netWeight: {
-    type: DataTypes.DOUBLE,
-    allowNull: false
-  },
   actualWeight: {
     type: DataTypes.DOUBLE,
     allowNull: true
@@ -135,10 +131,6 @@ models.InboundBundle = sequelize.define('InboundBundle', {
   },
   bundleNo: {
     type: DataTypes.INTEGER,
-    allowNull: false
-  },
-  weight: {
-    type: DataTypes.DOUBLE,
     allowNull: false
   },
   meltNo: {
