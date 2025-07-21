@@ -432,7 +432,7 @@ const getInboundRecordByInboundId = async (inboundId) => {
         LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
         LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
         LEFT JOIN public.users u_scheduler ON u_scheduler.userid = i."userId"
-        LEFT JOIN public.users u_processor ON u_processor.userid = i."userId"
+        LEFT JOIN public.users u_processor ON u_processor.userid = i."processedId"
         WHERE i."inboundId" = :inboundId
         LIMIT 1;`;
 
@@ -482,58 +482,62 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
 };
 
 // model.js
-const getAllScheduleInbound = async ({ filters = {}, page = 1, pageSize = 25 }) => {
+const getAllScheduleInbound = async ({
+  filters = {},
+  page = 1,
+  pageSize = 25,
+}) => {
   try {
     let whereClauses = [];
     const replacements = {};
 
     // ... (All existing filter logic for whereClauses and replacements remains the same)
-    
-    if (filters.commodity) {
-      whereClauses.push(`l."commodity" ILIKE :commodity`);
-      replacements.commodity = `%${filters.commodity}%`;
-    }
-    if (filters.shape) {
-      whereClauses.push(`l."shape" ILIKE :shape`);
-      replacements.shape = `%${filters.shape}%`;
-    }
-    if (filters.jobNo) {
-      whereClauses.push(`l."jobNo" ILIKE :jobNo`);
-      replacements.jobNo = `%${filters.jobNo}%`;
-    }
-    if (filters.brand) {
-      const brands = filters.brand.split(",").map((b) => b.trim());
-      const brandClauses = brands.map(
-        (_, index) => `l."brand" ILIKE :brand${index}`
-      );
-      whereClauses.push(`(${brandClauses.join(" OR ")})`);
-      brands.forEach((brand, index) => {
-        replacements[`brand${index}`] = `%${brand}%`;
-      });
-    }
-    if (filters.startDate && filters.endDate) {
-      whereClauses.push(
-        `si."inboundDate"::date BETWEEN :startDate::date AND :endDate::date`
-      );
-      replacements.startDate = filters.startDate;
-      replacements.endDate = filters.endDate;
-    }
-    if (filters.quantity) {
-      whereClauses.push(`l."expectedBundleCount" = :quantity`);
-      replacements.quantity = parseInt(filters.quantity, 10);
-    }
-    if (filters.inboundWarehouse) {
-      whereClauses.push(`l."inboundWarehouse" ILIKE :inboundWarehouse`);
-      replacements.inboundWarehouse = `%${filters.inboundWarehouse}%`;
-    }
-    if (filters.exWarehouseLocation) {
-      whereClauses.push(`l."exWarehouseLocation" ILIKE :exWarehouseLocation`);
-      replacements.exWarehouseLocation = `%${filters.exWarehouseLocation}%`;
-    }
-    if (filters.exLmeWarehouse) {
-      whereClauses.push(`l."exLmeWarehouse" ILIKE :exLmeWarehouse`);
-      replacements.exLmeWarehouse = `%${filters.exLmeWarehouse}%`;
-    }
+
+    if (filters.commodity) {
+      whereClauses.push(`l."commodity" ILIKE :commodity`);
+      replacements.commodity = `%${filters.commodity}%`;
+    }
+    if (filters.shape) {
+      whereClauses.push(`l."shape" ILIKE :shape`);
+      replacements.shape = `%${filters.shape}%`;
+    }
+    if (filters.jobNo) {
+      whereClauses.push(`l."jobNo" ILIKE :jobNo`);
+      replacements.jobNo = `%${filters.jobNo}%`;
+    }
+    if (filters.brand) {
+      const brands = filters.brand.split(",").map((b) => b.trim());
+      const brandClauses = brands.map(
+        (_, index) => `l."brand" ILIKE :brand${index}`
+      );
+      whereClauses.push(`(${brandClauses.join(" OR ")})`);
+      brands.forEach((brand, index) => {
+        replacements[`brand${index}`] = `%${brand}%`;
+      });
+    }
+    if (filters.startDate && filters.endDate) {
+      whereClauses.push(
+        `si."inboundDate"::date BETWEEN :startDate::date AND :endDate::date`
+      );
+      replacements.startDate = filters.startDate;
+      replacements.endDate = filters.endDate;
+    }
+    if (filters.quantity) {
+      whereClauses.push(`l."expectedBundleCount" = :quantity`);
+      replacements.quantity = parseInt(filters.quantity, 10);
+    }
+    if (filters.inboundWarehouse) {
+      whereClauses.push(`l."inboundWarehouse" ILIKE :inboundWarehouse`);
+      replacements.inboundWarehouse = `%${filters.inboundWarehouse}%`;
+    }
+    if (filters.exWarehouseLocation) {
+      whereClauses.push(`l."exWarehouseLocation" ILIKE :exWarehouseLocation`);
+      replacements.exWarehouseLocation = `%${filters.exWarehouseLocation}%`;
+    }
+    if (filters.exLmeWarehouse) {
+      whereClauses.push(`l."exLmeWarehouse" ILIKE :exLmeWarehouse`);
+      replacements.exLmeWarehouse = `%${filters.exLmeWarehouse}%`;
+    }
     if (filters.search) {
       whereClauses.push(`(
         l."jobNo" ILIKE :searchQuery OR
@@ -549,25 +553,25 @@ const getAllScheduleInbound = async ({ filters = {}, page = 1, pageSize = 25 }) 
 
     const whereString =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-      
-    // --- SORTING LOGIC --- (remains the same)
-    const sortableColumns = {
-      Date: 'si."inboundDate"',
-      "Lot No.": 'l."lotNo"',
-      "Ex-Warehouse Lots": 'l."exWarehouseLot"',
-      Metal: 'l."commodity"',
-      Brand: 'l."brand"',
-      Shape: 'l."shape"',
-      Quantity: 'l."expectedBundleCount"',
-      "Scheduled By": 'u1."username"',
-    };
 
-    let orderByClause = 'ORDER BY si."inboundDate" DESC NULLS LAST'; // Default sort
-    if (filters.sortBy && sortableColumns[filters.sortBy]) {
-      const sortColumn = sortableColumns[filters.sortBy];
-      const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
-      orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
-    }
+    // --- SORTING LOGIC --- (remains the same)
+    const sortableColumns = {
+      Date: 'si."inboundDate"',
+      "Lot No.": 'l."lotNo"',
+      "Ex-Warehouse Lots": 'l."exWarehouseLot"',
+      Metal: 'l."commodity"',
+      Brand: 'l."brand"',
+      Shape: 'l."shape"',
+      Quantity: 'l."expectedBundleCount"',
+      "Scheduled By": 'u1."username"',
+    };
+
+    let orderByClause = 'ORDER BY si."inboundDate" DESC NULLS LAST'; // Default sort
+    if (filters.sortBy && sortableColumns[filters.sortBy]) {
+      const sortColumn = sortableColumns[filters.sortBy];
+      const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
+      orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
+    }
 
     // NEW: Pagination Logic
     const limit = parseInt(pageSize, 10);
@@ -581,13 +585,13 @@ const getAllScheduleInbound = async ({ filters = {}, page = 1, pageSize = 25 }) 
                         JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
                         LEFT JOIN public.users u1 ON si."userId" = u1.userid
                         ${whereString}`;
-    
+
     const totalResult = await db.sequelize.query(countQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
     });
     const total = parseInt(totalResult[0].count, 10);
-    
+
     // MODIFIED: Data query with pagination
     const dataQuery = `SELECT
                       l."lotId" AS id,
@@ -605,11 +609,11 @@ const getAllScheduleInbound = async ({ filters = {}, page = 1, pageSize = 25 }) 
                     JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
                     LEFT JOIN public.users u1 ON si."userId" = u1.userid
                     LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
-                    LEFT JOIN public.users u2 ON u2.userid = i."processedId"
+                    LEFT JOIN public.users u2 ON u2.userid = i."userId"
                     ${whereString}
                     ${orderByClause}
                     ${paginationClause}`;
-                    
+
     const data = await db.sequelize.query(dataQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
@@ -622,7 +626,11 @@ const getAllScheduleInbound = async ({ filters = {}, page = 1, pageSize = 25 }) 
   }
 };
 
-const getAllScheduleOutbound = async ({ filters = {}, page = 1, pageSize = 25 }) => {
+const getAllScheduleOutbound = async ({
+  filters = {},
+  page = 1,
+  pageSize = 25,
+}) => {
   try {
     let whereClauses = [];
     const replacements = {};
@@ -713,7 +721,7 @@ const getAllScheduleOutbound = async ({ filters = {}, page = 1, pageSize = 25 })
     const offset = (page - 1) * limit;
     replacements.limit = limit;
     replacements.offset = offset;
-    
+
     const fromAndJoins = `FROM public.scheduleoutbounds o 
       JOIN public.selectedinbounds si ON o."scheduleOutboundId" = si."scheduleOutboundId"
       LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
@@ -728,7 +736,7 @@ const getAllScheduleOutbound = async ({ filters = {}, page = 1, pageSize = 25 })
       LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"`;
 
     const countQuery = `SELECT COUNT(DISTINCT si."inboundId") ${fromAndJoins} ${whereString}`;
-    
+
     const totalResult = await db.sequelize.query(countQuery, {
       replacements: { ...replacements }, // Use a copy to avoid mutation by sequelize
       type: db.sequelize.QueryTypes.SELECT,
@@ -789,7 +797,7 @@ const getScheduleInboundRecordByLotId = async (lotId) => {
           TO_CHAR(l."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
         FROM public.lot l
         LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
-        LEFT JOIN public.users u1 ON u1.userid = si."userId"
+        LEFT JOIN public.users u1 ON u1.userid = i."userId"
         LEFT JOIN public.inbounds i on i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
         LEFT JOIN public.users u2 ON u2.userid = i."processedId"
         WHERE l."lotId" = :lotId

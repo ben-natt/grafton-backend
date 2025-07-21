@@ -231,7 +231,8 @@ const createGrnAndTransactions = async (formData) => {
           s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
           so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
           so."outboundType", so."exportDate", so."stuffingDate", so."containerNo", so."sealNo",
-          so."lotReleaseWeight"
+          so."lotReleaseWeight",
+          so."userId" AS "scheduledBy"
       FROM public.selectedinbounds si
       JOIN public.inbounds i ON si."inboundId" = i."inboundId"
       JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
@@ -261,14 +262,14 @@ const createGrnAndTransactions = async (formData) => {
             "noOfBundle", "scheduleOutboundId", "releaseWarehouse", "lotReleaseWeight",
             "transportVendor", "outboundType", "exportDate", "stuffingDate", "containerNo", "sealNo",
             "driverName", "driverIdentityNo", "truckPlateNo", "warehouseStaff", "warehouseSupervisor",
-            "outboundedBy", "exWarehouseLot", "exWarehouseWarrant", "createdAt", "updatedAt"
+            "outboundedBy", "scheduledBy", "exWarehouseLot", "exWarehouseWarrant", "createdAt", "updatedAt"
         ) VALUES (
             :outboundId, :inboundId, :jobNo, :lotNo, :shape, :commodity, :brand,
             :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, :outboundedDate, :storageReleaseLocation,
             :noOfBundle, :scheduleOutboundId, :releaseWarehouse, :lotReleaseWeight,
             :transportVendor, :outboundType, :exportDate, :stuffingDate, :containerNo, :sealNo,
             :driverName, :driverIdentityNo, :truckPlateNo, :warehouseStaff, :warehouseSupervisor,
-            :userId, :exWarehouseLot, :exWarehouseWarrant, NOW(), NOW()
+            :userId, :scheduledBy, :exWarehouseLot, :exWarehouseWarrant, NOW(), NOW()
         );
       `;
       await db.sequelize.query(transactionQuery, {
