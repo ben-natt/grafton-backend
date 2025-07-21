@@ -7,6 +7,7 @@ const { sendEmail } = require("../nodemailler"); // Assuming your nodemailer set
 const otpStore = {};
 const passwordResetOtpStore = {}; // Separate store for password reset OTPs
 const OTP_EXPIRATION_MINUTES = 10;
+const OTP_COOLDOWN_MINUTES = 1; // Cooldown period in minutes
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -119,6 +120,21 @@ router.post("/forgot-password-otp", async (req, res) => {
     if (!email) {
         return res.status(400).json({ message: "Email is required" });
     }
+
+    // --- Start of Cooldown Logic ---
+    const existingOtpData = passwordResetOtpStore[email];
+    if (existingOtpData && existingOtpData.lastSent) {
+        const cooldownPeriod = OTP_COOLDOWN_MINUTES * 60 * 1000;
+        const timeSinceLastSent = Date.now() - existingOtpData.lastSent;
+
+        if (timeSinceLastSent < cooldownPeriod) {
+            const timeLeft = Math.ceil((cooldownPeriod - timeSinceLastSent) / 1000);
+            // Return a "Too Many Requests" error
+            return res.status(429).json({ message: `Please wait ${timeLeft} seconds before requesting another OTP.` });
+        }
+    }
+    // --- End of Cooldown Logic ---
+
     try {
         const user = await usersModel.getUserByEmail(email);
         // If user does not exist, return an error.
@@ -129,7 +145,8 @@ router.post("/forgot-password-otp", async (req, res) => {
         // If user exists, proceed with sending OTP.
         const otp = generateOtp();
         const expiresAt = Date.now() + OTP_EXPIRATION_MINUTES * 60 * 1000;
-        passwordResetOtpStore[email] = { otp, expiresAt, verified: false };
+        // Store OTP, expiration, and the timestamp of when it was sent
+        passwordResetOtpStore[email] = { otp, expiresAt, verified: false, lastSent: Date.now() };
         
         await sendEmail(email, otp, "Password Reset OTP");
         console.log(`Password reset OTP sent to ${email}: ${otp}`);
