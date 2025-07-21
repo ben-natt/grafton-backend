@@ -15,7 +15,8 @@ router.get('/', async (req, res) => {
 
 router.get('/inventory', async (req, res) => {
     try {
-        const inventory = await stockModel.getInventory();
+        // Pass query params to the model for pagination
+        const inventory = await stockModel.getInventory(req.query);
         res.json(inventory);
     } catch (error) {
         console.error('Error fetching inventory records:', error);
@@ -26,7 +27,6 @@ router.get('/inventory', async (req, res) => {
 router.get('/lots', async (req, res) => {
     try {
         const filters = req.query; // Pass all query params to the model
-        console.log('Fetching lots with filters:', filters);
         const lots = await stockModel.getLotDetails(filters);
         res.json(lots);
     } catch (error) {
@@ -114,8 +114,8 @@ router.get('/lots-by-job/:jobNo/:brand/:shape', async (req, res) => { // Updated
             return res.status(400).json({ error: 'Missing jobNo or brand parameter in URL' });
         }
 
-        // Pass both to the model function
-        const lots = await stockModel.getLotsByJobNo(jobNo, brand, shape);
+        // Pass req.query to the model function for pagination
+        const lots = await stockModel.getLotsByJobNo(jobNo, brand, shape, req.query);
         res.json(lots);
 
     } catch (error) {
@@ -123,4 +123,15 @@ router.get('/lots-by-job/:jobNo/:brand/:shape', async (req, res) => { // Updated
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
+
+router.get('/inventory1', async (req, res) => {
+    try {
+        const inventory = await stockModel.getInventory1();
+        res.json(inventory);
+    } catch (error) {
+        console.error('Error fetching inventory records:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 module.exports = router;

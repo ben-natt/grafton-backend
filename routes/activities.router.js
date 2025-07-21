@@ -157,19 +157,87 @@ router.get("/outbound-records/:outboundId", async (req, res) => {
   }
 });
 
+// router.js
 router.get("/scheduled-inbound", async (req, res) => {
   try {
-    const scheduledInbounds = await activitiesModel.getAllScheduleInbound();
-    res.json(scheduledInbounds);
+    const filters = {
+      commodity: req.query.commodity,
+      shape: req.query.shape,
+      jobNo: req.query.jobNo,
+      brand: req.query.brand,
+      search: req.query.search,
+      sortBy: req.query.sortBy,
+      sortOrder: req.query.sortOrder,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+      quantity: req.query.quantity,
+      inboundWarehouse: req.query.inboundWarehouse,
+      exWarehouseLocation: req.query.exWarehouseLocation,
+      exLmeWarehouse: req.query.exLmeWarehouse,
+    };
+    // Remove null/undefined/empty filters
+    Object.keys(filters).forEach(
+      (key) =>
+        (filters[key] === undefined ||
+          filters[key] === null ||
+          filters[key] === "") &&
+        delete filters[key]
+    );
+
+    // NEW: Pagination parameters
+    const page = parseInt(req.query.page, 10) || 1;
+    const pageSize = parseInt(req.query.pageSize, 10) || 25;
+
+    const result = await activitiesModel.getAllScheduleInbound({
+      filters,
+      page,
+      pageSize,
+    });
+    res.json(result);
   } catch (error) {
     console.error("Error fetching scheduled inbound records:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
+
+// router.js
+
 router.get("/scheduled-outbound", async (req, res) => {
   try {
-    const scheduledOutbounds = await activitiesModel.getAllScheduleOutbound();
+    const filters = {
+      commodity: req.query.commodity,
+      shape: req.query.shape,
+      jobNo: req.query.jobNo,
+      brand: req.query.brand,
+      search: req.query.search,
+      sortBy: req.query.sortBy,
+      sortOrder: req.query.sortOrder,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+      quantity: req.query.quantity,
+      inboundWarehouse: req.query.inboundWarehouse,
+      exWarehouseLocation: req.query.exWarehouseLocation,
+      exLmeWarehouse: req.query.exLmeWarehouse,
+    };
+    // Remove null/undefined/empty filters
+    Object.keys(filters).forEach(
+      (key) =>
+        (filters[key] === undefined ||
+          filters[key] === null ||
+          filters[key] === "") &&
+        delete filters[key]
+    );
+
+    // NEW: Pagination parameters
+    const page = parseInt(req.query.page, 10) || 1;
+    const pageSize = parseInt(req.query.pageSize, 10) || 25;
+
+    const scheduledOutbounds = await activitiesModel.getAllScheduleOutbound({
+      filters,
+      page,
+      pageSize,
+    });
     res.json(scheduledOutbounds);
   } catch (error) {
     console.error("Error fetching scheduled outbound records:", error);
