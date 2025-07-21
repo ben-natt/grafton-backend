@@ -113,21 +113,36 @@ const getOutboundsByDateRange = async (startDate, endDate) => {
 const getAllScheduleOutbounds = async () => {
     try {
         const query = `
-           SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+         SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
 		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
 		b."brandName"  AS "Brand",
 		s."shapeName" AS "Shape",
 		i."noOfBundle" AS "Qty",
-		u."username" AS "Scheduled By"
+		i."netWeight" AS "Net Weight",
+		i."grossWeight" AS "Gross Weight",
+		i."actualWeight" AS "Actual Weight",
+        exlme."exLmeWarehouseName" AS "Ex-LME Warehouse",
+        o."releaseDate" AS "Release Date",
+        o."releaseWarehouse" AS "Release Warehouse",
+        o."deliveryDate" AS "Delivery Date",
+        o."createdAt" AS "Scheduled Outbound Date",
+        o."lotReleaseWeight" AS "Lot Release Weight",
+        o."storageReleaseLocation" AS "Storage Release Location",
+        o."exportDate" AS "Export Date",
+		u1."username" AS "Scheduled By",
+        u2."username" AS "Processed By"
 		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
 		ON o."scheduleOutboundId" = si."scheduleOutboundId"
 		LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
 		LEFT JOIN public.commodities c on i."commodityId" = c."commodityId"
 		LEFT JOIN public.brands b on i."brandId" = b."brandId"
 		LEFT JOIN public.shapes s on i."shapeId" = s."shapeId"
-		LEFT JOIN public.users u ON o."userId" = u.userid
+		LEFT JOIN public.users u1 ON o."userId" = u1.userid
+        LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = si."inboundId"
+        LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
+        LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT
@@ -143,21 +158,36 @@ const getAllScheduleOutbounds = async () => {
 const getScheduleOutboundByDate = async (date) => {
     try {
         const query = `
-            SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-                i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
-                i."exWarehouseLot" AS  "Ex-W Lot",
-                c."commodityName" AS "Metal",
-                b."brandName"  AS "Brand",
-                s."shapeName" AS "Shape",
-                i."noOfBundle" AS "Qty",
-                u."username" AS "Scheduled By"
-            FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
-            ON o."scheduleOutboundId" = si."scheduleOutboundId"
-            LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
-            LEFT JOIN public.commodities c on i."commodityId" = c."commodityId"
-            LEFT JOIN public.brands b on i."brandId" = b."brandId"
-            LEFT JOIN public.shapes s on i."shapeId" = s."shapeId"
-            LEFT JOIN public.users u ON o."userId" = u.userid
+                SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
+		i."exWarehouseLot" AS  "Ex-W Lot",
+		c."commodityName" AS "Metal",
+		b."brandName"  AS "Brand",
+		s."shapeName" AS "Shape",
+		i."noOfBundle" AS "Qty",
+		i."netWeight" AS "Net Weight",
+		i."grossWeight" AS "Gross Weight",
+		i."actualWeight" AS "Actual Weight",
+        exlme."exLmeWarehouseName" AS "Ex-LME Warehouse",
+        o."releaseWarehouse" AS "Release Warehouse",
+        o."createdAt" AS "Scheduled Outbound Date",
+        o."releaseDate" AS "Release Date",
+        o."deliveryDate" AS "Delivery Date",
+        o."lotReleaseWeight" AS "Lot Release Weight",
+        o."exportDate" AS "Export Date",
+        o."storageReleaseLocation" AS "Storage Release Location",
+		u1."username" AS "Scheduled By",
+		u2."username" AS "Processed By"
+		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
+		ON o."scheduleOutboundId" = si."scheduleOutboundId"
+		LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
+		LEFT JOIN public.commodities c on i."commodityId" = c."commodityId"
+		LEFT JOIN public.brands b on i."brandId" = b."brandId"
+		LEFT JOIN public.shapes s on i."shapeId" = s."shapeId"
+		LEFT JOIN public.users u1 ON o."userId" = u1.userid
+        LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = si."inboundId"
+        LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
+        LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
             WHERE TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
         `;
         const result = await db.sequelize.query(query, {
@@ -174,21 +204,36 @@ const getScheduleOutboundByDate = async (date) => {
 const getScheduleOutboundByDateRange = async (startDate, endDate) => {
     try {
         const query = `
-            SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-                i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
-                i."exWarehouseLot" AS  "Ex-W Lot",
-                c."commodityName" AS "Metal",
-                b."brandName"  AS "Brand",
-                s."shapeName" AS "Shape",
-                i."noOfBundle" AS "Qty",
-                u."username" AS "Scheduled By"
-            FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
-            ON o."scheduleOutboundId" = si."scheduleOutboundId"
-            LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
-            LEFT JOIN public.commodities c on i."commodityId" = c."commodityId"
-            LEFT JOIN public.brands b on i."brandId" = b."brandId"
-            LEFT JOIN public.shapes s on i."shapeId" = s."shapeId"
-            LEFT JOIN public.users u ON o."userId" = u.userid
+             SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
+		i."exWarehouseLot" AS  "Ex-W Lot",
+		c."commodityName" AS "Metal",
+		b."brandName"  AS "Brand",
+		s."shapeName" AS "Shape",
+		i."noOfBundle" AS "Qty",
+		i."netWeight" AS "Net Weight",
+		i."grossWeight" AS "Gross Weight",
+		i."actualWeight" AS "Actual Weight",
+        exlme."exLmeWarehouseName" AS "Ex-LME Warehouse",
+        o."releaseDate" AS "Release Date",
+        o."releaseWarehouse" AS "Release Warehouse",
+        o."createdAt" AS "Scheduled Outbound Date",
+        o."deliveryDate" AS "Delivery Date",
+        o."lotReleaseWeight" AS "Lot Release Weight",
+        o."storageReleaseLocation" AS "Storage Release Location",
+        o."exportDate" AS "Export Date",
+		u1."username" AS "Scheduled By",
+		u2."username" AS "Processed By"
+		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
+		ON o."scheduleOutboundId" = si."scheduleOutboundId"
+		LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
+		LEFT JOIN public.commodities c on i."commodityId" = c."commodityId"
+		LEFT JOIN public.brands b on i."brandId" = b."brandId"
+		LEFT JOIN public.shapes s on i."shapeId" = s."shapeId"
+		LEFT JOIN public.users u1 ON o."userId" = u1.userid
+        LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = si."inboundId"
+        LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
+        LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
             WHERE TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
         `;
         const result = await db.sequelize.query(query, {

@@ -137,7 +137,7 @@ exports.uploadExcel = async (req, res) => {
     const inWarehouseIndex = headers.indexOf('Inbound Warehouse');
 
     if (jobNoIndex === -1) {
-      return res.status(400).json({ message: 'Missing "Job No" column in Excel file.' });
+      return res.status(400).json({ message: 'Invalid data in excel file. Please check your file again.' });
     }
 
     const jobDataMap = new Map();

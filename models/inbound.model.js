@@ -12,7 +12,8 @@ const getAllInbound = async () => {
                 b."brandName" AS "Brand",
                 s."shapeName" AS "Shape",
                 i."noOfBundle" AS "Qty", 
-                u."username" AS "Scheduled By"
+                u1."username" AS "Scheduled By",
+                u2."username" AS "Processed By"
             FROM 
                 public.inbounds i 
             JOIN 
@@ -22,7 +23,9 @@ const getAllInbound = async () => {
             JOIN 
                 public.shapes s ON s."shapeId" = i."shapeId"
             JOIN 
-                public.users u ON u.userid = i."userId"
+                public.users u1 ON u1.userid = i."userId"
+            LEFT JOIN
+                public.users u2 ON u2.userid = i."processedId"
             WHERE 
                 i."inboundDate" IS NOT NULL
             ORDER BY 
@@ -54,7 +57,8 @@ const getInboundByDate = async (date) => {
                 b."brandName" AS "Brand",
                 s."shapeName" AS "Shape",
                 i."noOfBundle" AS "Qty",
-                u."username" AS "Scheduled By"
+                u1."username" AS "Scheduled By",
+                u2."username" AS "Processed By"
             FROM
                 public.inbounds i
             JOIN
@@ -64,7 +68,9 @@ const getInboundByDate = async (date) => {
             JOIN
                 public.shapes s ON s."shapeId" = i."shapeId"
             JOIN
-                public.users u ON u.userid = i."userId"
+                public.users u1 ON u1.userid = i."userId"
+            LEFT JOIN
+                public.users u2 ON u2.userid = i."processedId"
             WHERE
                 TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
             ORDER BY
@@ -94,7 +100,8 @@ const getInboundByDateRange = async (startDate, endDate) => {
                 b."brandName" AS "Brand",
                 s."shapeName" AS "Shape",
                 i."noOfBundle" AS "Qty",
-                u."username" AS "Scheduled By"
+                u1."username" AS "Scheduled By",
+                u2."username" AS "Processed By"
             FROM
                 public.inbounds i
             JOIN
@@ -104,7 +111,9 @@ const getInboundByDateRange = async (startDate, endDate) => {
             JOIN
                 public.shapes s ON s."shapeId" = i."shapeId"
             JOIN
-                public.users u ON u.userid = i."userId"
+                public.users u1 ON u1.userid = i."userId"
+            LEFT JOIN
+                public.users u2 ON u2.userid = i."processedId"
             WHERE
                 TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
             ORDER BY
@@ -180,7 +189,7 @@ const getAllScheduleInbound = async () => {
     try {
         const query = `
           select  
-          TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+          TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
 		l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 2, '0') AS "Lot No",
         l."lotId",
 		l."exWarehouseLot" AS  "Ex-W Lot",
@@ -188,10 +197,21 @@ const getAllScheduleInbound = async () => {
 		l."brand"  AS "Brand",
 		l."shape"  AS "Shape",
 		l."expectedBundleCount" AS "Qty", 
-		u."username" AS "Scheduled By"
-            from public.lot l 
-            JOIN public.scheduleinbounds i ON l."scheduleInboundId" = i."scheduleInboundId"
-            LEFT JOIN public.users u ON i."userId" = u.userid
+        l."exWarehouseWarrant" AS "Warrant",
+        l."exWarehouseLocation" AS "Ex-W Location",
+        l."exLmeWarehouse" AS "Ex-LME Warehouse",
+        l."netWeight" AS "Net Weight",
+        l."grossWeight" AS "Gross Weight",
+        l."actualWeight" AS "Actual Weight",
+        l."inboundWarehouse" AS "Inbound Warehouse",
+        TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
+		u1."username" AS "Scheduled By",
+        u2."username" AS "Processed By"
+         FROM public.lot l
+        JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
+        LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
+        LEFT JOIN public.users u1 ON u1."userid" = si."userId"
+        LEFT JOIN public.users u2 ON u2."userid" = i."processedId";
 
         `;
         const result = await db.sequelize.query(query, {
@@ -217,16 +237,24 @@ const getScheduleInboundByDate = async (date) => {
                 l."brand" AS "Brand",
                 l."shape" AS "Shape",
                 l."expectedBundleCount" AS "Qty",
-                u."username" AS "Scheduled By"
-               
-            FROM
-                public.lot l
-            JOIN
-                public.scheduleinbounds i ON l."scheduleInboundId" = i."scheduleInboundId"
-            LEFT JOIN
-                public.users u ON i."userId" = u.userid
+                l."exWarehouseWarrant" AS "Warrant",
+                l."exWarehouseLocation" AS "Ex-W Location",
+                l."exLmeWarehouse" AS "Ex-LME Warehouse",
+                l."netWeight" AS "Net Weight",
+                l."grossWeight" AS "Gross Weight",
+                l."actualWeight" AS "Actual Weight",
+                l."inboundWarehouse" AS "Inbound Warehouse",
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
+                u1."username" AS "Scheduled By",
+                u2."username" AS "Processed By"             
+           FROM public.lot l 
+            JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
+            LEFT JOIN public.inbounds i 
+            ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
+            LEFT JOIN public.users u1 ON u1."userid" = si."userId"
+            LEFT JOIN public.users u2 ON u2."userid" = i."processedId"
             WHERE
-                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
@@ -243,7 +271,7 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
     try {
         const query = `
             SELECT
-                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
                 l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 2, '0') AS "Lot No",
                 l."lotId",
                 l."exWarehouseLot" AS "Ex-W Lot",
@@ -251,15 +279,24 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
                 l."brand" AS "Brand",
                 l."shape" AS "Shape",
                 l."expectedBundleCount" AS "Qty",
-                u."username" AS "Scheduled By"
-            FROM
-                public.lot l
-            JOIN
-                public.scheduleinbounds i ON l."scheduleInboundId" = i."scheduleInboundId"
-            LEFT JOIN
-                public.users u ON i."userId" = u.userid
+                l."exWarehouseWarrant" AS "Warrant",
+                l."exWarehouseLocation" AS "Ex-W Location",
+                l."exLmeWarehouse" AS "Ex-LME Warehouse",
+                l."netWeight" AS "Net Weight",
+                l."grossWeight" AS "Gross Weight",
+                l."actualWeight" AS "Actual Weight",
+                l."inboundWarehouse" AS "Inbound Warehouse",
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
+                u1."username" AS "Scheduled By",
+                u2."username" AS "Processed By"
+            FROM public.lot l 
+                JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
+                LEFT JOIN public.inbounds i 
+                ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
+                LEFT JOIN public.users u1 ON u1."userid" = si."userId"
+                LEFT JOIN public.users u2 ON u2."userid" = i."processedId"
             WHERE
-                TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
         `;
         
         const result = await db.sequelize.query(query, {
