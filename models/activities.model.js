@@ -603,6 +603,8 @@ const getAllScheduleInbound = async ({
                       l."brand" AS "Brand",
                       l."shape" AS "Shape",
                       l."expectedBundleCount" AS "Qty", 
+                      l."isRepackProvided", 
+                      l."isRebundled",
                       u1."username" AS "Scheduled By",
                       u2."username" AS "Processed By"
                     FROM public.lot l 
@@ -797,8 +799,8 @@ const getScheduleInboundRecordByLotId = async (lotId) => {
           TO_CHAR(l."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
         FROM public.lot l
         LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
-        LEFT JOIN public.users u1 ON u1.userid = i."userId"
         LEFT JOIN public.inbounds i on i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
+        LEFT JOIN public.users u1 ON u1.userid = i."userId"
         LEFT JOIN public.users u2 ON u2.userid = i."processedId"
         WHERE l."lotId" = :lotId
         LIMIT 1;`;

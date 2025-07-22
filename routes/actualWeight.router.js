@@ -2,64 +2,72 @@ const express = require("express");
 const router = express.Router();
 const actualWeightModel = require("../models/actualWeight.model");
 
-router.post("/actual/save-inbound-bundles", async (req, res) => {
-  const { inboundId, actualWeight, bundles } = req.body;
-    console.log("Received data:", req.body);
-
+router.post("/actual/save-weight", async (req, res) => {
+  const { inboundId, lotId, actualWeight, bundles } = req.body;
+  
   try {
-    const result = await actualWeightModel.saveInboundWithBundles(inboundId, actualWeight, bundles);
+    let result;
+    if (inboundId) {
+      result = await actualWeightModel.saveInboundWithBundles(inboundId, actualWeight, bundles);
+    } else if (lotId) {
+      result = await actualWeightModel.saveLotWithBundles(lotId, actualWeight, bundles);
+    } else {
+      return res.status(400).json({ error: "Either inboundId or lotId must be provided" });
+    }
     res.status(200).json(result);
   } catch (error) {
-    console.error("Error saving inbound bundles:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: error.message });
   }
 });
 
-router.post("/actual/get-inbound-bundles", async (req, res) => {
-  const { inboundId } = req.body;
-  try {
-    const result = await actualWeightModel.getInboundWithBundles(inboundId);
-    res.status(200).json(result);
-  } catch (error) {
-    console.error("Error fetching inbound bundles:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
+router.post("/actual/get-weight", async (req, res) => {
+  const { inboundId, lotId } = req.body;
 
-router.post("/actual/update-inbound-weight", async (req, res) => {
-  const { inboundId, actualWeight } = req.body;
   try {
-    const result = await actualWeightModel.updateInboundActualWeight(inboundId, actualWeight);
+    let result;
+    if (inboundId) {
+      result = await actualWeightModel.getInboundWithBundles(inboundId);
+    } else if (lotId) {
+      result = await actualWeightModel.getLotWithBundles(lotId);
+    } else {
+      return res.status(400).json({ error: "Either inboundId or lotId must be provided" });
+    }
     res.status(200).json(result);
   } catch (error) {
-    console.error("Error updating inbound weight:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: error.message });
   }
 });
 
 router.post("/actual/update-bundle", async (req, res) => {
-  const { inboundBundleId, weight, meltNo } = req.body;
-  try {
-    const result = await actualWeightModel.updateSingleBundle(inboundBundleId, weight, meltNo);
-    res.status(200).json(result);
-  } catch (error) {
-    console.error("Error updating bundle:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-}); 
-
-router.post("/actual/get-inbound-bundles-if-weighted", async (req, res) => {
-  const { inboundId } = req.body;
+  const { bundleId, weight, meltNo } = req.body;
 
   try {
-    const result = await actualWeightModel.getInboundBundlesIfWeighted(inboundId);
+    if (!bundleId) {
+      return res.status(400).json({ error: "bundleId is required" });
+    }
+    const result = await actualWeightModel.updateSingleBundle(bundleId, weight, meltNo);
     res.status(200).json(result);
   } catch (error) {
-    console.error("Error fetching inbound bundles if weighted:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: error.message });
   }
 });
 
+router.post("/actual/get-bundles-if-weighted", async (req, res) => {
+  const { inboundId, lotId } = req.body;
 
+  try {
+    let result;
+    if (inboundId) {
+      result = await actualWeightModel.getBundlesIfWeighted(inboundId, true);
+    } else if (lotId) {
+      result = await actualWeightModel.getBundlesIfWeighted(lotId, false);
+    } else {
+      return res.status(400).json({ error: "Either inboundId or lotId must be provided" });
+    }
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;
