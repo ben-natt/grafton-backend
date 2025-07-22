@@ -517,7 +517,7 @@ const getAllScheduleInbound = async ({
     }
     if (filters.startDate && filters.endDate) {
       whereClauses.push(
-        `si."inboundDate"::date BETWEEN :startDate::date AND :endDate::date`
+        `(si."inboundDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
       );
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
@@ -607,9 +607,10 @@ const getAllScheduleInbound = async ({
                       u2."username" AS "Processed By"
                     FROM public.lot l 
                     JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
+                     LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
                     LEFT JOIN public.users u1 ON si."userId" = u1.userid
-                    LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
-                    LEFT JOIN public.users u2 ON u2.userid = i."userId"
+                   
+                    LEFT JOIN public.users u2 ON u2.userid = i."processedId"
                     ${whereString}
                     ${orderByClause}
                     ${paginationClause}`;
@@ -797,8 +798,8 @@ const getScheduleInboundRecordByLotId = async (lotId) => {
           TO_CHAR(l."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
         FROM public.lot l
         LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
-        LEFT JOIN public.users u1 ON u1.userid = i."userId"
         LEFT JOIN public.inbounds i on i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
+        LEFT JOIN public.users u1 ON u1.userid = si."userId"
         LEFT JOIN public.users u2 ON u2.userid = i."processedId"
         WHERE l."lotId" = :lotId
         LIMIT 1;`;
