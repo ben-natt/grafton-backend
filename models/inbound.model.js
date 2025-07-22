@@ -31,8 +31,8 @@ const getAllInbound = async () => {
             ORDER BY 
                 i."inboundId" limit 200
         `;
-        
-      const result = await db.sequelize.query(query, {
+
+        const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT
         });
 
@@ -78,7 +78,7 @@ const getInboundByDate = async (date) => {
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
-            replacements: { date } 
+            replacements: { date }
         });
         return result;
     } catch (error) {
@@ -119,12 +119,12 @@ const getInboundByDateRange = async (startDate, endDate) => {
             ORDER BY
                 i."inboundId" LIMIT 200
         `;
-        
+
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
             replacements: { startDate, endDate }
         });
-        
+
         return result;
     } catch (error) {
         console.error(`Error fetching inbound records for date range ${startDate} to ${endDate}:`, error);
@@ -140,17 +140,17 @@ const getUpcomingInbound = async () => {
             FROM public.lot
             WHERE status IN ('Pending')
         `;
-        
+
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT
         });
-        
+
         // Handle case where result might be empty
         if (!result || result.length === 0) {
             console.log('No upcoming inbound records found!');
             return 0;
         }
-        
+
         return result[0].upcomingInbound || 0;
     } catch (error) {
         console.error('Error fetching upcoming inbound records:', error);
@@ -174,8 +174,8 @@ const getInventory = async () => {
             GROUP BY 
                 c."commodityName";
         `;
-        
-            const result = await db.sequelize.query(query, {
+
+        const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT
         });
         return result;
@@ -204,6 +204,8 @@ const getAllScheduleInbound = async () => {
         l."grossWeight" AS "Gross Weight",
         l."actualWeight" AS "Actual Weight",
         l."inboundWarehouse" AS "Inbound Warehouse",
+        l."isRepackProvided", 
+        l."isRebundled",
         TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
 		u1."username" AS "Scheduled By",
         u2."username" AS "Processed By"
@@ -244,6 +246,8 @@ const getScheduleInboundByDate = async (date) => {
                 l."grossWeight" AS "Gross Weight",
                 l."actualWeight" AS "Actual Weight",
                 l."inboundWarehouse" AS "Inbound Warehouse",
+                l."isRepackProvided", 
+                l."isRebundled",
                 TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
                 u1."username" AS "Scheduled By",
                 u2."username" AS "Processed By"             
@@ -286,6 +290,8 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
                 l."grossWeight" AS "Gross Weight",
                 l."actualWeight" AS "Actual Weight",
                 l."inboundWarehouse" AS "Inbound Warehouse",
+                l."isRepackProvided", 
+                l."isRebundled",
                 TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
                 u1."username" AS "Scheduled By",
                 u2."username" AS "Processed By"
@@ -298,12 +304,12 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
             WHERE
                 TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
         `;
-        
+
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
             replacements: { startDate, endDate }
         });
-        
+
         return result;
     } catch (error) {
         console.error(`Error fetching schedule inbound records for date range ${startDate} to ${endDate}:`, error);

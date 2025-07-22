@@ -603,6 +603,8 @@ const getAllScheduleInbound = async ({
                       l."brand" AS "Brand",
                       l."shape" AS "Shape",
                       l."expectedBundleCount" AS "Qty", 
+                      l."isRepackProvided", 
+                      l."isRebundled",
                       u1."username" AS "Scheduled By",
                       u2."username" AS "Processed By"
                     FROM public.lot l 
