@@ -43,9 +43,9 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
   }
 };
 
-
 // MODAL TO CHANGE THE LOT STATUS AND INSERT INTO INBOUND
 const insertInboundFromLots = async (lotsArray, userId) => {
+  // Using the original parameter name 'userId'
   const transaction = await db.sequelize.transaction();
 
   try {
@@ -86,11 +86,33 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       });
 
       if (lots.length === 0) {
-        console.warn(`Skipping lot with ID ${lotId}: Not found or not pending.`);
+        console.warn(
+          `Skipping lot with ID ${lotId}: Not found or not pending.`
+        );
         continue;
       }
 
       const lot = lots[0];
+
+      // Fetch the original scheduler's User ID from the scheduleinbounds table
+      const scheduleInboundQuery = `
+        SELECT "userId" FROM public.scheduleinbounds WHERE "scheduleInboundId" = :scheduleInboundId
+      `;
+      const scheduleInboundResult = await db.sequelize.query(
+        scheduleInboundQuery,
+        {
+          replacements: { scheduleInboundId: lot.scheduleInboundId },
+          type: db.sequelize.QueryTypes.SELECT,
+          transaction,
+        }
+      );
+
+      if (scheduleInboundResult.length === 0) {
+        throw new Error(
+          `Could not find the original scheduler for lotId ${lotId}.`
+        );
+      }
+      const schedulerUserId = scheduleInboundResult[0].userId;
 
       // Check for existing record
       const existingQuery = `
@@ -105,25 +127,55 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       });
 
       if (existing.length > 0) {
-        console.warn(`Skipping insert for jobNo ${lot.jobNo} and lotNo ${lot.lotNo}: Record already exists.`);
+        console.warn(
+          `Skipping insert for jobNo ${lot.jobNo} and lotNo ${lot.lotNo}: Record already exists.`
+        );
         continue;
       }
 
       // Convert name fields to ID
-      const commodityId = await getIdByName("commodities", "commodityName", "commodityId", lot.commodity);
-      const shapeId = await getIdByName("shapes", "shapeName", "shapeId", lot.shape);
-      const brandId = await getIdByName("brands", "brandName", "brandId", lot.brand);
-      const exLmeWarehouseId = await getIdByName("exlmewarehouses", "exLmeWarehouseName", "exLmeWarehouseId", lot.exLmeWarehouse);
-      const inboundWarehouseId = await getIdByName("inboundwarehouses", "inboundWarehouseName", "inboundWarehouseId", lot.inboundWarehouse);
-      const exWarehouseLocationId = await getIdByName("exwarehouselocations", "exWarehouseLocationName", "exWarehouseLocationId", lot.exWarehouseLocation);
+      const commodityId = await getIdByName(
+        "commodities",
+        "commodityName",
+        "commodityId",
+        lot.commodity
+      );
+      const shapeId = await getIdByName(
+        "shapes",
+        "shapeName",
+        "shapeId",
+        lot.shape
+      );
+      const brandId = await getIdByName(
+        "brands",
+        "brandName",
+        "brandId",
+        lot.brand
+      );
+      const exLmeWarehouseId = await getIdByName(
+        "exlmewarehouses",
+        "exLmeWarehouseName",
+        "exLmeWarehouseId",
+        lot.exLmeWarehouse
+      );
+      const inboundWarehouseId = await getIdByName(
+        "inboundwarehouses",
+        "inboundWarehouseName",
+        "inboundWarehouseId",
+        lot.inboundWarehouse
+      );
+      const exWarehouseLocationId = await getIdByName(
+        "exwarehouselocations",
+        "exWarehouseLocationName",
+        "exWarehouseLocationId",
+        lot.exWarehouseLocation
+      );
 
       // Update lot status
       await db.sequelize.query(
         `UPDATE public.lot
-   SET status = 'Received',
-       "isConfirm" = true,
-       "updatedAt" = NOW()
-   WHERE "lotId" = :lotId`,
+         SET status = 'Received', "isConfirm" = true, "updatedAt" = NOW()
+         WHERE "lotId" = :lotId`,
         {
           replacements: { lotId },
           type: db.sequelize.QueryTypes.UPDATE,
@@ -131,21 +183,20 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         }
       );
 
-
-      // Insert into inbounds
+      // Update the INSERT statement
       const insertQuery = `
         INSERT INTO public.inbounds (
           "jobNo", "lotNo", "noOfBundle", "barcodeNo", "commodityId", "shapeId",
           "exLmeWarehouseId", "exWarehouseWarrant", "inboundWarehouseId",
           "grossWeight", "netWeight", "actualWeight", "isWeighted", "isRelabelled",
           "isRebundled", "noOfMetalStraps", "isRepackProvided", "repackDescription",
-          "userId", "createdAt", "updatedAt", "brandId", "inboundDate",
+          "userId", "processedId", "createdAt", "updatedAt", "brandId", "inboundDate",
           "exWarehouseLot", "scheduleInboundDate", "exWarehouseLocationId"
         ) VALUES (
           :jobNo, :lotNo, :noOfBundle, :barcodeNo, :commodityId, :shapeId,
           :exLmeWarehouseId, :exWarehouseWarrant, :inboundWarehouseId,
           :grossWeight, :netWeight, :actualWeight, false, false,
-          false, 0, false, '', :userId, NOW(), NOW(),
+          false, 0, false, '', :userId, :processedId, NOW(), NOW(),
           :brandId, NOW(), :exWarehouseLot, NOW(), :exWarehouseLocationId
         )
         RETURNING *;
@@ -165,7 +216,8 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           grossWeight: lot.grossWeight,
           netWeight: lot.netWeight,
           actualWeight: lot.actualWeight,
-          userId,
+          userId: schedulerUserId, // Original scheduler's ID
+          processedId: userId, // Logged-in user's ID (from the function parameter)
           brandId,
           exWarehouseLot: lot.exWarehouseLot,
           exWarehouseLocationId,
@@ -186,9 +238,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
   }
 };
 
-
-
 module.exports = {
   reportConfirmation,
-  insertInboundFromLots
+  insertInboundFromLots,
 };
