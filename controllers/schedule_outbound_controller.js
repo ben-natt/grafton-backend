@@ -1,3 +1,4 @@
+
 const XLSX = require('xlsx');
 const { v4: uuidv4 } = require('uuid');
 const { sequelize, DataTypes } = require('../database');
@@ -5,15 +6,14 @@ const { ScheduleOutbound, SelectedInbounds, ScheduleInbound, Lot, Inbounds, Bran
 const fs = require('fs');
 const auth = require('../middleware/auth')
 
+
 function excelDateToJSDate(excelDate) {
   if (excelDate === null || excelDate === undefined || excelDate === '') return null;
-
   let parsedDate;
   if (typeof excelDate === 'string') {
     parsedDate = new Date(excelDate);
     if (!isNaN(parsedDate.getTime())) return parsedDate;
   }
-
   if (typeof excelDate === 'number' || (typeof excelDate === 'string' && !isNaN(parseFloat(excelDate)))) {
     const numValue = parseFloat(excelDate);
     if (numValue > 0) {
@@ -22,7 +22,6 @@ function excelDateToJSDate(excelDate) {
       return date;
     }
   }
-
   return null;
 }
 
@@ -75,7 +74,6 @@ exports.uploadExcel = async (req, res) => {
 
       const jobNoFromExcel = getCellValue('Job Number')?.toString().trim();
       const lotNoFromExcel = parseInt(getCellValue('Lot No'), 10);
-      console.log(getCellValue('Release Date'), getCellValue('Export Date'), getCellValue('Stuffing Date'), getCellValue('Delivery Date'));
 
       if (!jobNoFromExcel || isNaN(lotNoFromExcel)) {
         console.warn('Skipping row due to missing or invalid Job Number or Lot No:', row);
@@ -101,26 +99,17 @@ exports.uploadExcel = async (req, res) => {
         const exportDateExcel = excelDateToJSDate(getCellValue('Export Date'));
         const stuffingDateExcel = excelDateToJSDate(getCellValue('Stuffing Date'));
         const deliveryDateExcel = excelDateToJSDate(getCellValue('Delivery Date'));
-        console.log('Parsed Dates:', {
-          releaseDateExcel,
-          exportDateExcel,
-          stuffingDateExcel,
-          deliveryDateExcel
-        });
 
         const lotDataForFrontend = {
           inboundId: masterInbound.inboundId,
           jobNo: masterInbound.jobNo,
           lotNo: masterInbound.lotNo,
           exWarehouseLot: masterInbound.exWarehouseLot,
-
           metal: masterInbound.commodityDetails?.name ?? null,
           brand: masterInbound.brandDetails?.name ?? null,
           shape: masterInbound.shapeDetails?.name ?? null,
-
           quantity: masterInbound.noOfBundle,
           weight: masterInbound.netWeight,
-
           releaseDate: toLocalYYYYMMDD(releaseDateExcel),
           storageReleaseLocation: getCellValue('Storage Release Location')?.toString().trim() ?? null,
           releaseWarehouse: getCellValue('Release To Warehouse')?.toString().trim() ?? null,
@@ -135,7 +124,6 @@ exports.uploadExcel = async (req, res) => {
 
         processedLots.push(lotDataForFrontend);
         totalLotsFound++;
-        console.log('1',processedLots);
       } else {
         console.warn(`Inbound record with Job No: ${jobNoFromExcel} and Lot No: ${lotNoFromExcel} not found in inbounds table. Skipping.`);
       }
@@ -160,8 +148,10 @@ exports.uploadExcel = async (req, res) => {
 };
 
 
+
 exports.createScheduleOutbound = async (req, res) => {
-  const userId = req.user.userId;
+  const userId = req.user?.userId;
+
   const {
     releaseDate,
     storageReleaseLocation,
@@ -176,65 +166,91 @@ exports.createScheduleOutbound = async (req, res) => {
     selectedLots
   } = req.body;
 
-  const outboundType = (containerNo && containerNo.length > 0) ? 'container' : 'flatbed';
-  console.log('outboundType:', outboundType);
-  console.log('request body for createScheduleOutbound:', req.body);
-  if (!releaseDate || releaseDate.trim() === '' ||
-      !storageReleaseLocation || storageReleaseLocation.trim() === '' ||
-      !releaseWarehouse || releaseWarehouse.trim() === '' ||
-      lotReleaseWeight == null ||
-      !transportVendor || transportVendor.trim() === '' ||
-      !selectedLots || selectedLots.length === 0) {
-    return res.status(400).json({ message: 'Missing required data for scheduling outbound. Ensure all required fields are provided.' });
+  // Validate required fields
+  if (!releaseDate || !storageReleaseLocation || !releaseWarehouse || lotReleaseWeight == null || !transportVendor || !Array.isArray(selectedLots) || selectedLots.length === 0) {
+    return res.status(400).json({
+      message: 'Missing required data for scheduling outbound. Ensure all required fields are provided.'
+    });
   }
 
+  const outboundType = (containerNo?.trim()?.length > 0) ? 'container' : 'flatbed';
   const transaction = await sequelize.transaction();
 
   try {
-    const newScheduleOutbound = await ScheduleOutbound.create({
-      releaseDate: parseLocalDate(releaseDate),
-      userId: userId,
-      storageReleaseLocation,
-      releaseWarehouse,
-      lotReleaseWeight,
-      transportVendor,
-      outboundType: outboundType,
-      exportDate: parseLocalDate(exportDate),
-      stuffingDate: parseLocalDate(stuffingDate),
-      containerNo,
-      sealNo,
-      deliveryDate: parseLocalDate(deliveryDate),
-    }, { transaction });
+    const result = await sequelize.query(
+      `
+      INSERT INTO public.scheduleoutbounds(
+        "releaseDate", "userId", "lotReleaseWeight", "outboundType",
+        "exportDate", "stuffingDate", "containerNo", "sealNo",
+        "createdAt", "updatedAt", "deliveryDate", "storageReleaseLocation",
+        "releaseWarehouse", "transportVendor"
+      )
+      VALUES (
+        :releaseDate, :userId, :lotReleaseWeight, :outboundType,
+        :exportDate, :stuffingDate, :containerNo, :sealNo,
+        NOW(), NOW(), :deliveryDate, :storageReleaseLocation,
+        :releaseWarehouse, :transportVendor
+      )
+      RETURNING "scheduleOutboundId";
+      `,
+      {
+        replacements: {
+          releaseDate: parseLocalDate(releaseDate),
+          userId,
+          lotReleaseWeight: parseFloat(lotReleaseWeight),
+          outboundType,
+          exportDate: parseLocalDate(exportDate),
+          stuffingDate: parseLocalDate(stuffingDate),
+          containerNo: containerNo || null,
+          sealNo: sealNo || null,
+          deliveryDate: parseLocalDate(deliveryDate),
+          storageReleaseLocation,
+          releaseWarehouse,
+          transportVendor
+        },
+        type: sequelize.QueryTypes.INSERT,
+        transaction
+      }
+    );
 
+    const scheduleOutboundId = result?.[0]?.[0]?.scheduleOutboundId;
+
+    if (!scheduleOutboundId) {
+      throw new Error("Failed to retrieve scheduleOutboundId.");
+    }
+
+    // Loop through selected lots
     for (const lot of selectedLots) {
-      const masterInboundRecord = await Inbounds.findOne({
+      const inboundRecord = await Inbounds.findOne({
         where: { jobNo: lot.jobNo, lotNo: lot.lotNo },
         attributes: ['inboundId'],
-        transaction,
+        transaction
       });
 
-      if (!masterInboundRecord) {
-        throw new Error(`Inbound record with Job No: ${lot.jobNo} and Lot No: ${lot.lotNo} not found.`);
+      if (!inboundRecord) {
+        throw new Error(`Inbound record not found: Job No "${lot.jobNo}", Lot No "${lot.lotNo}"`);
       }
 
       await SelectedInbounds.create({
-        scheduleOutboundId: newScheduleOutbound.scheduleOutboundId,
-        inboundId: masterInboundRecord.inboundId,
+        scheduleOutboundId,
+        inboundId: inboundRecord.inboundId,
         lotNo: lot.lotNo,
         jobNo: lot.jobNo,
-        isOutbounded: false,
+        isOutbounded: false
       }, { transaction });
     }
 
     await transaction.commit();
     res.status(200).json({
-      message: 'Outbound schedule and selected inbound lots created/updated successfully!',
-      scheduleOutboundId: newScheduleOutbound.scheduleOutboundId
+      message: 'Outbound schedule and selected inbound lots created successfully!',
+      jobNo: `SINO${scheduleOutboundId}`
     });
 
-  } catch (dbError) {
+  } catch (error) {
     await transaction.rollback();
-    console.error('Database error during outbound scheduling:', dbError);
-    res.status(500).json({ message: 'Error processing outbound scheduling data.', error: dbError.message });
+    res.status(500).json({
+      message: 'Error processing outbound schedule.',
+      error: error.message
+    });
   }
 };

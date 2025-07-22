@@ -7,6 +7,7 @@ const { sendEmail } = require("../nodemailler"); // Assuming your nodemailer set
 const otpStore = {};
 const passwordResetOtpStore = {}; // Separate store for password reset OTPs
 const OTP_EXPIRATION_MINUTES = 10;
+const OTP_COOLDOWN_MINUTES = 1; // Cooldown period in minutes
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -34,7 +35,7 @@ const storage = multer.diskStorage({
 // Multer middleware for handling single file uploads with validation.
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 1 * 1024 * 1024 }, // 1MB limit
+  limits: { fileSize: 2 * 1024 * 1024 }, // MODIFICATION: Increased to 2MB
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png|gif/; // Allowed file types
     const mimetype = filetypes.test(file.mimetype); // Check MIME type
@@ -46,7 +47,8 @@ const upload = multer({
       // If both MIME type and extension are valid
       return cb(null, true); // Accept the file
     }
-    cb(new Error("Only image files are allowed!"));
+    // REVISED: Pass a new Error object for better error handling
+    cb(new Error("Only image files (jpeg, jpg, png, gif) are allowed!"));
   },
 }).single("profileImage"); // 'profileImage' is the field name in the form data
 
@@ -115,90 +117,122 @@ router.post("/verify-otp", async (req, res) => {
 
 // Route to handle "Forgot Password" OTP request.
 router.post("/forgot-password-otp", async (req, res) => {
-    const { email } = req.body;
-    if (!email) {
-        return res.status(400).json({ message: "Email is required" });
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ message: "Email is required" });
+  }
+
+  // --- Start of Cooldown Logic ---
+  const existingOtpData = passwordResetOtpStore[email];
+  if (existingOtpData && existingOtpData.lastSent) {
+    const cooldownPeriod = OTP_COOLDOWN_MINUTES * 60 * 1000;
+    const timeSinceLastSent = Date.now() - existingOtpData.lastSent;
+
+    if (timeSinceLastSent < cooldownPeriod) {
+      const timeLeft = Math.ceil((cooldownPeriod - timeSinceLastSent) / 1000);
+      // Return a "Too Many Requests" error
+      return res.status(429).json({
+        message: `Please wait ${timeLeft} seconds before requesting another OTP.`,
+      });
     }
-    try {
-        const user = await usersModel.getUserByEmail(email);
-        // If user does not exist, return an error.
-        if (!user) {
-            return res.status(404).json({ message: "Email is not registered. Please create an account." });
-        }
-        
-        // If user exists, proceed with sending OTP.
-        const otp = generateOtp();
-        const expiresAt = Date.now() + OTP_EXPIRATION_MINUTES * 60 * 1000;
-        passwordResetOtpStore[email] = { otp, expiresAt, verified: false };
-        
-        await sendEmail(email, otp, "Password Reset OTP");
-        console.log(`Password reset OTP sent to ${email}: ${otp}`);
-        
-        res.status(200).json({ message: "A password reset OTP has been sent to your email." });
-    } catch (error) {
-        console.error("Error in /forgot-password-otp:", error);
-        res.status(500).json({ message: "Server error while sending OTP." });
+  }
+  // --- End of Cooldown Logic ---
+
+  try {
+    const user = await usersModel.getUserByEmail(email);
+    // If user does not exist, return an error.
+    if (!user) {
+      return res.status(404).json({
+        message: "Email is not registered. Please create an account.",
+      });
     }
+
+    // If user exists, proceed with sending OTP.
+    const otp = generateOtp();
+    const expiresAt = Date.now() + OTP_EXPIRATION_MINUTES * 60 * 1000;
+    // Store OTP, expiration, and the timestamp of when it was sent
+    passwordResetOtpStore[email] = {
+      otp,
+      expiresAt,
+      verified: false,
+      lastSent: Date.now(),
+    };
+
+    await sendEmail(email, otp, "Password Reset OTP");
+    console.log(`Password reset OTP sent to ${email}: ${otp}`);
+
+    res
+      .status(200)
+      .json({ message: "A password reset OTP has been sent to your email." });
+  } catch (error) {
+    console.error("Error in /forgot-password-otp:", error);
+    res.status(500).json({ message: "Server error while sending OTP." });
+  }
 });
 
 // Route to verify the OTP for the password reset flow.
 router.post("/verify-password-reset-otp", async (req, res) => {
-    const { email, otp } = req.body;
-    if (!email || !otp) {
-        return res.status(400).json({ message: "Email and OTP are required." });
-    }
-    const storedOtpData = passwordResetOtpStore[email];
-    if (!storedOtpData) {
-        return res.status(400).json({ message: "Invalid OTP. Please request a new one." });
-    }
-    if (Date.now() > storedOtpData.expiresAt) {
-        delete passwordResetOtpStore[email];
-        return res.status(400).json({ message: "OTP has expired." });
-    }
-    if (storedOtpData.otp === otp) {
-        passwordResetOtpStore[email].verified = true;
-        res.status(200).json({ message: "OTP verified successfully." });
-    } else {
-        res.status(400).json({ message: "Invalid OTP." });
-    }
+  const { email, otp } = req.body;
+  if (!email || !otp) {
+    return res.status(400).json({ message: "Email and OTP are required." });
+  }
+  const storedOtpData = passwordResetOtpStore[email];
+  if (!storedOtpData) {
+    return res
+      .status(400)
+      .json({ message: "Invalid OTP. Please request a new one." });
+  }
+  if (Date.now() > storedOtpData.expiresAt) {
+    delete passwordResetOtpStore[email];
+    return res.status(400).json({ message: "OTP has expired." });
+  }
+  if (storedOtpData.otp === otp) {
+    passwordResetOtpStore[email].verified = true;
+    res.status(200).json({ message: "OTP verified successfully." });
+  } else {
+    res.status(400).json({ message: "Invalid OTP." });
+  }
 });
 
 // Route to reset the password after OTP verification.
 router.post("/reset-password", async (req, res) => {
-    const { email, newPassword } = req.body;
-    if (!email || !newPassword) {
-        return res.status(400).json({ message: "Email and new password are required." });
-    }
-    const storedOtpData = passwordResetOtpStore[email];
-    if (!storedOtpData || !storedOtpData.verified) {
-        return res.status(400).json({ message: "OTP not verified. Please complete the verification step first." });
-    }
+  const { email, newPassword } = req.body;
+  if (!email || !newPassword) {
+    return res
+      .status(400)
+      .json({ message: "Email and new password are required." });
+  }
+  const storedOtpData = passwordResetOtpStore[email];
+  if (!storedOtpData || !storedOtpData.verified) {
+    return res.status(400).json({
+      message: "OTP not verified. Please complete the verification step first.",
+    });
+  }
 
-    // Password complexity validation
-    if (newPassword.length < 8) {
-      return res
-        .status(400)
-        .json({ message: "Password must be at least 8 characters long" });
-    } else if (
-      !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/.test(newPassword)
-    ) {
-      return res.status(400).json({
-        message:
-          "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character.",
-      });
-    }
+  // Password complexity validation
+  if (newPassword.length < 8) {
+    return res
+      .status(400)
+      .json({ message: "Password must be at least 8 characters long" });
+  } else if (
+    !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/.test(newPassword)
+  ) {
+    return res.status(400).json({
+      message:
+        "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character.",
+    });
+  }
 
-    try {
-        // Assumes users.model.js has a function to update the password by email.
-        await usersModel.updateUserPassword(email, newPassword);
-        delete passwordResetOtpStore[email]; // Clean up the used OTP
-        res.status(200).json({ message: "Password has been reset successfully." });
-    } catch (error) {
-        console.error("Error resetting password:", error);
-        res.status(500).json({ message: "Server error while resetting password." });
-    }
+  try {
+    // Assumes users.model.js has a function to update the password by email.
+    await usersModel.updateUserPassword(email, newPassword);
+    delete passwordResetOtpStore[email]; // Clean up the used OTP
+    res.status(200).json({ message: "Password has been reset successfully." });
+  } catch (error) {
+    console.error("Error resetting password:", error);
+    res.status(500).json({ message: "Server error while resetting password." });
+  }
 });
-
 
 // Route for user registration.
 router.post("/register", async (req, res) => {
@@ -373,13 +407,26 @@ router.get("/profile", authenticate, async (req, res) => {
 });
 
 // Route to update the authenticated user's profile.
+// Route to update the authenticated user's profile.
 router.put("/profile", authenticate, (req, res) => {
   upload(req, res, async (err) => {
-    try {
-      if (err) {
-        return res.status(400).json({ message: err.message });
+    // MODIFICATION: Handle multer-specific errors first
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "Image file size cannot exceed 2MB.",
+          });
       }
+      return res.status(400).json({ success: false, message: err.message });
+    } else if (err) {
+      // Handle other errors (like file type filter)
+      return res.status(400).json({ success: false, message: err.message });
+    }
 
+    try {
       const userId = req.user.userId;
       const updates = {};
 
@@ -389,6 +436,7 @@ router.put("/profile", authenticate, (req, res) => {
       if (req.body.password) {
         if (req.body.password.length < 8) {
           return res.status(400).json({
+            success: false,
             message: "Password must be at least 8 characters long",
           });
         }
@@ -398,6 +446,7 @@ router.put("/profile", authenticate, (req, res) => {
           )
         ) {
           return res.status(400).json({
+            success: false,
             message:
               "Password must contain uppercase, lowercase, number, and special character",
           });
@@ -428,30 +477,57 @@ router.put("/profile", authenticate, (req, res) => {
       }
 
       if (Object.keys(updates).length === 0) {
-        return res.status(400).json({ message: "No updates provided" });
+        return res
+          .status(400)
+          .json({ success: false, message: "No updates provided" });
       }
 
       await usersModel.updateUserProfile(userId, updates);
       // Fetch the user again to get the most recent data, including the role name.
       const userWithUpdatedRole = await usersModel.getUserById(userId);
 
+      const protocol =
+        req.headers["x-forwarded-proto"]?.split(",")[0] || req.protocol;
+      const fullProfileImageUrl = userWithUpdatedRole.profileimageurl
+        ? `${protocol}://${req.get("host")}/${
+            userWithUpdatedRole.profileimageurl
+          }`
+        : null;
+
       const userProfile = {
         userid: userWithUpdatedRole.userid,
         email: userWithUpdatedRole.email,
         username: userWithUpdatedRole.username,
-        profileimageurl: userWithUpdatedRole.profileimageurl
-          ? `${req.protocol}://${req.get("host")}/${
-              userWithUpdatedRole.profileimageurl
-            }`
-          : null,
+        profileimageurl: fullProfileImageUrl,
         roleid: userWithUpdatedRole.roleid,
         rolename: userWithUpdatedRole.rolename,
       };
 
-      res.status(200).json(userProfile);
+      // MODIFICATION: Standardize success response
+      res.status(200).json({ success: true, data: userProfile });
     } catch (error) {
       console.error("Error updating profile:", error);
-      res.status(500).json({ message: "Server error", error: error.message });
+      // MODIFICATION: Catch unique constraint violation for username
+      // The error name can be 'SequelizeUniqueConstraintError'
+      // The postgres error code for unique violation is '23505'
+      if (
+        error.name === "SequelizeUniqueConstraintError" ||
+        (error.original && error.original.code === "23505")
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "Username already exists. Please choose a different one.",
+          });
+      }
+      res
+        .status(500)
+        .json({
+          success: false,
+          message: "Server error",
+          error: error.message,
+        });
     }
   });
 });
