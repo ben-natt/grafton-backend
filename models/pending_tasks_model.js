@@ -300,10 +300,11 @@ const findInboundTasksOffice = async (
       replacements.hasWarning = filters.type === "Discrepancies";
     }
 
+    // Corrected JOIN condition: s."scheduleInboundId" = l."scheduleInboundId"
     const countQuery = `
       SELECT COUNT(DISTINCT l."jobNo")::int
       FROM public.lot l
-      JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
+      JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
       JOIN public.users u ON s."userId" = u."userid"
       WHERE ${whereClauses}
     `;
@@ -314,10 +315,11 @@ const findInboundTasksOffice = async (
     });
     const totalCount = countResult.count;
 
+    // Corrected JOIN condition: s."scheduleInboundId" = l."scheduleInboundId"
     const jobNoQuery = `
       SELECT l."jobNo"
       FROM public.lot l
-      JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
+      JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
       JOIN public.users u ON s."userId" = u."userid"
       WHERE ${whereClauses}
       GROUP BY l."jobNo"
@@ -334,6 +336,7 @@ const findInboundTasksOffice = async (
       return { totalCount, data: {} };
     }
 
+    // Corrected JOIN condition: s."scheduleInboundId" = l."scheduleInboundId"
     const tasksQuery = `
       SELECT
         l."jobNo",
@@ -348,10 +351,10 @@ const findInboundTasksOffice = async (
         u.username AS "scheduledBy",
         l.report AS "hasWarning"
       FROM public.lot l
-      JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
+      JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
       JOIN public.users u ON s."userId" = u."userid"
       WHERE l."jobNo" IN (:jobNos) AND ${whereClauses}
-      ORDER BY s."inboundDate" ASC, l."jobNo" ASC, l.report DESC, LPAD(l."lotNo"::text, 2, '0') ASC
+      ORDER BY s."inboundDate" ASC, LPAD(l."lotNo"::text, 2, '0') ASC, l.report DESC
     `;
 
     const tasksResult = await db.sequelize.query(tasksQuery, {
