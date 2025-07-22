@@ -124,6 +124,49 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       field: 'inboundWarehouse',
     },
+    report: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'report',
+    },
+    isConfirm: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'isConfirm',
+    },
+    isWeighted: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      field: 'isWeighted',
+    },
+    isRelabelled: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      field: 'isRelabelled',
+    },
+    isRebundled: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      field: 'isRebundled',
+    },
+    isRepackProvided: {
+      type: DataTypes.BOOLEAN,
+      allowNull: true,
+      field: 'isRepackProvided',
+    },
+    noOfMetalStraps: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: 'noOfMetalStraps',
+    },
+    repackDescription: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: 'repackDescription',
+    },
+
     scheduleInboundId: {
       type: DataTypes.INTEGER,
       allowNull: false,
@@ -131,7 +174,7 @@ module.exports = (sequelize, DataTypes) => {
       references: {
         model: 'scheduleinbounds',
         key: 'scheduleInboundId',
-      },  
+      },
       onDelete: 'CASCADE',
     },
     createdAt: {
