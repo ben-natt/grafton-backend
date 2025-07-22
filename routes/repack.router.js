@@ -95,11 +95,11 @@ const handleRepack = async (req, res, isMobile = false) => {
     } = req.body;
 
     // Validate required fields
-    if ((!inboundId && !lotId) || !noOfBundle) {
-      return res.status(400).json({
-        error: 'Missing required fields: either inboundId or lotId, and noOfBundle'
-      });
-    }
+if ((inboundId === undefined && lotId === undefined) || !noOfBundle) {
+  return res.status(400).json({
+    error: 'Missing required fields: either inboundId or lotId, and noOfBundle'
+  });
+}
 
     let identifier, jobNo, lotNo, isLotRepack = false;
     let parentRecord;
@@ -109,14 +109,13 @@ const handleRepack = async (req, res, isMobile = false) => {
     const isRepackProvidedBool = isRepackProvided === 'true';
 
     if (inboundId) {
-      // Handle inbound repack
-      parentRecord = await Inbound.findByPk(inboundId);
-      if (!parentRecord) {
-        return res.status(404).json({ error: 'Inbound record not found' });
-      }
-      identifier = inboundId;
-      jobNo = parentRecord.jobNo;
-      lotNo = parentRecord.lotNo;
+if (inboundId && inboundId !== 'null') {
+  parentRecord = await Inbound.findByPk(parseInt(inboundId));
+} else if (lotId && lotId !== 'null') {
+  parentRecord = await Lot.findByPk(parseInt(lotId));
+} else {
+  return res.status(400).json({ error: 'Invalid ID provided' });
+}
     } else {
       // Handle lot repack
       parentRecord = await Lot.findByPk(lotId);
@@ -130,10 +129,15 @@ const handleRepack = async (req, res, isMobile = false) => {
     }
 
     // Check if bundle already exists
-    const whereClause = isLotRepack
-      ? { lotId: parseInt(lotId), bundleNo: parseInt(noOfBundle) }
-      : { inboundId: parseInt(inboundId), bundleNo: parseInt(noOfBundle) };
+const whereClause = {
+  bundleNo: parseInt(noOfBundle)
+};
 
+if (isLotRepack) {
+  whereClause.lotId = lotId ? parseInt(lotId) : null;
+} else {
+  whereClause.inboundId = inboundId ? parseInt(inboundId) : null;
+}
     let inboundBundle = await InboundBundle.findOne({ 
       where: whereClause,
       include: [
