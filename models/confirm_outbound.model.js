@@ -143,8 +143,8 @@ const getGrnDetailsForSelection = async (
         lotNo: lot.lotNo,
         jobNo: lot.jobNo,
         bundles: lot.noOfBundle,
-        grossWeightMt: parseFloat(lot.grossWeight * 0.907185).toFixed(2),
-        netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
+        grossWeightMt: lot.grossWeight,
+        netWeightMt: lot.netWeight,
       })),
     };
     console.log(

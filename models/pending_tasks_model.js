@@ -1,178 +1,350 @@
 const db = require("../database");
 
 // ------------------------ Supervisor Flow ----------------------
-// --- INBOUND ROUTES---
-const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
+
+// Helper function to format date consistently
+const formatDate = (date) => {
+  if (!date) return "N/A";
+  const d = new Date(date);
+  const day = d.getDate();
+  const month = d.toLocaleString("en-US", { month: "short" });
+  const year = d.getFullYear();
+  return `${day} ${month} ${year}`;
+};
+
+// --- INBOUND (New unified function from previous request) ---
+const getPendingInboundTasks = async (
+  page = 1,
+  pageSize = 10,
+  filters = {}
+) => {
   try {
+    const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
+
+    let whereClauses = [`l.status = 'Pending'`, `l.report = 'False'`];
+    const replacements = {};
+
+    if (exWarehouseLot) {
+      whereClauses.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
+      replacements.exWarehouseLot = `%${exWarehouseLot}%`;
+    }
+    if (startDate && endDate) {
+      whereClauses.push(
+        `(s."inboundDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`
+      );
+      replacements.startDate = startDate;
+      replacements.endDate = endDate;
+    }
+
+    const whereString = whereClauses.join(" AND ");
 
     const countQuery = `
       SELECT COUNT(DISTINCT l."jobNo")::int
       FROM public.lot l
-      JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
-      WHERE l."status" = 'Pending' AND l."report" = 'False'
+      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
+      WHERE ${whereString};
     `;
+    const countResult = await db.sequelize.query(countQuery, {
+      replacements,
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+    const totalCount = countResult.count || 0;
+    const totalPages = Math.ceil(totalCount / pageSize);
+
+    if (totalCount === 0) {
+      return { data: [], page, pageSize, totalPages, totalCount };
+    }
+
+    const jobNoQuery = `
+      SELECT DISTINCT l."jobNo"
+      FROM public.lot l
+      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
+      WHERE ${whereString}
+      ORDER BY l."jobNo"
+      LIMIT :limit OFFSET :offset;
+    `;
+    const jobNoResults = await db.sequelize.query(jobNoQuery, {
+      replacements: { ...replacements, limit: pageSize, offset },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+
+    const paginatedJobNos = jobNoResults.map((j) => j.jobNo);
+
+    if (paginatedJobNos.length === 0) {
+      return { data: [], page, pageSize, totalPages, totalCount };
+    }
+
+    const detailsQuery = `
+      SELECT
+          l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
+          l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
+          s."inboundDate",
+          u.username
+      FROM public.lot l
+      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
+      JOIN public.users u ON s."userId" = u.userid
+      WHERE l."jobNo" IN (:paginatedJobNos)
+        AND l.status = 'Pending'
+        AND l.report = 'False'
+      ORDER BY s."inboundDate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
+    `;
+
+    const detailsForPage = await db.sequelize.query(detailsQuery, {
+      replacements: { paginatedJobNos },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+
+    const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
+      const jobNo = lot.jobNo;
+      if (!acc[jobNo]) {
+        acc[jobNo] = {
+          jobNo: jobNo,
+          userInfo: {
+            username: lot.username || "N/A",
+            inboundDate: formatDate(lot.inboundDate),
+          },
+          lotDetails: [],
+        };
+      }
+      acc[jobNo].lotDetails.push({
+        lotId: lot.lotId,
+        lotNo: lot.lotNo,
+        jobNo: lot.jobNo,
+        commodity: lot.commodity,
+        expectedBundleCount: lot.expectedBundleCount,
+        brand: lot.brand,
+        exWarehouseLot: lot.exWarehouseLot,
+        exLmeWarehouse: lot.exLmeWarehouse,
+        shape: lot.shape,
+        report: lot.report,
+      });
+      return acc;
+    }, {});
+
+    const finalData = Object.values(groupedByJobNo);
+    return { data: finalData, page, pageSize, totalPages, totalCount };
+  } catch (error) {
+    console.error("Error fetching pending inbound tasks:", error);
+    throw error;
+  }
+};
+
+// --- OUTBOUND (New unified function) ---
+const getPendingOutboundTasks = async (
+  page = 1,
+  pageSize = 10,
+  filters = {}
+) => {
+  try {
+    const { startDate, endDate, jobNo } = filters;
+    const offset = (page - 1) * pageSize;
+
+    let whereClauses = [`si."isOutbounded" = false`];
+    const replacements = {};
+
+    if (jobNo) {
+      whereClauses.push(`i."jobNo" ILIKE :jobNo`);
+      replacements.jobNo = `%${jobNo}%`;
+    }
+    if (startDate && endDate) {
+      whereClauses.push(
+        `(so."releaseDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`
+      );
+      replacements.startDate = startDate;
+      replacements.endDate = endDate;
+    }
+
+    const whereString = whereClauses.join(" AND ");
+
+    const baseQuery = `
+      FROM public.scheduleoutbounds so
+      JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
+      JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+      JOIN public.users u ON so."userId" = u."userid"
+    `;
+
+    const countQuery = `SELECT COUNT(DISTINCT so."scheduleOutboundId")::int ${baseQuery} WHERE ${whereString};`;
+    const countResult = await db.sequelize.query(countQuery, {
+      replacements,
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+    const totalCount = countResult.count || 0;
+    const totalPages = Math.ceil(totalCount / pageSize);
+
+    if (totalCount === 0) {
+      return { data: [], page, pageSize, totalPages, totalCount };
+    }
+
+    const scheduleIdQuery = `
+      SELECT DISTINCT so."scheduleOutboundId"
+      ${baseQuery}
+      WHERE ${whereString}
+      ORDER BY so."scheduleOutboundId"
+      LIMIT :limit OFFSET :offset;
+    `;
+    const scheduleIdResults = await db.sequelize.query(scheduleIdQuery, {
+      replacements: { ...replacements, limit: pageSize, offset },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+
+    const paginatedScheduleIds = scheduleIdResults.map(
+      (s) => s.scheduleOutboundId
+    );
+
+    if (paginatedScheduleIds.length === 0) {
+      return { data: [], page, pageSize, totalPages, totalCount };
+    }
+
+    const detailsQuery = `
+      SELECT
+          so."scheduleOutboundId",
+          CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo",
+          so."releaseDate" as "scheduleReleaseDate",
+          so."stuffingDate", so."containerNo", so."sealNo",
+          u.username,
+          i."jobNo", i."lotNo", i."noOfBundle" as "expectedBundleCount",
+          i."exWarehouseLot", w."exLmeWarehouseName" as "exLmeWarehouse",
+          b."brandName" as brand, c."commodityName" as commodity, s."shapeName" as shape
+      FROM public.scheduleoutbounds so
+      JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
+      JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+      JOIN public.users u ON so."userId" = u."userid"
+      LEFT JOIN public.brands b ON i."brandId" = b."brandId"
+      LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
+      LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
+      LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
+      WHERE so."scheduleOutboundId" IN (:paginatedScheduleIds) AND si."isOutbounded" = false
+      ORDER BY so."releaseDate" ASC, i."jobNo" ASC, i."lotNo" ASC;
+    `;
+
+    const detailsForPage = await db.sequelize.query(detailsQuery, {
+      replacements: { paginatedScheduleIds },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+
+    const groupedByScheduleId = detailsForPage.reduce((acc, item) => {
+      const scheduleId = item.scheduleOutboundId;
+      if (!acc[scheduleId]) {
+        acc[scheduleId] = {
+          scheduleInfo: {
+            scheduleOutboundId: scheduleId,
+            outboundJobNo: item.outboundJobNo,
+          },
+          userInfo: {
+            username: item.username,
+            releaseDate: formatDate(item.scheduleReleaseDate),
+            stuffingDate: item.stuffingDate
+              ? formatDate(item.stuffingDate)
+              : null,
+            containerNo: item.containerNo,
+            sealNo: item.sealNo,
+          },
+          lotDetails: [],
+        };
+      }
+      acc[scheduleId].lotDetails.push({
+        jobNo: item.jobNo,
+        lotNo: item.lotNo,
+        expectedBundleCount: item.expectedBundleCount,
+        exWarehouseLot: item.exWarehouseLot,
+        exLmeWarehouse: item.exLmeWarehouse,
+        brand: item.brand,
+        commodity: item.commodity,
+        shape: item.shape,
+      });
+      return acc;
+    }, {});
+
+    const finalData = Object.values(groupedByScheduleId);
+    return { data: finalData, page, pageSize, totalPages, totalCount };
+  } catch (error) {
+    console.error("Error fetching pending outbound tasks:", error);
+    throw error;
+  }
+};
+
+// --- Legacy functions below for compatibility ---
+const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
+  try {
+    const offset = (page - 1) * pageSize;
+    const countQuery = `SELECT COUNT(DISTINCT l."jobNo")::int FROM public.lot l JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo" WHERE l."status" = 'Pending' AND l."report" = 'False'`;
     const countResult = await db.sequelize.query(countQuery, {
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
     const totalCount = countResult.count;
-
-    const dataQuery = `
-      SELECT *
-      FROM (
-        SELECT DISTINCT ON (l."jobNo") l."jobNo", s."inboundDate"
-        FROM public.lot l
-        JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
-        WHERE l."status" = 'Pending' AND l."report" = 'False'
-        ORDER BY l."jobNo", s."inboundDate" ASC
-      ) AS distinct_jobs
-      ORDER BY distinct_jobs."inboundDate" ASC
-      LIMIT :limit OFFSET :offset;
-    `;
+    const dataQuery = `SELECT * FROM (SELECT DISTINCT ON (l."jobNo") l."jobNo", s."inboundDate" FROM public.lot l JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo" WHERE l."status" = 'Pending' AND l."report" = 'False' ORDER BY l."jobNo", s."inboundDate" ASC) AS distinct_jobs ORDER BY distinct_jobs."inboundDate" ASC LIMIT :limit OFFSET :offset;`;
     const data = await db.sequelize.query(dataQuery, {
       replacements: { limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
     });
-
     return { totalCount, data };
   } catch (error) {
     console.error("Error fetching pending tasks records:", error);
     throw error;
   }
 };
-
 const getDetailsPendingTasks = async (jobNo) => {
   try {
-    const query = `
-    SELECT "lotId", "lotNo","jobNo", "commodity", "expectedBundleCount", "brand",
-           "exWarehouseLot", "exLmeWarehouse", "shape", "report"
-    FROM public.lot
-    WHERE "jobNo" = :jobNo AND "status" = 'Pending' AND "report" = 'False'
-    ORDER BY "exWarehouseLot" ASC;
-    `;
-
-    const result = await db.sequelize.query(query, {
+    const query = `SELECT "lotId", "lotNo","jobNo", "commodity", "expectedBundleCount", "brand", "exWarehouseLot", "exLmeWarehouse", "shape", "report" FROM public.lot WHERE "jobNo" = :jobNo AND "status" = 'Pending' AND "report" = 'False' ORDER BY "exWarehouseLot" ASC;`;
+    return await db.sequelize.query(query, {
       replacements: { jobNo },
       type: db.sequelize.QueryTypes.SELECT,
     });
-
-    if (result.length > 0) {
-      console.log("Query result:", result);
-      console.log("First result keys:", Object.keys(result[0]));
-    } else {
-      console.log("No pending tasks found for jobNo:", jobNo);
-    }
-    return result;
   } catch (error) {
-    console.error("Error in /pending-tasks route:", error);
     console.error("Error fetching pending tasks records:", error);
     throw error;
   }
 };
-
 const pendingTasksUserId = async (jobNo) => {
   try {
-    const query = `
-          SELECT 
-            u."username", 
-            TO_CHAR(s."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "inboundDate"
-          FROM public.scheduleinbounds s
-          JOIN public.lot l ON s."jobNo" = l."jobNo"
-          JOIN public.users u ON s."userId" = u."userid"
-          WHERE l."jobNo" = :jobNo AND l."status" = 'Pending'
-        `;
-
+    const query = `SELECT u."username", TO_CHAR(s."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "inboundDate" FROM public.scheduleinbounds s JOIN public.lot l ON s."jobNo" = l."jobNo" JOIN public.users u ON s."userId" = u."userid" WHERE l."jobNo" = :jobNo AND l."status" = 'Pending'`;
     const result = await db.sequelize.query(query, {
       replacements: { jobNo },
       type: db.sequelize.QueryTypes.SELECT,
     });
-
-    if (result.length === 0) {
-      console.log("No results found for jobNo:", jobNo);
-      return {
-        username: "",
-        dateRange: "",
-        inboundDates: [], // Add empty array
-      };
-    }
-
+    if (result.length === 0)
+      return { username: "", dateRange: "", inboundDates: [] };
     const dates = result.map((r) => new Date(r.inboundDate));
     const minDate = new Date(Math.min(...dates));
     const maxDate = new Date(Math.max(...dates));
-
-    // Get array of all inbound dates in YYYY-MM-DD format
     const inboundDates = result.map((r) => r.inboundDate);
-
     let formattedRange;
-
     if (minDate.getTime() === maxDate.getTime()) {
-      const day = minDate.getDate();
-      const month = minDate.toLocaleString("en-SG", { month: "long" });
-      const year = minDate.getFullYear();
-      formattedRange = `${day} ${month} ${year}`;
+      formattedRange = `${minDate.getDate()} ${minDate.toLocaleString("en-SG", {
+        month: "long",
+      })} ${minDate.getFullYear()}`;
     } else {
-      const minDay = minDate.getDate();
-      const maxDay = maxDate.getDate();
-      const minMonth = minDate.toLocaleString("en-SG", { month: "long" });
-      const maxMonth = maxDate.toLocaleString("en-SG", { month: "long" });
-      const minYear = minDate.getFullYear();
-      const maxYear = maxDate.getFullYear();
-
-      if (minYear === maxYear) {
-        if (minMonth === maxMonth) {
-          formattedRange = `${minDay} ${minMonth} - ${maxDay} ${maxMonth} ${maxYear}`;
-        } else {
-          formattedRange = `${minDay} ${minMonth} - ${maxDay} ${maxMonth} ${maxYear}`;
-        }
-      } else {
-        formattedRange = `${minDay} ${minMonth} ${minYear} - ${maxDay} ${maxMonth} ${maxYear}`;
-      }
+      formattedRange = `${minDate.getDate()} ${minDate.toLocaleString("en-SG", {
+        month: "long",
+      })} ${minDate.getFullYear()} - ${maxDate.getDate()} ${maxDate.toLocaleString(
+        "en-SG",
+        { month: "long" }
+      )} ${maxDate.getFullYear()}`;
     }
-
-    console.log("Returning result:", {
-      username: result[0].username || "",
-      dateRange: formattedRange || "",
-      inboundDates: inboundDates, // Include the dates array
-    });
-
     return {
       username: result[0].username || "",
       dateRange: formattedRange || "",
-      inboundDates: inboundDates, // Return array of dates
+      inboundDates: inboundDates,
     };
   } catch (error) {
     console.error("Error fetching pending tasks records:", error);
     throw error;
   }
 };
-
-// --- OUTBOUND ---
 const findScheduleIdPendingOutbound = async (page = 1, pageSize = 10) => {
   try {
     const offset = (page - 1) * pageSize;
-
-    const countQuery = `
-      SELECT COUNT(DISTINCT so."scheduleOutboundId")::int
-      FROM public.scheduleoutbounds so
-      JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
-      WHERE si."isOutbounded" = false
-    `;
+    const countQuery = `SELECT COUNT(DISTINCT so."scheduleOutboundId")::int FROM public.scheduleoutbounds so JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId" WHERE si."isOutbounded" = false`;
     const countResult = await db.sequelize.query(countQuery, {
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
     const totalCount = countResult.count;
-
-    const dataQuery = `
-      SELECT DISTINCT so."scheduleOutboundId",
-      CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo", so."releaseDate"
-      FROM public.scheduleoutbounds so
-      JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
-      WHERE si."isOutbounded" = false
-      ORDER BY so."releaseDate" ASC
-      LIMIT :limit OFFSET :offset
-    `;
+    const dataQuery = `SELECT DISTINCT so."scheduleOutboundId", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo", so."releaseDate" FROM public.scheduleoutbounds so JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId" WHERE si."isOutbounded" = false ORDER BY so."releaseDate" ASC LIMIT :limit OFFSET :offset`;
     const data = await db.sequelize.query(dataQuery, {
       replacements: { limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
@@ -183,62 +355,26 @@ const findScheduleIdPendingOutbound = async (page = 1, pageSize = 10) => {
     throw error;
   }
 };
-
 const getDetailsPendingOutbound = async (scheduleOutboundId) => {
   try {
-    const query = `
-            SELECT
-                si."selectedInboundId",
-                i."jobNo",
-                i."lotNo",
-                s."shapeName" as shape,
-                i."noOfBundle" as "expectedBundleCount",
-                b."brandName" AS "brand",
-                c."commodityName" AS "commodity",
-                w."exLmeWarehouseName" AS "exLmeWarehouse",
-                i."exWarehouseLot",
-                so."lotReleaseWeight"
-            FROM public.selectedinbounds si
-            JOIN public.inbounds i ON si."inboundId" = i."inboundId"
-            JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
-            LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
-            LEFT JOIN public.brands b ON i."brandId" = b."brandId"
-            LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
-            LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
-            WHERE si."scheduleOutboundId" = :scheduleOutboundId AND si."isOutbounded" = false
-            ORDER BY i."lotNo" ASC
-        `;
-    const result = await db.sequelize.query(query, {
+    const query = `SELECT si."selectedInboundId", i."jobNo", i."lotNo", s."shapeName" as shape, i."noOfBundle" as "expectedBundleCount", b."brandName" AS "brand", c."commodityName" AS "commodity", w."exLmeWarehouseName" AS "exLmeWarehouse", i."exWarehouseLot", so."lotReleaseWeight" FROM public.selectedinbounds si JOIN public.inbounds i ON si."inboundId" = i."inboundId" JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId" LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId" LEFT JOIN public.brands b ON i."brandId" = b."brandId" LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId" LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId" WHERE si."scheduleOutboundId" = :scheduleOutboundId AND si."isOutbounded" = false ORDER BY i."lotNo" ASC`;
+    return await db.sequelize.query(query, {
       replacements: { scheduleOutboundId },
       type: db.sequelize.QueryTypes.SELECT,
     });
-    return result;
   } catch (error) {
     console.error("Error fetching pending outbound task details:", error);
     throw error;
   }
 };
-
 const pendingOutboundTasksUser = async (scheduleOutboundId) => {
   try {
-    const query = `
-            SELECT
-                u."username",
-                TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
-                TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate",
-                so."containerNo",
-                so."sealNo"
-            FROM public.scheduleoutbounds so
-            JOIN public.users u ON so."userId" = u."userid"
-            WHERE so."scheduleOutboundId" = :scheduleOutboundId
-            LIMIT 1;
-        `;
+    const query = `SELECT u."username", TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate", TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate", so."containerNo", so."sealNo" FROM public.scheduleoutbounds so JOIN public.users u ON so."userId" = u."userid" WHERE so."scheduleOutboundId" = :scheduleOutboundId LIMIT 1;`;
     const result = await db.sequelize.query(query, {
       replacements: { scheduleOutboundId },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
-
     return {
       username: result?.username || "N/A",
       releaseDate: result?.releaseDate || "N/A",
@@ -637,6 +773,8 @@ module.exports = {
   getDetailsPendingOutbound,
   pendingOutboundTasksUser,
   findOutboundTasksOffice,
+  getPendingOutboundTasks,
   // New
   getOfficeFilterOptions,
+  getPendingInboundTasks, // Export the new function
 };

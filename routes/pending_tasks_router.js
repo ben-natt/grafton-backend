@@ -8,22 +8,47 @@ router.get("/tasks-jobNo", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 10;
-    const { totalCount, data } = await pendingTasksModel.findJobNoPendingTasks(
-      page,
-      pageSize
-    );
-    res.status(200).json({
-      data: data,
+    const filters = {
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+      exWarehouseLot: req.query.exWarehouseLot,
+    };
+    const result = await pendingTasksModel.getPendingInboundTasks(
       page,
       pageSize,
-      totalPages: Math.ceil(totalCount / pageSize),
-      totalCount: totalCount,
-    });
+      filters
+    );
+    res.status(200).json(result);
   } catch (error) {
+    console.error("Error fetching pending inbound tasks:", error);
     res.status(500).json({ error: "Failed to fetch pending tasks." });
   }
 });
 
+// --- OUTBOUND ROUTES ---
+router.get("/tasks-outbound-ids", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const filters = {
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+      jobNo: req.query.jobNo, // Add jobNo filter
+    };
+    // Call the new unified function for outbound tasks
+    const result = await pendingTasksModel.getPendingOutboundTasks(
+      page,
+      pageSize,
+      filters
+    );
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching pending outbound tasks:", error);
+    res.status(500).json({ error: "Failed to fetch pending outbound tasks." });
+  }
+});
+
+// --- LEGACY ROUTES FOR COMPATIBILITY ---
 router.post("/tasks-inbound", async (req, res) => {
   const { jobNo } = req.body;
   try {
@@ -42,27 +67,6 @@ router.post("/tasks-user", async (req, res) => {
   } catch (error) {
     console.error("Error fetching stock records:", error);
     res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-// --- OUTBOUND ROUTES ---
-router.get("/tasks-outbound-ids", async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 10;
-    const { totalCount, data } =
-      await pendingTasksModel.findScheduleIdPendingOutbound(page, pageSize);
-    res.status(200).json({
-      data: data,
-      page,
-      pageSize,
-      totalPages: Math.ceil(totalCount / pageSize),
-      totalCount: totalCount,
-    });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ error: "Failed to fetch pending outbound schedule IDs." });
   }
 });
 
@@ -97,7 +101,7 @@ router.post("/tasks-outbound-user", async (req, res) => {
   }
 });
 
-// ---------------------------OFFICE Flow ---------------------------
+// ----------------------------------- OFFICE Flow ---------------------------------
 // --- NEW ROUTE FOR FILTER OPTIONS ---
 router.get("/office-filter-options", async (req, res) => {
   try {
