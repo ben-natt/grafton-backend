@@ -184,7 +184,8 @@ const getLotSummary = async (jobNo, lotNo) => {
         s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
         i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
         exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse",
-        i."inboundDate" AS "InboundDate", i."scheduleInboundDate" AS "ScheduleInboundDate",
+        i."createdAt" AS "InboundDate", TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
+        si."createdAt" AS "CreatedAt",
         i."grossWeight" AS "GrossWeight", i."netWeight" AS "NetWeight", i."actualWeight" AS "ActualWeight",
         i."isRebundled" AS "IsRebundled", i."isRepackProvided" AS "IsRepackProvided",
         u1."username" AS "ScheduledBy",
@@ -194,6 +195,8 @@ const getLotSummary = async (jobNo, lotNo) => {
       LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
       -- MODIFICATION: Join with outboundtransactions to filter out processed lots
       LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
+      LEFT JOIN public.lot l on l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+      LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
       LEFT JOIN public.brands b ON b."brandId" = i."brandId"
       LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
       LEFT JOIN public.shapes s ON s."shapeId" = i."shapeId"
@@ -413,131 +416,139 @@ ORDER BY i."inboundId"        `;
 };
 
 const createScheduleOutbound = async (scheduleData, userId) => {
-    const t = await db.sequelize.transaction();
-    console.log('Creating schedule outbound with data:', scheduleData, 'and userId:', userId);
+  const t = await db.sequelize.transaction();
+  console.log('Creating schedule outbound with data:', scheduleData, 'and userId:', userId);
 
-    try {
-        const {
-            releaseDate,
-            lotReleaseWeight,
-            exportDate,
-            stuffingDate,
-            containerNo,
-            sealNo,
-            deliveryDate,
-            storageReleaseLocation,
-            releaseWarehouse,
-            transportVendor,
-            selectedLots
-        } = scheduleData;
+  try {
+    const {
+      releaseStartDate, // Used as releaseDate
+      releaseEndDate,   // Used as releaseEndDate
+      lotReleaseWeight,
+      exportDate,
+      stuffingDate,
+      containerNo,
+      sealNo,
+      deliveryDate,
+      storageReleaseLocation,
+      releaseWarehouse,
+      transportVendor,
+      selectedLots
+    } = scheduleData;
 
-        const outboundType = (containerNo && containerNo.length > 0) ? 'container' : 'flatbed';
-        const scheduleInsertQuery = `
-      INSERT INTO public.scheduleoutbounds(
-        "releaseDate", "userId", "lotReleaseWeight", "outboundType", "exportDate",
+    const outboundType = (containerNo && containerNo.length > 0) ? 'container' : 'flatbed';
+
+    const scheduleInsertQuery = `
+      INSERT INTO public.scheduleoutbounds (
+        "releaseDate", "releaseEndDate", "userId", "lotReleaseWeight", "outboundType", "exportDate",
         "stuffingDate", "containerNo", "sealNo", "createdAt", "updatedAt",
         "deliveryDate", "storageReleaseLocation", "releaseWarehouse", "transportVendor"
       )
       VALUES (
-        :releaseDate, :userId, :lotReleaseWeight, :outboundType, :exportDate,
+        :releaseDate, :releaseEndDate, :userId, :lotReleaseWeight, :outboundType, :exportDate,
         :stuffingDate, :containerNo, :sealNo, NOW(), NOW(),
         :deliveryDate, :storageReleaseLocation, :releaseWarehouse, :transportVendor
       )
       RETURNING "scheduleOutboundId";
     `;
 
-        const insertResult = await db.sequelize.query(scheduleInsertQuery, {
-            replacements: {
-                releaseDate,
-                userId,
-                lotReleaseWeight: parseFloat(lotReleaseWeight),
-                outboundType,
-                exportDate,
-                stuffingDate: stuffingDate || null,
-                containerNo: containerNo || null,
-                sealNo: sealNo || null,
-                deliveryDate: deliveryDate || null,
-                storageReleaseLocation,
-                releaseWarehouse,
-                transportVendor
-            },
-            type: db.sequelize.QueryTypes.INSERT,
-            transaction: t
-        });
+    const insertResult = await db.sequelize.query(scheduleInsertQuery, {
+      replacements: {
+        releaseDate: releaseStartDate,
+        releaseEndDate: releaseEndDate,
+        userId,
+        lotReleaseWeight: parseFloat(lotReleaseWeight),
+        outboundType,
+        exportDate,
+        stuffingDate: stuffingDate || null,
+        containerNo: containerNo || null,
+        sealNo: sealNo || null,
+        deliveryDate: deliveryDate || null,
+        storageReleaseLocation,
+        releaseWarehouse,
+        transportVendor
+      },
+      type: db.sequelize.QueryTypes.INSERT,
+      transaction: t
+    });
 
-        const scheduleOutboundId = insertResult?.[0]?.[0]?.scheduleOutboundId;
+    const scheduleOutboundId = insertResult?.[0]?.[0]?.scheduleOutboundId;
 
-        if (!scheduleOutboundId) {
-            throw new Error("Failed to retrieve scheduleOutboundId.");
-        }
+    if (!scheduleOutboundId) {
+      throw new Error("Failed to retrieve scheduleOutboundId.");
+    }
 
-        // Handle selected lots
-        if (selectedLots?.length > 0) {
-            const selectedInboundsQuery = `
-        INSERT INTO public.selectedinbounds(
+    // Insert selected lots
+    if (selectedLots?.length > 0) {
+      const selectedInboundsQuery = `
+        INSERT INTO public.selectedinbounds (
           "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt"
         )
         VALUES (:inboundId, :scheduleOutboundId, :lotNo, :jobNo, NOW(), NOW())
         ON CONFLICT ("jobNo", "lotNo") DO NOTHING;
       `;
 
-            const updateInboundQuantityQuery = `
+      const updateInboundQuantityQuery = `
         UPDATE public.inbounds
         SET "noOfBundle" = :quantity
         WHERE "inboundId" = :inboundId;
       `;
 
-            for (const lot of selectedLots) {
-                const inboundId = lot.id;
-                const quantity = lot.Qty;
+      for (const lot of selectedLots) {
+        const inboundId = lot.id;
+        const quantity = lot.Qty;
 
-                if (!inboundId) {
-                    console.warn('Skipping lot due to missing inboundId:', lot);
-                    continue;
-                }
-
-                const lotNoString = lot['Lot No']?.toString() ?? '';
-                const [jobNo, lotNoStr] = lotNoString.split('-');
-                const lotNo = parseInt(lotNoStr, 10);
-
-                if (!jobNo || !Number.isInteger(lotNo)) {
-                    console.warn(`Skipping invalid lot format: "${lotNoString}"`);
-                    continue;
-                }
-
-                await db.sequelize.query(selectedInboundsQuery, {
-                    replacements: {
-                        inboundId,
-                        scheduleOutboundId,
-                        lotNo,
-                        jobNo
-                    },
-                    type: db.sequelize.QueryTypes.INSERT,
-                    transaction: t
-                });
-
-                if (quantity != null) {
-                    await db.sequelize.query(updateInboundQuantityQuery, {
-                        replacements: {
-                            quantity,
-                            inboundId
-                        },
-                        type: db.sequelize.QueryTypes.UPDATE,
-                        transaction: t
-                    });
-                }
-            }
+        if (!inboundId) {
+          console.warn('Skipping lot due to missing inboundId:', lot);
+          continue;
         }
 
-        await t.commit();
-        return { success: true, message: 'Schedule created successfully.', scheduleOutboundId };
+        const lotNoString = lot['Lot No']?.toString() ?? '';
+        const [jobNo, lotNoStr] = lotNoString.split('-');
+        const lotNo = parseInt(lotNoStr, 10);
 
-    } catch (error) {
-        await t.rollback();
-        console.error('Error in createScheduleOutbound transaction:', error);
-        throw new Error('Failed to create outbound schedule due to a database error.');
+        if (!jobNo || !Number.isInteger(lotNo)) {
+          console.warn(`Skipping invalid lot format: "${lotNoString}"`);
+          continue;
+        }
+
+        await db.sequelize.query(selectedInboundsQuery, {
+          replacements: {
+            inboundId,
+            scheduleOutboundId,
+            lotNo,
+            jobNo
+          },
+          type: db.sequelize.QueryTypes.INSERT,
+          transaction: t
+        });
+
+        if (quantity != null) {
+          await db.sequelize.query(updateInboundQuantityQuery, {
+            replacements: {
+              quantity,
+              inboundId
+            },
+            type: db.sequelize.QueryTypes.UPDATE,
+            transaction: t
+          });
+        }
+      }
     }
+
+    await t.commit();
+    return {
+      success: true,
+      message: 'Schedule created successfully.',
+      scheduleOutboundId
+    };
+
+  } catch (error) {
+    await t.rollback();
+    console.error('Error in createScheduleOutbound transaction:', error);
+    throw new Error('Failed to create outbound schedule due to a database error.');
+  }
 };
+
 
 
 const EditInformation = async (inboundId, updateData) => {
@@ -716,34 +727,32 @@ const getInventory1 = async () => {
     try {
         const query = `
             SELECT
-        i."jobNo" AS "Job No",
-        COUNT(i."lotNo") AS "Lot No",
-        c."commodityName" AS "Metal",
-        b."brandName" AS "Brand",
-        s."shapeName" AS "Shape",
-        SUM(i."noOfBundle") AS "Qty",
-        SUM(i."netWeight") AS "Weight"
-        FROM
-            public.inbounds i
-        LEFT JOIN
-            public.selectedInbounds o ON o."inboundId" = i."inboundId"
-        -- MODIFICATION: Join with outboundtransactions to filter out processed lots
-        LEFT JOIN
-            public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
-        JOIN
-            public.brands b ON b."brandId" = i."brandId"
-        JOIN
-            public.commodities c ON c."commodityId" = c."commodityId"
-        JOIN
-            public.shapes s ON s."shapeId" = i."shapeId"
-        WHERE
-            o."inboundId" IS NULL
-            -- MODIFICATION: Ensure the lot is not in outboundtransactions
-            AND ot."inboundId" IS NULL
-        GROUP BY
-            i."jobNo", c."commodityName", b."brandName", s."shapeName"
-        ORDER BY
-            i."jobNo"
+                    i."jobNo" AS "Job No",
+                    COUNT(i."lotNo") AS "Lot No",
+                    c."commodityName" AS "Metal",
+                    b."brandName" AS "Brand",
+                    s."shapeName" AS "Shape",
+                    SUM(i."noOfBundle") AS "Qty",
+                    SUM(i."netWeight") AS "Weight"
+                FROM
+                    public.inbounds i
+                LEFT JOIN
+                    public.selectedInbounds o ON o."inboundId" = i."inboundId"
+                LEFT JOIN
+                    public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
+                JOIN
+                    public.brands b ON b."brandId" = i."brandId"
+                JOIN
+                    public.commodities c ON c."commodityId" = i."commodityId"
+                JOIN
+                    public.shapes s ON s."shapeId" = i."shapeId"
+                WHERE
+                    o."inboundId" IS NULL
+                    AND ot."inboundId" IS NULL
+                GROUP BY
+                    i."jobNo", c."commodityName", b."brandName", s."shapeName"
+                ORDER BY
+                    i."jobNo"
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT

@@ -167,10 +167,13 @@ const getInventory = async () => {
                 public.inbounds i
              LEFT JOIN 
             public.selectedInbounds o ON o."inboundId" = i."inboundId"
+            LEFT JOIN
+            public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
             JOIN 
                 public.commodities c ON i."commodityId" = c."commodityId"
             WHERE 
                 o."inboundId" IS NULL
+            AND ot."inboundId" IS NULL
             GROUP BY 
                 c."commodityName";
         `;
@@ -206,7 +209,9 @@ const getAllScheduleInbound = async () => {
         l."inboundWarehouse" AS "Inbound Warehouse",
         l."isRepackProvided", 
         l."isRebundled",
+        TO_CHAR(si."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
         TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
+        TO_CHAR(i."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbounded Date",
 		u1."username" AS "Scheduled By",
         u2."username" AS "Processed By"
          FROM public.lot l
@@ -248,7 +253,9 @@ const getScheduleInboundByDate = async (date) => {
                 l."inboundWarehouse" AS "Inbound Warehouse",
                 l."isRepackProvided", 
                 l."isRebundled",
+                 TO_CHAR(si."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
                 TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
+                TO_CHAR(i."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbounded Date",
                 u1."username" AS "Scheduled By",
                 u2."username" AS "Processed By"             
            FROM public.lot l 
@@ -292,7 +299,9 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
                 l."inboundWarehouse" AS "Inbound Warehouse",
                 l."isRepackProvided", 
                 l."isRebundled",
+               TO_CHAR(si."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
                 TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbound Date",
+                TO_CHAR(i."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Inbounded Date",
                 u1."username" AS "Scheduled By",
                 u2."username" AS "Processed By"
             FROM public.lot l 

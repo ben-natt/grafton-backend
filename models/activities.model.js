@@ -418,13 +418,15 @@ const getInboundRecordByInboundId = async (inboundId) => {
           s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
           i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
           exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse",
-          i."inboundDate" AS "InboundDate", i."scheduleInboundDate" AS "ScheduleInboundDate",
+          si."inboundDate" AS "InboundDate", si."createdAt" AS "ScheduleInboundDate", i."createdAt" AS "CreatedAt",
           i."grossWeight" AS "GrossWeight", i."netWeight" AS "NetWeight", i."actualWeight" AS "ActualWeight",
           i."isRebundled" AS "IsRebundled", i."isRepackProvided" AS "IsRepackProvided",
           u_scheduler."username" AS "ScheduledBy",
           u_processor."username" AS "ProcessedBy",
           i."updatedAt" AS "UpdatedAt"
         FROM public.inbounds i
+        LEFT JOIN public.lot l ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+        LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
         LEFT JOIN public.brands b ON b."brandId" = i."brandId"
         LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
         LEFT JOIN public.shapes s ON s."shapeId" = i."shapeId"
@@ -456,8 +458,10 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
           o."shape" AS "Shape", o."exLmeWarehouse" AS "ExLMEWarehouse",
           o."exWarehouseLot" AS "ExWarehouseLot", o."releaseWarehouse" AS "ReleaseWarehouse",
           o."releaseDate" AS "ReleaseDate", 
-          o."createdAt" AS "ScheduleOutboundDate",
-          o."exportDate" AS "ExportDate", o."deliveyDate" AS "DeliveryDate",
+          so."createdAt" AS "ScheduleOutboundDate",
+          o."exportDate" AS "ExportDate", so."deliveryDate" AS "DeliveryDate",
+          o."stuffingDate" AS "StuffingDate",
+          o."createdAt" AS "CreatedAt",
           o."netWeight" AS "TotalReleaseWeight",
           o."storageReleaseLocation" AS "StorageReleaseLocation", o."transportVendor" AS "TransportVendor",
           scheduler."username" AS "ScheduledBy",
@@ -466,6 +470,8 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
         FROM public.outboundtransactions o
         LEFT JOIN public.users scheduler ON scheduler.userid = o."scheduledBy"
         LEFT JOIN public.users processor ON processor.userid = o."outboundedBy"
+        LEFT JOIN public.selectedinbounds si ON si."inboundId" = o."inboundId"
+        LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = si."scheduleOutboundId"
         WHERE o."outboundTransactionId" = :outboundId
         LIMIT 1;`;
 
@@ -790,14 +796,16 @@ const getScheduleInboundRecordByLotId = async (lotId) => {
           l."exWarehouseWarrant" AS "ExWarehouseWarrant",
           l."exWarehouseLocation" AS "ExWarehouseLocation",
           l."inboundWarehouse" AS "InboundWarehouse",
-          TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "InboundDate",
-          TO_CHAR(si."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD ') AS "ScheduleInboundDate",
+          i."createdAt" AS "InboundDate",
+          si."createdAt" AS "ScheduleInboundDate",
           l."grossWeight" AS "GrossWeight",
           l."netWeight" AS "NetWeight",
           l."actualWeight" AS "ActualWeight",
           u1."username" AS "ScheduledBy",
           u2."username" AS "ProcessedBy",
-          TO_CHAR(l."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
+          TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
+          TO_CHAR(i."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
+          TO_CHAR(si."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2"
         FROM public.lot l
         LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
         LEFT JOIN public.inbounds i on i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
@@ -836,13 +844,16 @@ const getScheduleOutboundRecordById = async (id) => {
           TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleOutboundDate",
           TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
           TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
+          TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "StuffingDate",
           TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
           i."netWeight" AS "TotalReleaseWeight",
           so."storageReleaseLocation" AS "StorageReleaseLocation",
           so."transportVendor" AS "TransportVendor",
           scheduler."username" AS "ScheduledBy",
           processor."username" AS "ProcessedBy",
-          TO_CHAR(so."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt"
+          TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
+          TO_CHAR(ot."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
+          TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2"
         FROM public.selectedinbounds selin
         LEFT JOIN public.inbounds i ON i."inboundId" = selin."inboundId"
         LEFT JOIN public.brands b ON b."brandId" = i."brandId"

@@ -131,6 +131,7 @@ const getAllScheduleOutbounds = async () => {
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."storageReleaseLocation" AS "Storage Release Location",
         o."exportDate" AS "Export Date",
+        o."stuffingDate" AS "Stuffing Date",
 		u1."username" AS "Scheduled By",
         u2."username" AS "Processed By"
 		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
@@ -175,6 +176,7 @@ const getScheduleOutboundByDate = async (date) => {
         o."deliveryDate" AS "Delivery Date",
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."exportDate" AS "Export Date",
+    o."stuffingDate" AS "Stuffing Date",
         o."storageReleaseLocation" AS "Storage Release Location",
 		u1."username" AS "Scheduled By",
 		u2."username" AS "Processed By"
@@ -222,6 +224,7 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."storageReleaseLocation" AS "Storage Release Location",
         o."exportDate" AS "Export Date",
+        o."stuffingDate" AS "Stuffing Date",
 		u1."username" AS "Scheduled By",
 		u2."username" AS "Processed By"
 		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
