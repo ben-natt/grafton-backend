@@ -28,15 +28,33 @@ const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+    const allowedExtensions = ['.jpg', '.jpeg', '.png'];
+    
     const ext = path.extname(file.originalname).toLowerCase();
     
-    // Custom MIME type detection for PNG files
-    const actualMimeType = ext === '.png' ? 'image/png' : file.mimetype;
-
-    if (allowedMimeTypes.includes(actualMimeType) && 
-        ['.jpg', '.jpeg', '.png'].includes(ext)) {
+    // Map extensions to correct MIME types
+    const mimeTypeMap = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg'
+    };
+    
+    // Use extension-based MIME type if available, otherwise use detected type
+    const actualMimeType = mimeTypeMap[ext] || file.mimetype;
+    
+    console.log('File details:', {
+      originalname: file.originalname,
+      detectedMimeType: file.mimetype,
+      extension: ext,
+      actualMimeType: actualMimeType
+    });
+    
+    // Check both extension and MIME type
+    if (allowedExtensions.includes(ext) && allowedMimeTypes.includes(actualMimeType)) {
       cb(null, true);
     } else {
+      const errorMsg = `Invalid file type. File: ${file.originalname}, Extension: ${ext}, MIME: ${file.mimetype}`;
+      console.error(errorMsg);
       cb(new Error('Only .jpg, .jpeg, and .png files are allowed!'), false);
     }
   },
