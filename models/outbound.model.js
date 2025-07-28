@@ -113,7 +113,9 @@ const getOutboundsByDateRange = async (startDate, endDate) => {
 const getAllScheduleOutbounds = async () => {
     try {
         const query = `
-         SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+         SELECT 
+         TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+         TO_CHAR(o."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
 		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
@@ -125,6 +127,7 @@ const getAllScheduleOutbounds = async () => {
 		i."actualWeight" AS "Actual Weight",
         exlme."exLmeWarehouseName" AS "Ex-LME Warehouse",
         o."releaseDate" AS "Release Date",
+        o."releaseEndDate" AS "Release End Date",
         o."releaseWarehouse" AS "Release Warehouse",
         o."deliveryDate" AS "Delivery Date",
         o."createdAt" AS "Scheduled Outbound Date",
@@ -159,7 +162,9 @@ const getAllScheduleOutbounds = async () => {
 const getScheduleOutboundByDate = async (date) => {
     try {
         const query = `
-                SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+                SELECT 
+                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+         TO_CHAR(o."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
 		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
@@ -173,6 +178,7 @@ const getScheduleOutboundByDate = async (date) => {
         o."releaseWarehouse" AS "Release Warehouse",
         o."createdAt" AS "Scheduled Outbound Date",
         o."releaseDate" AS "Release Date",
+        o."releaseEndDate" AS "Release End Date",
         o."deliveryDate" AS "Delivery Date",
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."exportDate" AS "Export Date",
@@ -206,7 +212,9 @@ const getScheduleOutboundByDate = async (date) => {
 const getScheduleOutboundByDateRange = async (startDate, endDate) => {
     try {
         const query = `
-             SELECT TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+             SELECT 
+             TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+         TO_CHAR(o."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
 		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
@@ -218,6 +226,7 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
 		i."actualWeight" AS "Actual Weight",
         exlme."exLmeWarehouseName" AS "Ex-LME Warehouse",
         o."releaseDate" AS "Release Date",
+        o."releaseEndDate" AS "Release End Date",
         o."releaseWarehouse" AS "Release Warehouse",
         o."createdAt" AS "Scheduled Outbound Date",
         o."deliveryDate" AS "Delivery Date",

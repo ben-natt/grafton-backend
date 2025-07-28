@@ -754,6 +754,7 @@ const getAllScheduleOutbound = async ({
 
     const dataQuery = `SELECT 
         TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+        TO_CHAR(o."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseEndDate",
         si."inboundId" AS id,
         i."jobNo" AS "Job No",
         i."lotNo" AS "Lot No",
@@ -843,6 +844,7 @@ const getScheduleOutboundRecordById = async (id) => {
           so."releaseWarehouse" AS "ReleaseWarehouse",
           TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleOutboundDate",
           TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
+          TO_CHAR(so."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseEndDate",
           TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
           TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "StuffingDate",
           TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
