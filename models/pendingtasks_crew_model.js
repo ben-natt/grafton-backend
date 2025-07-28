@@ -28,13 +28,15 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
     const replacements = {};
 
     if (exWarehouseLot) {
-      whereClauses.push(`l."exWarehouseLot" = :exWarehouseLot`);
-      replacements.exWarehouseLot = exWarehouseLot;
+      // Use ILIKE for case-insensitive partial matching.
+      whereClauses.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
+      replacements.exWarehouseLot = `%${exWarehouseLot}%`;
     }
     if (startDate && endDate) {
       // Inclusive date range for the filter.
+      // Explicitly set timezone to prevent off-by-one errors due to server/client differences.
       whereClauses.push(
-        `s."inboundDate"::date BETWEEN :startDate AND :endDate`
+        `(s."inboundDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`
       );
       replacements.startDate = startDate;
       replacements.endDate = endDate;

@@ -140,10 +140,11 @@ const createGrnAndTransactions = async (req, res) => {
       ...grnDataFromRequest,
       ourReference: grnDataFromRequest.outboundJobNo,
       grnNo: createdOutbound.grnNo,
-      releaseDate: new Date(createdOutbound.outboundedDate).toLocaleDateString(
-        "en-GB",
-        { day: "2-digit", month: "short", year: "numeric" }
-      ),
+      releaseDate: new Date().toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }),
       warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "",
       containerAndSealNo: containerAndSealNo,
       cargoDetails: {
@@ -154,8 +155,8 @@ const createGrnAndTransactions = async (req, res) => {
       lots: lotsForPdf.map((lot) => ({
         lotNo: `${lot.jobNo}-${lot.lotNo}`,
         bundles: lot.noOfBundle,
-        grossWeightMt: parseFloat(lot.grossWeight * 0.907185).toFixed(2),
-        netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
+        grossWeightMt: parseFloat(lot.grossWeight).toFixed(2),
+        netWeightMt: parseFloat(lot.netWeight).toFixed(2),
       })),
     };
     console.log(
