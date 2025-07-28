@@ -802,6 +802,8 @@ const getScheduleInboundRecordByLotId = async (lotId) => {
           l."grossWeight" AS "GrossWeight",
           l."netWeight" AS "NetWeight",
           l."actualWeight" AS "ActualWeight",
+          l."isRepackProvided", 
+          l."isRebundled",
           u1."username" AS "ScheduledBy",
           u2."username" AS "ProcessedBy",
           TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
