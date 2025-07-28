@@ -143,8 +143,8 @@ const getGrnDetailsForSelection = async (
         lotNo: lot.lotNo,
         jobNo: lot.jobNo,
         bundles: lot.noOfBundle,
-        grossWeightMt: parseFloat(lot.grossWeight * 0.907185).toFixed(2),
-        netWeightMt: parseFloat(lot.netWeight * 0.907185).toFixed(2),
+        grossWeightMt: lot.grossWeight,
+        netWeightMt: lot.netWeight,
       })),
     };
     console.log(
@@ -265,7 +265,7 @@ const createGrnAndTransactions = async (formData) => {
             "outboundedBy", "scheduledBy", "exWarehouseLot", "exWarehouseWarrant", "createdAt", "updatedAt"
         ) VALUES (
             :outboundId, :inboundId, :jobNo, :lotNo, :shape, :commodity, :brand,
-            :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, :outboundedDate, :storageReleaseLocation,
+            :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, NOW(), :storageReleaseLocation,
             :noOfBundle, :scheduleOutboundId, :releaseWarehouse, :lotReleaseWeight,
             :transportVendor, :outboundType, :exportDate, :stuffingDate, :containerNo, :sealNo,
             :driverName, :driverIdentityNo, :truckPlateNo, :warehouseStaff, :warehouseSupervisor,
@@ -276,7 +276,7 @@ const createGrnAndTransactions = async (formData) => {
         replacements: {
           ...lot,
           outboundId: createdOutbound.outboundId,
-          outboundedDate: createdOutbound.outboundedDate,
+          // outboundedDate: createdOutbound.outboundedDate,
           ...formData,
         },
         type: db.sequelize.QueryTypes.INSERT,
