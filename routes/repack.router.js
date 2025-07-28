@@ -65,18 +65,6 @@ const getChangedFields = (existingData, newData) => {
   return changes;
 };
 
-// Helper function to delete old image files
-const deleteImageFile = (imagePath) => {
-  try {
-    const fullPath = path.join(__dirname, '..', imagePath);
-    if (fs.existsSync(fullPath)) {
-      fs.unlinkSync(fullPath);
-      console.log(`Deleted old image: ${imagePath}`);
-    }
-  } catch (error) {
-    console.error(`Error deleting image ${imagePath}:`, error);
-  }
-};
 
 // Common function to handle repack for both inbound and lot - OPTIMIZED VERSION
 const handleRepack = async (req, res, isMobile = false) => {
@@ -95,11 +83,11 @@ const handleRepack = async (req, res, isMobile = false) => {
     } = req.body;
 
     // Validate required fields
-if ((inboundId === undefined && lotId === undefined) || !noOfBundle) {
-  return res.status(400).json({
-    error: 'Missing required fields: either inboundId or lotId, and noOfBundle'
-  });
-}
+    if ((inboundId === undefined && lotId === undefined) || !noOfBundle) {
+      return res.status(400).json({
+        error: 'Missing required fields: either inboundId or lotId, and noOfBundle'
+      });
+    }
 
     let identifier, jobNo, lotNo, isLotRepack = false;
     let parentRecord;
@@ -108,17 +96,17 @@ if ((inboundId === undefined && lotId === undefined) || !noOfBundle) {
     const isRebundledBool = isRebundled === 'true';
     const isRepackProvidedBool = isRepackProvided === 'true';
 
-    if (inboundId) {
-if (inboundId && inboundId !== 'null') {
-  parentRecord = await Inbound.findByPk(parseInt(inboundId));
-} else if (lotId && lotId !== 'null') {
-  parentRecord = await Lot.findByPk(parseInt(lotId));
-} else {
-  return res.status(400).json({ error: 'Invalid ID provided' });
-}
-    } else {
-      // Handle lot repack
-      parentRecord = await Lot.findByPk(lotId);
+    if (inboundId && inboundId !== 'null') {
+      parentRecord = await Inbound.findByPk(parseInt(inboundId));
+      if (!parentRecord) {
+        return res.status(404).json({ error: 'Inbound record not found' });
+      }
+      identifier = inboundId;
+      jobNo = parentRecord.jobNo;
+      lotNo = parentRecord.lotNo;
+      isLotRepack = false;
+    } else if (lotId && lotId !== 'null') {
+      parentRecord = await Lot.findByPk(parseInt(lotId));
       if (!parentRecord) {
         return res.status(404).json({ error: 'Lot record not found' });
       }
@@ -126,18 +114,21 @@ if (inboundId && inboundId !== 'null') {
       jobNo = parentRecord.jobNo;
       lotNo = parentRecord.lotNo;
       isLotRepack = true;
+    } else {
+      return res.status(400).json({ error: 'Invalid ID provided' });
     }
 
     // Check if bundle already exists
-const whereClause = {
-  bundleNo: parseInt(noOfBundle)
-};
+    const whereClause = {
+      bundleNo: parseInt(noOfBundle)
+    };
 
-if (isLotRepack) {
-  whereClause.lotId = lotId ? parseInt(lotId) : null;
-} else {
-  whereClause.inboundId = inboundId ? parseInt(inboundId) : null;
-}
+    if (isLotRepack) {
+      whereClause.lotId = lotId ? parseInt(lotId) : null;
+    } else {
+      whereClause.inboundId = inboundId ? parseInt(inboundId) : null;
+    }
+
     let inboundBundle = await InboundBundle.findOne({ 
       where: whereClause,
       include: [
@@ -152,6 +143,9 @@ if (isLotRepack) {
       ]
     });
 
+    // FIXED: noOfMetalStrap should only be set if isRebundled is true
+    const metalStrapValue = isRebundledBool && noOfMetalStrap ? parseInt(noOfMetalStrap) : null;
+
     const newBundleData = {
       inboundId: isLotRepack ? null : parseInt(inboundId),
       lotId: isLotRepack ? parseInt(lotId) : null,
@@ -159,7 +153,7 @@ if (isLotRepack) {
       isRelabelled: isRelabelledBool,
       isRebundled: isRebundledBool,
       isRepackProvided: isRepackProvidedBool,
-      noOfMetalStrap: noOfMetalStrap ? parseInt(noOfMetalStrap) : null,
+      noOfMetalStrap: metalStrapValue,
       repackDescription: repackDescription || null
     };
 
@@ -177,7 +171,7 @@ if (isLotRepack) {
         isRelabelled: isRelabelledBool,
         isRebundled: isRebundledBool,
         isRepackProvided: isRepackProvidedBool,
-        noOfMetalStrap: noOfMetalStrap ? parseInt(noOfMetalStrap) : null,
+        noOfMetalStrap: metalStrapValue,
         repackDescription: repackDescription || null
       });
 
@@ -195,164 +189,193 @@ if (isLotRepack) {
       console.log('Created new bundle');
     }
 
-// Replace the image handling section in your handleRepack function with this improved version
-
-// Handle image uploads only if isRepackProvided is true
-if (isRepackProvidedBool) {
-  // Parse existing images that should be kept
-  let keepBeforeImages = [];
-  let keepAfterImages = [];
-  
-  try {
-    keepBeforeImages = existingBeforeImages ? JSON.parse(existingBeforeImages) : [];
-    keepAfterImages = existingAfterImages ? JSON.parse(existingAfterImages) : [];
-  } catch (error) {
-    console.error('Error parsing existing images:', error);
-    keepBeforeImages = [];
-    keepAfterImages = [];
-  }
-
-  // Get current images from database
-  const currentBeforeImages = inboundBundle.beforeImages || [];
-  const currentAfterImages = inboundBundle.afterImages || [];
-
-  // BEFORE IMAGES PROCESSING
-  const beforeFiles = req.files?.beforeImage || [];
-  
-  // Delete before images that are NOT in the keepBeforeImages list
-  for (const currentImage of currentBeforeImages) {
-    const shouldKeep = keepBeforeImages.some(keepImg => 
-      parseInt(keepImg.beforeImagesId) === parseInt(currentImage.beforeImagesId)
-    );
-    
-    if (!shouldKeep) {
-      // Delete from database
-      await BeforeImage.destroy({
-        where: { beforeImagesId: currentImage.beforeImagesId }
-      });
+    // Handle image uploads only if isRepackProvided is true
+    if (isRepackProvidedBool) {
+      // Parse existing images that should be kept
+      let keepBeforeImages = [];
+      let keepAfterImages = [];
       
-      // Delete physical file
-      deleteImageFile(currentImage.imageUrl);
-      console.log(`Removed before image: ${currentImage.beforeImagesId}`);
-    }
-  }
-
-  // Add new before images (only if there are new files uploaded)
-  if (beforeFiles.length > 0) {
-    for (const file of beforeFiles) {
-      const uniqueName = `${jobNo}-${lotNo}-${noOfBundle}/before-${uuidv4()}${path.extname(file.originalname)}`;
-      const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
-
-      // Ensure directory exists
-      const dir = path.dirname(newPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+      try {
+        keepBeforeImages = existingBeforeImages ? JSON.parse(existingBeforeImages) : [];
+        keepAfterImages = existingAfterImages ? JSON.parse(existingAfterImages) : [];
+      } catch (error) {
+        console.error('Error parsing existing images:', error);
+        keepBeforeImages = [];
+        keepAfterImages = [];
       }
 
-      fs.renameSync(file.path, newPath);
+      // Get current images from database
+      const currentBeforeImages = inboundBundle.beforeImages || [];
+      const currentAfterImages = inboundBundle.afterImages || [];
 
-      await BeforeImage.create({
-        inboundId: isLotRepack ? null : parseInt(inboundId),
-        lotId: isLotRepack ? parseInt(lotId) : null,
-        inboundBundleId: inboundBundle.inboundBundleId,
-        imageUrl: `uploads/img/repacked/${uniqueName}`,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
+      // BEFORE IMAGES PROCESSING
+      const beforeFiles = req.files?.beforeImage || [];
       
-      console.log(`Added new before image: ${uniqueName}`);
-    }
-  }
-
-  // AFTER IMAGES PROCESSING
-  const afterFiles = req.files?.afterImage || [];
-  
-  // Delete after images that are NOT in the keepAfterImages list
-  for (const currentImage of currentAfterImages) {
-    const shouldKeep = keepAfterImages.some(keepImg => 
-      parseInt(keepImg.afterImagesId) === parseInt(currentImage.afterImagesId)
-    );
-    
-    if (!shouldKeep) {
-      // Delete from database
-      await AfterImage.destroy({
-        where: { afterImagesId: currentImage.afterImagesId }
-      });
-      
-      // Delete physical file
-      deleteImageFile(currentImage.imageUrl);
-      console.log(`Removed after image: ${currentImage.afterImagesId}`);
-    }
-  }
-
-  // Add new after images (only if there are new files uploaded)
-  if (afterFiles.length > 0) {
-    for (const file of afterFiles) {
-      const uniqueName = `${jobNo}-${lotNo}-${noOfBundle}/after-${uuidv4()}${path.extname(file.originalname)}`;
-      const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
-
-      // Ensure directory exists
-      const dir = path.dirname(newPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+      // Delete before images that are NOT in the keepBeforeImages list
+      for (const currentImage of currentBeforeImages) {
+        const shouldKeep = keepBeforeImages.some(keepImg => 
+          parseInt(keepImg.beforeImagesId) === parseInt(currentImage.beforeImagesId)
+        );
+        
+        if (!shouldKeep) {
+          // Delete from database
+          await BeforeImage.destroy({
+            where: { beforeImagesId: currentImage.beforeImagesId }
+          });
+          
+          // Delete physical file
+          deleteImageFile(currentImage.imageUrl);
+          console.log(`Removed before image: ${currentImage.beforeImagesId}`);
+        }
       }
 
-      fs.renameSync(file.path, newPath);
+      // Add new before images (only if there are new files uploaded)
+      if (beforeFiles.length > 0) {
+        for (const file of beforeFiles) {
+          const uniqueName = `${jobNo}-${lotNo}-${noOfBundle}/before-${uuidv4()}${path.extname(file.originalname)}`;
+          const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
 
-      await AfterImage.create({
-        inboundId: isLotRepack ? null : parseInt(inboundId),
-        lotId: isLotRepack ? parseInt(lotId) : null,
-        inboundBundleId: inboundBundle.inboundBundleId,
-        imageUrl: `uploads/img/repacked/${uniqueName}`,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
+          // Ensure directory exists
+          const dir = path.dirname(newPath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+
+          fs.renameSync(file.path, newPath);
+
+          await BeforeImage.create({
+            inboundId: isLotRepack ? null : parseInt(inboundId),
+            lotId: isLotRepack ? parseInt(lotId) : null,
+            inboundBundleId: inboundBundle.inboundBundleId,
+            imageUrl: `uploads/img/repacked/${uniqueName}`,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          });
+          
+          console.log(`Added new before image: ${uniqueName}`);
+        }
+      }
+
+      // AFTER IMAGES PROCESSING
+      const afterFiles = req.files?.afterImage || [];
       
-      console.log(`Added new after image: ${uniqueName}`);
+      // Delete after images that are NOT in the keepAfterImages list
+      for (const currentImage of currentAfterImages) {
+        const shouldKeep = keepAfterImages.some(keepImg => 
+          parseInt(keepImg.afterImagesId) === parseInt(currentImage.afterImagesId)
+        );
+        
+        if (!shouldKeep) {
+          // Delete from database
+          await AfterImage.destroy({
+            where: { afterImagesId: currentImage.afterImagesId }
+          });
+          
+          // Delete physical file
+          deleteImageFile(currentImage.imageUrl);
+          console.log(`Removed after image: ${currentImage.afterImagesId}`);
+        }
+      }
+
+      // Add new after images (only if there are new files uploaded)
+      if (afterFiles.length > 0) {
+        for (const file of afterFiles) {
+          const uniqueName = `${jobNo}-${lotNo}-${noOfBundle}/after-${uuidv4()}${path.extname(file.originalname)}`;
+          const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
+
+          // Ensure directory exists
+          const dir = path.dirname(newPath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+
+          fs.renameSync(file.path, newPath);
+
+          await AfterImage.create({
+            inboundId: isLotRepack ? null : parseInt(inboundId),
+            lotId: isLotRepack ? parseInt(lotId) : null,
+            inboundBundleId: inboundBundle.inboundBundleId,
+            imageUrl: `uploads/img/repacked/${uniqueName}`,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          });
+          
+          console.log(`Added new after image: ${uniqueName}`);
+        }
+      }
+    } else {
+      // If isRepackProvided is false, remove all existing images
+      if (inboundBundle) {
+        const existingBeforeImages = await BeforeImage.findAll({
+          where: { inboundBundleId: inboundBundle.inboundBundleId }
+        });
+        
+        const existingAfterImages = await AfterImage.findAll({
+          where: { inboundBundleId: inboundBundle.inboundBundleId }
+        });
+
+        // Delete all before images
+        for (const image of existingBeforeImages) {
+          deleteImageFile(image.imageUrl);
+        }
+        await BeforeImage.destroy({
+          where: { inboundBundleId: inboundBundle.inboundBundleId }
+        });
+
+        // Delete all after images
+        for (const image of existingAfterImages) {
+          deleteImageFile(image.imageUrl);
+        }
+        await AfterImage.destroy({
+          where: { inboundBundleId: inboundBundle.inboundBundleId }
+        });
+        
+        console.log('Removed all images as isRepackProvided is false');
+      }
     }
-  }
-} else {
-  // If isRepackProvided is false, remove all existing images
-  if (inboundBundle) {
-    const existingBeforeImages = await BeforeImage.findAll({
-      where: { inboundBundleId: inboundBundle.inboundBundleId }
-    });
-    
-    const existingAfterImages = await AfterImage.findAll({
-      where: { inboundBundleId: inboundBundle.inboundBundleId }
+
+    // NEW LOGIC: Get aggregate values from ALL bundles for this parent record
+    const aggregateWhereClause = isLotRepack 
+      ? { lotId: parseInt(lotId) }
+      : { inboundId: parseInt(inboundId) };
+
+    const allBundles = await InboundBundle.findAll({
+      where: aggregateWhereClause,
+      attributes: ['isRelabelled', 'isRebundled', 'isRepackProvided', 'noOfMetalStrap', 'repackDescription']
     });
 
-    // Delete all before images
-    for (const image of existingBeforeImages) {
-      deleteImageFile(image.imageUrl);
-    }
-    await BeforeImage.destroy({
-      where: { inboundBundleId: inboundBundle.inboundBundleId }
-    });
-
-    // Delete all after images
-    for (const image of existingAfterImages) {
-      deleteImageFile(image.imageUrl);
-    }
-    await AfterImage.destroy({
-      where: { inboundBundleId: inboundBundle.inboundBundleId }
-    });
+    // Calculate aggregate values - if ANY bundle has true, parent should be true
+    const aggregateIsRelabelled = allBundles.some(bundle => bundle.isRelabelled === true);
+    const aggregateIsRebundled = allBundles.some(bundle => bundle.isRebundled === true);
+    const aggregateIsRepackProvided = allBundles.some(bundle => bundle.isRepackProvided === true);
     
-    console.log('Removed all images as isRepackProvided is false');
-  }
-}
-    // OPTIMIZATION: Only update parent record if needed
-    const shouldUpdateParent = inboundBundle.isRepackProvided !== parentRecord.isRepackProvided ||
-                              inboundBundle.isRelabelled !== parentRecord.isRelabelled ||
-                              inboundBundle.isRebundled !== parentRecord.isRebundled;
+    // FIXED: For noOfMetalStrap, only consider bundles where isRebundled is true
+    const rebundledBundles = allBundles.filter(bundle => bundle.isRebundled === true);
+    const aggregateNoOfMetalStrap = rebundledBundles.length > 0 
+      ? Math.max(...rebundledBundles.map(bundle => bundle.noOfMetalStrap || 0))
+      : 0;
+    
+    // For repackDescription, concatenate all non-null descriptions
+    const aggregateRepackDescription = allBundles
+      .filter(bundle => bundle.repackDescription)
+      .map(bundle => bundle.repackDescription)
+      .join('; ') || null;
+
+    // OPTIMIZATION: Only update parent record if the aggregate values are different
+    const shouldUpdateParent = 
+      aggregateIsRelabelled !== parentRecord.isRelabelled ||
+      aggregateIsRebundled !== parentRecord.isRebundled ||
+      aggregateIsRepackProvided !== parentRecord.isRepackProvided ||
+      aggregateNoOfMetalStrap !== (parentRecord.noOfMetalStraps || 0) ||
+      aggregateRepackDescription !== parentRecord.repackDescription;
 
     if (shouldUpdateParent) {
       const parentUpdateData = {
-        isRelabelled: isRelabelledBool,
-        isRebundled: isRebundledBool,
-        isRepackProvided: isRepackProvidedBool,
-        noOfMetalStraps: noOfMetalStrap ? parseInt(noOfMetalStrap) : null,
-        repackDescription: repackDescription || null,
+        isRelabelled: aggregateIsRelabelled,
+        isRebundled: aggregateIsRebundled,
+        isRepackProvided: aggregateIsRepackProvided,
+        noOfMetalStraps: aggregateNoOfMetalStrap > 0 ? aggregateNoOfMetalStrap : null,
+        repackDescription: aggregateRepackDescription,
         updatedAt: new Date()
       };
 
@@ -366,7 +389,7 @@ if (isRepackProvidedBool) {
         });
       }
       
-      console.log('Updated parent record');
+      console.log('Updated parent record with aggregate values:', parentUpdateData);
     } else {
       console.log('No changes needed for parent record');
     }
@@ -396,6 +419,19 @@ if (isRepackProvidedBool) {
       error: 'Internal server error',
       details: error.message
     });
+  }
+};
+
+// Helper function to delete old image files
+const deleteImageFile = (imagePath) => {
+  try {
+    const fullPath = path.join(__dirname, '..', imagePath);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+      console.log(`Deleted old image: ${imagePath}`);
+    }
+  } catch (error) {
+    console.error(`Error deleting image ${imagePath}:`, error);
   }
 };
 

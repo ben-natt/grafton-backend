@@ -1,52 +1,97 @@
 const db = require("../database");
-const deleteExistingBundles = async (idValue, isInbound) => {
+
+const upsertBundle = async (idValue, isInbound, bundleNo, weight, meltNo) => {
   try {
     const idField = isInbound ? 'inboundId' : 'lotId';
-    const query = `
-      DELETE FROM public.inboundbundles 
-      WHERE "${idField}" = :idValue
+    
+    // console.log(`\n=== UPSERT BUNDLE ${bundleNo} (IGNORE REPACK FLAGS) ===`);
+    // console.log(`${idField}: ${idValue}, Weight: ${weight}`);
+    
+    // UPDATED: Find ANY bundle with this ID and bundle number (ignore repack flags)
+    const findQuery = `
+      SELECT "inboundBundleId", "isRelabelled", "isRebundled", "isRepackProvided"
+      FROM public.inboundbundles 
+      WHERE "${idField}" = :idValue 
+      AND "bundleNo" = :bundleNo
+      ORDER BY "createdAt" DESC
+      LIMIT 1
     `;
 
-    const result = await db.sequelize.query(query, {
-      replacements: { idValue },
-      type: db.sequelize.QueryTypes.DELETE,
+    console.log("Find Query:", findQuery);
+    const existing = await db.sequelize.query(findQuery, {
+      replacements: { idValue, bundleNo },
+      type: db.sequelize.QueryTypes.SELECT,
     });
 
-    console.log(`Existing bundles deleted for ${idField}:`, idValue);
-    return result;
-  } catch (error) {
-    console.error("Error deleting existing bundles:", error);
-    throw error;
-  }
-};
+    console.log(`Found ${existing.length} existing bundles`);
+    if (existing.length > 0) {
+      console.log("Existing bundle flags:", {
+        id: existing[0].inboundBundleId,
+        isRelabelled: existing[0].isRelabelled,
+        isRebundled: existing[0].isRebundled,
+        isRepackProvided: existing[0].isRepackProvided
+      });
+    }
 
-const insertBundle = async (idValue, isInbound, bundleNo, weight, meltNo) => {
-  try {
-    const idField = isInbound ? 'inboundId' : 'lotId';
-    const query = `
-      INSERT INTO public.inboundbundles 
-      ("${idField}", "bundleNo", weight, "meltNo", "isOutbounded", "createdAt", "updatedAt")
-      VALUES (:idValue, :bundleNo, :weight, :meltNo, false, NOW(), NOW())
-      RETURNING *
-    `;
+    if (existing.length > 0) {
+      // UPDATED: Update the bundle regardless of repack flags
+      const updateQuery = `
+        UPDATE public.inboundbundles 
+        SET weight = :weight, 
+            "meltNo" = :meltNo, 
+            "updatedAt" = NOW()
+        WHERE "${idField}" = :idValue 
+        AND "bundleNo" = :bundleNo
+        AND "inboundBundleId" = :bundleId
+        RETURNING *
+      `;
 
-    const result = await db.sequelize.query(query, {
-      replacements: { 
-        idValue, 
-        bundleNo, 
-        weight, 
-        meltNo: meltNo || null 
-      },
-      type: db.sequelize.QueryTypes.INSERT,
-    });
+      const result = await db.sequelize.query(updateQuery, {
+        replacements: { 
+          idValue, 
+          bundleNo, 
+          weight, 
+          meltNo: meltNo || null,
+          bundleId: existing[0].inboundBundleId
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+      });
 
-    if (result.length > 0) {
-      console.log("Bundle inserted successfully:", result[0]);
-      return result[0];
+      if (result.length > 0) {
+        console.log("Updated existing bundle (ignoring repack flags)");
+        return result[0];
+      } else {
+        console.log("Update failed");
+      }
+    } else {
+      // Insert new bundle only if none exists
+      console.log("🔍 No existing bundle found - inserting new one");
+      
+      const insertQuery = isInbound ? `
+        INSERT INTO public.inboundbundles 
+        ("inboundId", "bundleNo", weight, "meltNo", "isOutbounded", "createdAt", "updatedAt",
+         "isRelabelled", "isRebundled", "isRepackProvided")
+        VALUES (:idValue, :bundleNo, :weight, :meltNo, false, NOW(), NOW(), false, false, false)
+        RETURNING *
+      ` : `
+        INSERT INTO public.inboundbundles 
+        ("lotId", "bundleNo", weight, "meltNo", "isOutbounded", "createdAt", "updatedAt",
+         "isRelabelled", "isRebundled", "isRepackProvided")
+        VALUES (:idValue, :bundleNo, :weight, :meltNo, false, NOW(), NOW(), false, false, false)
+        RETURNING *
+      `;
+      
+      const result = await db.sequelize.query(insertQuery, {
+        replacements: { idValue, bundleNo, weight, meltNo: meltNo || null },
+        type: db.sequelize.QueryTypes.INSERT,
+      });
+      
+      console.log("Inserted new bundle");
+      return result.length > 0 ? result[0] : null;
     }
     return null;
   } catch (error) {
-    console.error("Error inserting bundle:", error);
+    console.error("Error in upsert:", error);
     throw error;
   }
 };
@@ -83,25 +128,29 @@ const saveInboundWithBundles = async (inboundId, actualWeight, bundles) => {
   const transaction = await db.sequelize.transaction();
   
   try {
+    // Update inbound actual weight
     await updateInboundActualWeight(inboundId, actualWeight);
-    await deleteExistingBundles(inboundId, true);
     
+    // Upsert bundles (update existing, insert new)
     const savedBundles = [];
     for (const bundle of bundles) {
-      const savedBundle = await insertBundle(
+      const savedBundle = await upsertBundle(
         inboundId,
         true,
         bundle.bundleNo,
         bundle.weight,
         bundle.meltNo
       );
-      savedBundles.push(savedBundle);
+      if (savedBundle) {
+        savedBundles.push(savedBundle);
+      }
     }
 
     await transaction.commit();
     return { inboundId, actualWeight, bundles: savedBundles };
   } catch (error) {
     await transaction.rollback();
+    console.error("Error saving inbound with bundles:", error);
     throw error;
   }
 };
@@ -116,6 +165,11 @@ const getInboundWithBundles = async (inboundId) => {
         ib.weight as "bundleWeight",
         ib."meltNo",
         ib."isOutbounded",
+        ib."isRelabelled",
+        ib."isRebundled",
+        ib."isRepackProvided",
+        ib."noOfMetalStrap",
+        ib."repackDescription",
         ib."createdAt" as "bundleCreatedAt"
       FROM public.inbounds i
       LEFT JOIN public.inboundbundles ib ON i."inboundId" = ib."inboundId"
@@ -130,6 +184,7 @@ const getInboundWithBundles = async (inboundId) => {
 
     return result.length > 0 ? result : [];
   } catch (error) {
+    console.error("Error getting inbound with bundles:", error);
     throw error;
   }
 };
@@ -157,6 +212,7 @@ const updateLotActualWeight = async (lotId, actualWeight) => {
     }
     return null;
   } catch (error) {
+    console.error("Error updating lot actual weight:", error);
     throw error;
   }
 };
@@ -165,25 +221,29 @@ const saveLotWithBundles = async (lotId, actualWeight, bundles) => {
   const transaction = await db.sequelize.transaction();
   
   try {
+    // Update lot actual weight
     await updateLotActualWeight(lotId, actualWeight);
-    await deleteExistingBundles(lotId, false);
     
+    // Upsert bundles (update existing, insert new)
     const savedBundles = [];
     for (const bundle of bundles) {
-      const savedBundle = await insertBundle(
+      const savedBundle = await upsertBundle(
         lotId,
         false,
         bundle.bundleNo,
         bundle.weight,
         bundle.meltNo
       );
-      savedBundles.push(savedBundle);
+      if (savedBundle) {
+        savedBundles.push(savedBundle);
+      }
     }
 
     await transaction.commit();
     return { lotId, actualWeight, bundles: savedBundles };
   } catch (error) {
     await transaction.rollback();
+    console.error("Error saving lot with bundles:", error);
     throw error;
   }
 };
@@ -198,6 +258,11 @@ const getLotWithBundles = async (lotId) => {
         ib.weight as "bundleWeight",
         ib."meltNo",
         ib."isOutbounded",
+        ib."isRelabelled",
+        ib."isRebundled",
+        ib."isRepackProvided",
+        ib."noOfMetalStrap",
+        ib."repackDescription",
         ib."createdAt" as "bundleCreatedAt"
       FROM public.lot l
       LEFT JOIN public.inboundbundles ib ON l."lotId" = ib."lotId"
@@ -212,6 +277,7 @@ const getLotWithBundles = async (lotId) => {
 
     return result.length > 0 ? result : [];
   } catch (error) {
+    console.error("Error getting lot with bundles:", error);
     throw error;
   }
 };
@@ -239,6 +305,7 @@ const updateSingleBundle = async (bundleId, weight, meltNo) => {
 
     return result.length > 0 ? result[0] : null;
   } catch (error) {
+    console.error("Error updating single bundle:", error);
     throw error;
   }
 };
@@ -271,6 +338,11 @@ const getBundlesIfWeighted = async (idValue, isInbound) => {
         weight,
         "meltNo",
         "isOutbounded",
+        "isRelabelled",
+        "isRebundled",
+        "isRepackProvided",
+        "noOfMetalStrap",
+        "repackDescription",
         "createdAt",
         "updatedAt"
       FROM public.inboundbundles
@@ -283,6 +355,7 @@ const getBundlesIfWeighted = async (idValue, isInbound) => {
       type: db.sequelize.QueryTypes.SELECT,
     });
   } catch (error) {
+    console.error("Error getting bundles if weighted:", error);
     throw error;
   }
 };
@@ -300,5 +373,6 @@ module.exports = {
   
   // Unified functions
   updateSingleBundle,
-  getBundlesIfWeighted
+  getBundlesIfWeighted,
+  upsertBundle
 };
