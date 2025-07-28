@@ -26,7 +26,7 @@ const getPendingInboundTasks = async (
     const replacements = {};
 
     if (exWarehouseLot) {
-      whereClauses.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
+      whereClauses.push(`l."exWarehouseLot" iLIKE :exWarehouseLot`);
       replacements.exWarehouseLot = `%${exWarehouseLot}%`;
     }
     if (startDate && endDate) {
@@ -145,12 +145,18 @@ const getPendingOutboundTasks = async (
     const replacements = {};
 
     if (jobNo) {
-      whereClauses.push(`i."jobNo" ILIKE :jobNo`);
+      // Search in both inbound job number and outbound job number
+      whereClauses.push(
+        `(i."jobNo" iLIKE :jobNo OR CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) iLIKE :jobNo)`
+      );
       replacements.jobNo = `%${jobNo}%`;
     }
     if (startDate && endDate) {
+      // UPDATED: Check for date range overlap, handling cases where releaseEndDate might be null.
+      // This ensures that any job whose date range [releaseDate, releaseEndDate] intersects with the
+      // filter's date range [startDate, endDate] is included.
       whereClauses.push(
-        `(so."releaseDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`
+        `(so."releaseDate" <= :endDate AND COALESCE(so."releaseEndDate", so."releaseDate") >= :startDate)`
       );
       replacements.startDate = startDate;
       replacements.endDate = endDate;
@@ -178,11 +184,14 @@ const getPendingOutboundTasks = async (
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
+    // UPDATED: Changed the query to group by schedule ID and order by the earliest releaseDate.
+    // This ensures jobs are sorted correctly by date before being paginated.
     const scheduleIdQuery = `
-      SELECT DISTINCT so."scheduleOutboundId"
+      SELECT so."scheduleOutboundId"
       ${baseQuery}
       WHERE ${whereString}
-      ORDER BY so."scheduleOutboundId"
+      GROUP BY so."scheduleOutboundId"
+      ORDER BY MIN(so."releaseDate") ASC, so."scheduleOutboundId" ASC
       LIMIT :limit OFFSET :offset;
     `;
     const scheduleIdResults = await db.sequelize.query(scheduleIdQuery, {
@@ -201,8 +210,10 @@ const getPendingOutboundTasks = async (
     const detailsQuery = `
       SELECT
           so."scheduleOutboundId",
+          si."selectedInboundId",
           CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo",
           so."releaseDate" as "scheduleReleaseDate",
+          so."releaseEndDate" as "scheduleReleaseEndDate",
           so."stuffingDate", so."containerNo", so."sealNo",
           u.username,
           i."jobNo", i."lotNo", i."noOfBundle" as "expectedBundleCount",
@@ -236,6 +247,9 @@ const getPendingOutboundTasks = async (
           userInfo: {
             username: item.username,
             releaseDate: formatDate(item.scheduleReleaseDate),
+            releaseEndDate: item.scheduleReleaseEndDate
+              ? formatDate(item.scheduleReleaseEndDate)
+              : null,
             stuffingDate: item.stuffingDate
               ? formatDate(item.stuffingDate)
               : null,
@@ -246,6 +260,7 @@ const getPendingOutboundTasks = async (
         };
       }
       acc[scheduleId].lotDetails.push({
+        selectedInboundId: item.selectedInboundId,
         jobNo: item.jobNo,
         lotNo: item.lotNo,
         expectedBundleCount: item.expectedBundleCount,

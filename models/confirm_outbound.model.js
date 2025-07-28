@@ -265,7 +265,7 @@ const createGrnAndTransactions = async (formData) => {
             "outboundedBy", "scheduledBy", "exWarehouseLot", "exWarehouseWarrant", "createdAt", "updatedAt"
         ) VALUES (
             :outboundId, :inboundId, :jobNo, :lotNo, :shape, :commodity, :brand,
-            :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, :outboundedDate, :storageReleaseLocation,
+            :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, NOW(), :storageReleaseLocation,
             :noOfBundle, :scheduleOutboundId, :releaseWarehouse, :lotReleaseWeight,
             :transportVendor, :outboundType, :exportDate, :stuffingDate, :containerNo, :sealNo,
             :driverName, :driverIdentityNo, :truckPlateNo, :warehouseStaff, :warehouseSupervisor,
@@ -276,7 +276,7 @@ const createGrnAndTransactions = async (formData) => {
         replacements: {
           ...lot,
           outboundId: createdOutbound.outboundId,
-          outboundedDate: createdOutbound.outboundedDate,
+          // outboundedDate: createdOutbound.outboundedDate,
           ...formData,
         },
         type: db.sequelize.QueryTypes.INSERT,
