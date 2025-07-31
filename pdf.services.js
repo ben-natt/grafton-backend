@@ -26,7 +26,7 @@ async function generateGrnPdf(data) {
     const textColor = rgb(0, 0, 0);
 
     const drawText = (text, x, y, customFont = font, size = fontSize) => {
-      page.drawText(String(text || "-"), {
+      page.drawText(String(text || "N/A"), {
         x,
         y,
         font: customFont,
