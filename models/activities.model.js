@@ -42,6 +42,8 @@ const getOutboundSummary = async () => {
         SUM(o."netWeight") AS "totalWeight"
       FROM 
         public.outboundtransactions o
+      LEFT JOIN 
+        public.inbounds i ON o."inboundId" = i."inboundId"
       WHERE o."releaseDate" IS NOT NULL
       GROUP BY 
         o."commodity", o."shape"
@@ -87,7 +89,6 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
         replacements[`brand${index}`] = `%${brand}%`;
       });
     }
-    // **FIX: Cast timestamp to date for correct range filtering**
     if (filters.startDate && filters.endDate) {
       whereClauses.push(
         `i."inboundDate"::date BETWEEN :startDate::date AND :endDate::date`
@@ -131,7 +132,6 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
     const whereString =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
-    // --- SORTING LOGIC ---
     const sortableColumns = {
       Date: 'i."inboundDate"',
       "Job No": 'i."jobNo"',
@@ -144,7 +144,7 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       "Scheduled By": 'u."username"',
     };
 
-    let orderByClause = 'ORDER BY i."inboundDate" DESC NULLS LAST'; // Default sort
+    let orderByClause = 'ORDER BY i."inboundDate" DESC NULLS LAST';
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortColumn = sortableColumns[filters.sortBy];
       const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
@@ -187,7 +187,8 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
         b."brandName" AS "Brand",
         s."shapeName" AS "Shape",
         i."noOfBundle" AS "Qty", 
-        u."username" AS "Scheduled By"
+        u."username" AS "Scheduled By",
+        exlme."exLmeWarehouseName" AS "Ex LME Warehouse"
       ${baseQuery}
       ${orderByClause}
       LIMIT :limit OFFSET :offset;`;
@@ -206,10 +207,9 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
 const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
   try {
     const offset = (page - 1) * pageSize;
-    let whereClauses = ['o."releaseDate" IS NOT NULL']; // Base condition
+    let whereClauses = ['o."releaseDate" IS NOT NULL'];
     const replacements = { limit: pageSize, offset };
 
-    // Build WHERE clause from filters
     if (filters.commodity) {
       whereClauses.push(`o."commodity" ILIKE :commodity`);
       replacements.commodity = `%${filters.commodity}%`;
@@ -231,7 +231,6 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       });
       whereClauses.push(`(${brandClauses.join(" OR ")})`);
     }
-    // **FIX: Cast timestamp to date for correct range filtering**
     if (filters.startDate && filters.endDate) {
       whereClauses.push(
         `o."releaseDate"::date BETWEEN :startDate::date AND :endDate::date`
@@ -252,7 +251,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       replacements.exWarehouseLocation = `%${filters.exWarehouseLocation}%`;
     }
     if (filters.exLmeWarehouse) {
-      whereClauses.push(`o."exLmeWarehouse" ILIKE :exLmeWarehouse`);
+      whereClauses.push(`w."exLmeWarehouseName" ILIKE :exLmeWarehouse`);
       replacements.exLmeWarehouse = `%${filters.exLmeWarehouse}%`;
     }
 
@@ -273,7 +272,6 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
     const whereString =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
-    // --- SORTING LOGIC ---
     const sortableColumns = {
       Date: 'o."releaseDate"',
       "Job No": 'o."jobNo"',
@@ -286,7 +284,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       "Scheduled By": 'u."username"',
     };
 
-    let orderByClause = 'ORDER BY o."releaseDate" DESC NULLS LAST'; // Default sort
+    let orderByClause = 'ORDER BY o."releaseDate" DESC NULLS LAST';
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortColumn = sortableColumns[filters.sortBy];
       const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
@@ -297,6 +295,10 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
           public.outboundtransactions o
         LEFT JOIN
           public.users u ON u.userid = o."scheduledBy"
+        LEFT JOIN 
+          public.inbounds i ON o."inboundId" = i."inboundId"
+        LEFT JOIN 
+          public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
         ${whereString}`;
 
     const countQuery = `SELECT COUNT(o."outboundTransactionId")::int ${baseQuery}`;
@@ -317,7 +319,8 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
         o."brands" AS "Brand",
         o."shape" AS "Shape",
         o."noOfBundle" AS "Qty",
-        u."username" AS "Scheduled By"
+        u."username" AS "Scheduled By",
+        w."exLmeWarehouseName" AS "Ex LME Warehouse"
       ${baseQuery}
       ${orderByClause}
       LIMIT :limit OFFSET :offset;`;
