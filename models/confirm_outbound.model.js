@@ -132,11 +132,13 @@ const getGrnDetailsForSelection = async (
       releaseDate: firstLot.releaseDate,
       ourReference: outboundJobNo,
       grnNo,
-      warehouse: firstLot.releaseWarehouse,
+      warehouse: firstLot.releaseWarehouse ? firstLot.releaseWarehouse : "N/A",
       cargoDetails: {
-        commodity: aggregateDetails("commodity"),
-        shape: aggregateDetails("shape"),
-        brand: aggregateDetails("brand"),
+        commodity: aggregateDetails("commodity")
+          ? aggregateDetails("commodity")
+          : "N/A",
+        shape: aggregateDetails("shape") ? aggregateDetails("shape") : "N/A",
+        brand: aggregateDetails("brand") ? aggregateDetails("brand") : "N/A",
       },
       lots: lots.map((lot) => ({
         selectedInboundId: lot.selectedInboundId,

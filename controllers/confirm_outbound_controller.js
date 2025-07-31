@@ -142,8 +142,8 @@ const createGrnAndTransactions = async (req, res) => {
       grnNo: createdOutbound.grnNo,
       releaseDate: new Date().toLocaleDateString("en-GB", {
         day: "2-digit",
-        month: "short",
-        year: "numeric",
+        month: "2-digit",
+        year: "2-digit",
       }),
       warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "",
       containerAndSealNo: containerAndSealNo,
