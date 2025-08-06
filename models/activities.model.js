@@ -456,7 +456,7 @@ const getInboundRecordByInboundId = async (inboundId) => {
 const getOutboundRecordByOutboundId = async (outboundId) => {
   try {
     const query = `SELECT
-          o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", o."noOfBundle" AS "NoOfBundle",o."lotReleaseWeight" AS "LotReleaseWeight",
+          o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", o."noOfBundle" AS "NoOfBundle",o."actualWeight" AS "LotReleaseWeight",
           o."outboundTransactionId", o."commodity" AS "Commodity", o."brands" AS "Brand",
           o."shape" AS "Shape", o."exLmeWarehouse" AS "ExLMEWarehouse",
           o."exWarehouseLot" AS "ExWarehouseLot", o."releaseWarehouse" AS "ReleaseWarehouse",
@@ -465,11 +465,16 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
           o."exportDate" AS "ExportDate", so."deliveryDate" AS "DeliveryDate",
           o."stuffingDate" AS "StuffingDate",
           o."createdAt" AS "CreatedAt",
-          o."netWeight" AS "TotalReleaseWeight",
+          o."lotReleaseWeight" AS "TotalReleaseWeight",
           o."storageReleaseLocation" AS "StorageReleaseLocation", o."transportVendor" AS "TransportVendor",
           scheduler."username" AS "ScheduledBy",
           processor."username" AS "ProcessedBy",
-          o."updatedAt" AS "UpdatedAt"
+          o."updatedAt" AS "UpdatedAt",
+          (
+          SELECT COUNT(*) 
+          FROM public.outboundtransactions 
+          WHERE "outboundId" = o."outboundId"
+        ) AS "TotalLotsToRelease"
         FROM public.outboundtransactions o
         LEFT JOIN public.users scheduler ON scheduler.userid = o."scheduledBy"
         LEFT JOIN public.users processor ON processor.userid = o."outboundedBy"
@@ -835,44 +840,53 @@ const getScheduleInboundRecordByLotId = async (lotId) => {
 const getScheduleOutboundRecordById = async (id) => {
   try {
     const query = `SELECT
-          i."jobNo" AS "JobNo", 
-          i."lotNo" AS "LotNo", 
-          i."noOfBundle" AS "NoOfBundle",
-          so."lotReleaseWeight" AS "LotReleaseWeight",
-          i."inboundId", 
-          c."commodityName" AS "Commodity", 
-          b."brandName" AS "Brand",
-          s."shapeName" AS "Shape", 
-          exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
-          i."exWarehouseLot" AS "ExWarehouseLot",
-          i."exWarehouseWarrant" AS "ExWarehouseWarrant",
-          so."releaseWarehouse" AS "ReleaseWarehouse",
-          TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleOutboundDate",
-          TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
-          TO_CHAR(so."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseEndDate",
-          TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
-          TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "StuffingDate",
-          TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
-          i."netWeight" AS "TotalReleaseWeight",
-          so."storageReleaseLocation" AS "StorageReleaseLocation",
-          so."transportVendor" AS "TransportVendor",
-          scheduler."username" AS "ScheduledBy",
-          processor."username" AS "ProcessedBy",
-          TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
-          TO_CHAR(ot."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
-          TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2"
-        FROM public.selectedinbounds selin
-        LEFT JOIN public.inbounds i ON i."inboundId" = selin."inboundId"
-        LEFT JOIN public.brands b ON b."brandId" = i."brandId"
-        LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
-        LEFT JOIN public.shapes s ON s."shapeId" = i."shapeId"
-        LEFT JOIN public.exlmewarehouses exlme ON exlme."exLmeWarehouseId" = i."exLmeWarehouseId"
-        LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = selin."scheduleOutboundId"
-        LEFT JOIN public.users scheduler ON scheduler.userid = so."userId"
-        LEFT JOIN public.outboundtransactions ot ON selin."inboundId" = ot."inboundId"
-		    LEFT JOIN public.users processor ON processor.userid = ot."outboundedBy"
-        WHERE selin."inboundId" = :id
-        LIMIT 1;`;
+        i."jobNo" AS "JobNo", 
+        i."lotNo" AS "LotNo", 
+        i."noOfBundle" AS "NoOfBundle",
+        so."lotReleaseWeight" AS "LotReleaseWeight",
+        i."inboundId", 
+        c."commodityName" AS "Commodity", 
+        b."brandName" AS "Brand",
+        s."shapeName" AS "Shape",
+        i."actualWeight" AS "GrossWeight", 
+        exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
+        i."exWarehouseLot" AS "ExWarehouseLot",
+        i."exWarehouseWarrant" AS "ExWarehouseWarrant",
+        so."releaseWarehouse" AS "ReleaseWarehouse",
+        TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleOutboundDate",
+        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
+        TO_CHAR(so."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseEndDate",
+        TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
+        TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "StuffingDate",
+        TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
+        i."netWeight" AS "TotalReleaseWeight",
+        so."storageReleaseLocation" AS "StorageReleaseLocation",
+        so."transportVendor" AS "TransportVendor",
+        scheduler."username" AS "ScheduledBy",
+        processor."username" AS "ProcessedBy",
+        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
+        TO_CHAR(ot."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
+        TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2",
+        
+        (
+          SELECT COUNT(*)
+          FROM public.selectedinbounds si2
+          WHERE si2."scheduleOutboundId" = selin."scheduleOutboundId"
+        ) AS "TotalLots"
+        
+      FROM public.selectedinbounds selin
+      LEFT JOIN public.inbounds i ON i."inboundId" = selin."inboundId"
+      LEFT JOIN public.brands b ON b."brandId" = i."brandId"
+      LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
+      LEFT JOIN public.shapes s ON s."shapeId" = i."shapeId"
+      LEFT JOIN public.exlmewarehouses exlme ON exlme."exLmeWarehouseId" = i."exLmeWarehouseId"
+      LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = selin."scheduleOutboundId"
+      LEFT JOIN public.users scheduler ON scheduler.userid = so."userId"
+      LEFT JOIN public.outboundtransactions ot ON selin."inboundId" = ot."inboundId"
+      LEFT JOIN public.users processor ON processor.userid = ot."outboundedBy"
+      WHERE selin."inboundId" = :id
+      LIMIT 1;
+    `;
 
     const result = await db.sequelize.query(query, {
       replacements: { id },
