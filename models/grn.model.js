@@ -81,7 +81,7 @@ const grnModel = {
       const dataQuery = `
         SELECT
           o."outboundId",
-          TO_CHAR(o."createdAt" AT TIME ZONE 'Asia/Singapore', 'DD-MM-YYYY') AS "date",
+          TO_CHAR(o."createdAt" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
           o."grnNo",
           o."grnImage",
           o."grnPreviewImage",
