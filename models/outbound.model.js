@@ -130,13 +130,20 @@ const getAllScheduleOutbounds = async () => {
         o."releaseEndDate" AS "Release End Date",
         o."releaseWarehouse" AS "Release Warehouse",
         o."deliveryDate" AS "Delivery Date",
+        o."transportVendor" AS "Transport Vendor",
         o."createdAt" AS "Scheduled Outbound Date",
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."storageReleaseLocation" AS "Storage Release Location",
         o."exportDate" AS "Export Date",
         o."stuffingDate" AS "Stuffing Date",
 		u1."username" AS "Scheduled By",
-        u2."username" AS "Processed By"
+        u2."username" AS "Processed By",
+          (
+          SELECT COUNT(*)
+          FROM public.selectedinbounds si2
+          WHERE si2."scheduleOutboundId" = si."scheduleOutboundId"
+        ) AS "TotalLots"
+        
 		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
 		ON o."scheduleOutboundId" = si."scheduleOutboundId"
 		LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
@@ -147,6 +154,8 @@ const getAllScheduleOutbounds = async () => {
         LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = si."inboundId"
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
+          ORDER BY
+                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT
@@ -180,12 +189,18 @@ const getScheduleOutboundByDate = async (date) => {
         o."releaseDate" AS "Release Date",
         o."releaseEndDate" AS "Release End Date",
         o."deliveryDate" AS "Delivery Date",
+        o."transportVendor" AS "Transport Vendor",
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."exportDate" AS "Export Date",
     o."stuffingDate" AS "Stuffing Date",
         o."storageReleaseLocation" AS "Storage Release Location",
 		u1."username" AS "Scheduled By",
-		u2."username" AS "Processed By"
+		u2."username" AS "Processed By",
+         (
+          SELECT COUNT(*)
+          FROM public.selectedinbounds si2
+          WHERE si2."scheduleOutboundId" = si."scheduleOutboundId"
+        ) AS "TotalLots"
 		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
 		ON o."scheduleOutboundId" = si."scheduleOutboundId"
 		LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
@@ -197,6 +212,8 @@ const getScheduleOutboundByDate = async (date) => {
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
             WHERE TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
+        ORDER BY
+                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
@@ -230,12 +247,18 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
         o."releaseWarehouse" AS "Release Warehouse",
         o."createdAt" AS "Scheduled Outbound Date",
         o."deliveryDate" AS "Delivery Date",
+        o."transportVendor" AS "Transport Vendor",
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."storageReleaseLocation" AS "Storage Release Location",
         o."exportDate" AS "Export Date",
         o."stuffingDate" AS "Stuffing Date",
 		u1."username" AS "Scheduled By",
-		u2."username" AS "Processed By"
+		u2."username" AS "Processed By",
+         (
+          SELECT COUNT(*)
+          FROM public.selectedinbounds si2
+          WHERE si2."scheduleOutboundId" = si."scheduleOutboundId"
+        ) AS "TotalLots"
 		FROM public.scheduleoutbounds o JOIN public.selectedinbounds si
 		ON o."scheduleOutboundId" = si."scheduleOutboundId"
 		LEFT JOIN public.inbounds i on si."inboundId" = i."inboundId"
@@ -247,6 +270,8 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
             WHERE TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
+        ORDER BY
+                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,

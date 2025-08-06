@@ -48,7 +48,6 @@ const getInventory = async (filters) => {
         const offset = (page - 1) * pageSize;
         const replacements = { pageSize, offset };
 
-        // Define the base aggregation query as a Common Table Expression (CTE)
         const cteQuery = `
             WITH grouped_inventory AS (
                 SELECT
@@ -79,7 +78,6 @@ const getInventory = async (filters) => {
             )
         `;
 
-        // Rest of the code remains the same...
         let finalWhereClause = '';
         if (filters.search) {
             replacements.search = `%${filters.search}%`;
@@ -95,19 +93,27 @@ const getInventory = async (filters) => {
             `;
         }
 
-        const countQuery = `
-            ${cteQuery}
-            SELECT COUNT(*)::int AS "totalItems"
-            FROM grouped_inventory
-            ${finalWhereClause};
-        `;
+        // --- START: Sorting Logic for getInventory ---
+        const sortableColumns = {
+            'Job No': '"Job No"', 'Lots': '"Lot No"', 'Metal': '"Metal"',
+            'Brand': '"Brand"', 'Shape': '"Shape"', 'Qty': '"Qty"', 'Weight': '"Weight"'
+        };
+        let orderByClause = 'ORDER BY "Job No" ASC'; // Default sort
+        if (filters.sortBy && sortableColumns[filters.sortBy]) {
+            const sortColumn = sortableColumns[filters.sortBy];
+            const sortOrder = filters.sortOrder === 'desc' ? 'DESC' : 'ASC';
+            orderByClause = `ORDER BY ${sortColumn} ${sortOrder}`;
+        }
+        // --- END: Sorting Logic ---
+
+        const countQuery = `${cteQuery} SELECT COUNT(*)::int AS "totalItems" FROM grouped_inventory ${finalWhereClause};`;
 
         const dataQuery = `
             ${cteQuery}
             SELECT *
             FROM grouped_inventory
             ${finalWhereClause}
-            ORDER BY "Job No"
+            ${orderByClause}
             LIMIT :pageSize OFFSET :offset;
         `;
 
@@ -117,14 +123,10 @@ const getInventory = async (filters) => {
 
         const [countResult, items] = await Promise.all([
             db.sequelize.query(countQuery, { replacements: countReplacements, type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(dataQuery, {
-                replacements,
-                type: db.sequelize.QueryTypes.SELECT
-            })
+            db.sequelize.query(dataQuery, { replacements, type: db.sequelize.QueryTypes.SELECT })
         ]);
 
         const totalItems = countResult.length > 0 ? countResult[0].totalItems : 0;
-
         return { items, totalItems };
     } catch (error) {
         console.error('Error fetching inventory records:', error);
@@ -278,22 +280,11 @@ const getLotSummary = async (jobNo, lotNo) => {
 const getLotDetails = async (filters) => {
     try {
         const replacements = {};
-        // MODIFICATION: Add check for outboundtransactions to the default clauses
         let whereClauses = ['o."inboundId" IS NULL', 'ot."inboundId" IS NULL'];
 
-        // --- Existing Filters ---
-        if (filters.selectedMetal) {
-            whereClauses.push('c."commodityName" = :selectedMetal');
-            replacements.selectedMetal = filters.selectedMetal;
-        }
-        if (filters.selectedShape) {
-            whereClauses.push('s."shapeName" = :selectedShape');
-            replacements.selectedShape = filters.selectedShape;
-        }
-        if (filters.jobNo) {
-            whereClauses.push('i."jobNo" ILIKE :jobNo');
-            replacements.jobNo = `%${filters.jobNo}%`;
-        }
+        if (filters.selectedMetal) { whereClauses.push('c."commodityName" = :selectedMetal'); replacements.selectedMetal = filters.selectedMetal; }
+        if (filters.selectedShape) { whereClauses.push('s."shapeName" = :selectedShape'); replacements.selectedShape = filters.selectedShape; }
+        if (filters.jobNo) { whereClauses.push('i."jobNo" ILIKE :jobNo'); replacements.jobNo = `%${filters.jobNo}%`; }
         if (filters.brands) {
             try {
                 const brandsList = JSON.parse(filters.brands);
@@ -301,82 +292,43 @@ const getLotDetails = async (filters) => {
                     whereClauses.push('b."brandName" IN (:brands)');
                     replacements.brands = brandsList;
                 }
-            } catch (e) {
-                console.error("Error parsing brands filter:", e);
-            }
+            } catch (e) { console.error("Error parsing brands filter:", e); }
         }
-        if (filters.exWarehouseLocation) {
-            whereClauses.push('exwhl."exWarehouseLocationName" = :exWarehouseLocation');
-            replacements.exWarehouseLocation = filters.exWarehouseLocation;
-        }
-        if (filters.exLMEWarehouse) {
-            whereClauses.push('elme."exLmeWarehouseName" = :exLMEWarehouse');
-            replacements.exLMEWarehouse = filters.exLMEWarehouse;
-        }
+        if (filters.exWarehouseLocation) { whereClauses.push('exwhl."exWarehouseLocationName" = :exWarehouseLocation'); replacements.exWarehouseLocation = filters.exWarehouseLocation; }
+        if (filters.exLMEWarehouse) { whereClauses.push('elme."exLmeWarehouseName" = :exLMEWarehouse'); replacements.exLMEWarehouse = filters.exLMEWarehouse; }
         if (filters.noOfBundle) {
             const noOfBundleInt = parseInt(filters.noOfBundle, 10);
-            if (!isNaN(noOfBundleInt)) {
-                whereClauses.push('i."noOfBundle" = :noOfBundle');
-                replacements.noOfBundle = noOfBundleInt;
-            }
+            if (!isNaN(noOfBundleInt)) { whereClauses.push('i."noOfBundle" = :noOfBundle'); replacements.noOfBundle = noOfBundleInt; }
         }
-        if (filters.inboundWarehouse) {
-            whereClauses.push('iw."inboundWarehouseName" = :inboundWarehouse');
-            replacements.inboundWarehouse = filters.inboundWarehouse;
-        }
-        if (filters.exWarehouseLot) {
-            whereClauses.push('i."exWarehouseLot" ILIKE :exWarehouseLot');
-            replacements.exWarehouseLot = `%${filters.exWarehouseLot}%`;
-        }
-
-        // --- NEW Search Filter ---
+        if (filters.inboundWarehouse) { whereClauses.push('iw."inboundWarehouseName" = :inboundWarehouse'); replacements.inboundWarehouse = filters.inboundWarehouse; }
+        if (filters.exWarehouseLot) { whereClauses.push('i."exWarehouseLot" ILIKE :exWarehouseLot'); replacements.exWarehouseLot = `%${filters.exWarehouseLot}%`; }
         if (filters.search) {
             whereClauses.push(`(
-                i."jobNo" ILIKE :search OR
-                i."exWarehouseLot" ILIKE :search OR
-                c."commodityName" ILIKE :search OR
-                b."brandName" ILIKE :search OR
-                s."shapeName" ILIKE :search OR
-                CAST(i."lotNo" AS TEXT) ILIKE :search OR
-                CAST(i."netWeight" AS TEXT) ILIKE :search OR
-                CAST(i."noOfBundle" AS TEXT) ILIKE :search 
+                i."jobNo" ILIKE :search OR i."exWarehouseLot" ILIKE :search OR c."commodityName" ILIKE :search OR
+                b."brandName" ILIKE :search OR s."shapeName" ILIKE :search OR CAST(i."lotNo" AS TEXT) ILIKE :search OR
+                CAST(i."netWeight" AS TEXT) ILIKE :search OR CAST(i."noOfBundle" AS TEXT) ILIKE :search 
             )`);
             replacements.search = `%${filters.search}%`;
         }
 
         const whereString = ' WHERE ' + whereClauses.join(' AND ');
 
-        // Query for total count
-        const countQuery = `
-            SELECT COUNT(i."inboundId")::int AS "totalItems"
-            FROM public.inbounds i
-            LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
-            LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
-            LEFT JOIN public.brands b ON i."brandId" = b."brandId"
-            LEFT JOIN public.exlmewarehouses elme ON elme."exLmeWarehouseId" = i."exLmeWarehouseId"
-            LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
-            LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
-            LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
-            -- MODIFICATION: Join with outboundtransactions to filter out processed lots
-            LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
-            ${whereString};
-        `;
+        // --- START: Sorting Logic for getLotDetails ---
+        const sortableColumns = {
+            'Lot No': 'i."jobNo" ASC, i."lotNo"', 'Ex-Whse Lot': 'i."exWarehouseLot"', 'Metal': 'c."commodityName"',
+            'Brand': 'b."brandName"', 'Shape': 's."shapeName"', 'Qty': 'i."noOfBundle"', 'Weight': '"Weight"'
+        };
+        let orderByClause = 'ORDER BY i."inboundId" ASC'; // Default sort
+        if (filters.sortBy && sortableColumns[filters.sortBy]) {
+            const sortOrder = filters.sortOrder === 'desc' ? 'DESC' : 'ASC';
+            if (filters.sortBy === 'Lot No') {
+                orderByClause = `ORDER BY i."jobNo" ${sortOrder}, i."lotNo" ${sortOrder}`;
+            } else {
+                orderByClause = `ORDER BY ${sortableColumns[filters.sortBy]} ${sortOrder}`;
+            }
+        }
 
-        const countResult = await db.sequelize.query(countQuery, {
-            type: db.sequelize.QueryTypes.SELECT,
-            replacements: { ...replacements }
-        });
-        const totalItems = countResult[0].totalItems;
-
-        // Query for paginated data
-        let query = `
-            SELECT
-                i."inboundId" as id, i."jobNo" AS "JobNo", i."lotNo" AS "LotNo",
-                i."exWarehouseLot" AS "Ex-WarehouseLot", elme."exLmeWarehouseName" AS "ExLMEWarehouse",
-                c."commodityName" AS "Metal", b."brandName" AS "Brand", s."shapeName" AS "Shape",
-                i."noOfBundle" AS "Qty", SUM(CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END) AS "Weight"
- , exwhl."exWarehouseLocationName" AS "ExWarehouseLocation"
-            , iw."inboundWarehouseName" AS "InboundWarehouse"
+        const baseQuery = `
             FROM public.inbounds i
             JOIN public.commodities c ON i."commodityId" = c."commodityId"
             JOIN public.shapes s ON i."shapeId" = s."shapeId"
@@ -385,28 +337,38 @@ const getLotDetails = async (filters) => {
             LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
             LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
             LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
-            -- MODIFICATION: Join with outboundtransactions to filter out processed lots
             LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
             ${whereString}
-GROUP BY 
-    i."inboundId", i."jobNo", i."lotNo", i."exWarehouseLot", elme."exLmeWarehouseName",
-    c."commodityName", b."brandName", s."shapeName", i."noOfBundle",
-    exwhl."exWarehouseLocationName", iw."inboundWarehouseName"
-ORDER BY i."inboundId"        `;
+        `;
+
+        const countQuery = `SELECT COUNT(i."inboundId")::int AS "totalItems" ${baseQuery.split('GROUP BY')[0]}`;
+        
+        const countResult = await db.sequelize.query(countQuery, { type: db.sequelize.QueryTypes.SELECT, replacements: { ...replacements } });
+        const totalItems = countResult[0].totalItems;
 
         const page = parseInt(filters.page, 10) || 1;
         const pageSize = parseInt(filters.pageSize, 10) || 25;
         const offset = (page - 1) * pageSize;
-
-        query += ` LIMIT :pageSize OFFSET :offset;`;
         replacements.pageSize = pageSize;
         replacements.offset = offset;
 
-        const items = await db.sequelize.query(query, {
-            type: db.sequelize.QueryTypes.SELECT,
-            replacements: replacements
-        });
-
+        let dataQuery = `
+            SELECT
+                i."inboundId" as id, i."jobNo" AS "JobNo", i."lotNo" AS "LotNo",
+                i."exWarehouseLot" AS "Ex-WarehouseLot", elme."exLmeWarehouseName" AS "ExLMEWarehouse",
+                c."commodityName" AS "Metal", b."brandName" AS "Brand", s."shapeName" AS "Shape",
+                i."noOfBundle" AS "Qty", SUM(CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END) AS "Weight",
+                exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse"
+            ${baseQuery}
+            GROUP BY 
+                i."inboundId", i."jobNo", i."lotNo", i."exWarehouseLot", elme."exLmeWarehouseName",
+                c."commodityName", b."brandName", s."shapeName", i."noOfBundle",
+                exwhl."exWarehouseLocationName", iw."inboundWarehouseName"
+            ${orderByClause}
+            LIMIT :pageSize OFFSET :offset;
+        `;
+        
+        const items = await db.sequelize.query(dataQuery, { type: db.sequelize.QueryTypes.SELECT, replacements });
         return { items, totalItems };
 
     } catch (error) {
