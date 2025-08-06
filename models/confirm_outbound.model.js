@@ -41,6 +41,7 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
         TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
         i."jobNo",
         i."lotNo",
+        i."actualWeight",
         i."noOfBundle" AS "expectedBundleCount",
         b."brandName" AS "brand",
         c."commodityName" AS "commodity",
@@ -60,6 +61,19 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
+
+    // Add detailed print statement to see the retrieved data
+    console.log("MODEL (getConfirmationDetailsById): Retrieved data:");
+    console.log(JSON.stringify(result, null, 2));
+    console.log(
+      "MODEL (getConfirmationDetailsById): actualWeight value:",
+      result?.actualWeight
+    );
+    console.log(
+      "MODEL (getConfirmationDetailsById): actualWeight type:",
+      typeof result?.actualWeight
+    );
+
     console.log(
       "MODEL (getConfirmationDetailsById): Details fetched successfully."
     );
@@ -99,9 +113,9 @@ const getGrnDetailsForSelection = async (
     const lotsQuery = `
       SELECT
         si."selectedInboundId",
-        i."lotNo", i."jobNo", i."noOfBundle", i."grossWeight", i."netWeight",
+        i."lotNo", i."jobNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
         c."commodityName" as commodity, b."brandName" as brand, s."shapeName" as shape,
-        so."releaseWarehouse",
+        so."releaseWarehouse", so."transportVendor",
         TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'dd-Mon-yyyy') AS "releaseDate"
       FROM public.selectedinbounds si
       JOIN public.inbounds i ON si."inboundId" = i."inboundId"
@@ -145,8 +159,9 @@ const getGrnDetailsForSelection = async (
         lotNo: lot.lotNo,
         jobNo: lot.jobNo,
         bundles: lot.noOfBundle,
-        grossWeightMt: lot.grossWeight,
+        // grossWeightMt: lot.grossWeight,
         netWeightMt: lot.netWeight,
+        actualWeightMt: lot.actualWeight,
       })),
     };
     console.log(
