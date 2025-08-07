@@ -1,5 +1,5 @@
 const express = require("express");
-const {reportConfirmation,insertInboundFromLots } = require('../models/confirm_inbound_model');
+const {reportConfirmation,insertInboundFromLots, reportDuplication } = require('../models/confirm_inbound_model');
 const router = express.Router();
 
 // ROUTER TO DO REPORT
@@ -27,6 +27,37 @@ router.post('/tasks-report-confirmation', async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating reports:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ROUTER TO REPORT DUPLICATE LOTS
+router.post('/tasks-report-duplication', async (req, res) => {
+  try {
+    const { lotIds, reportedBy } = req.body;
+
+    // Validate the incoming request body
+    if (!Array.isArray(lotIds) || lotIds.length === 0) {
+      return res.status(400).json({ error: 'lotIds must be a non-empty array' });
+    }
+
+    if (!reportedBy) {
+      return res.status(400).json({ error: 'reportedBy is required' });
+    }
+
+    // Call the model function to handle the database insertion
+    const createdReports = await reportDuplication(lotIds, reportedBy);
+
+    if (!createdReports || createdReports.length === 0) {
+      return res.status(404).json({ error: 'No duplicate reports were created. Please check lotIds.' });
+    }
+
+    res.status(200).json({
+      message: 'Lot duplicate reports created successfully.',
+      createdReports,
+    });
+  } catch (error) {
+    console.error('Error creating duplicate reports:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

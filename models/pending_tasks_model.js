@@ -22,7 +22,7 @@ const getPendingInboundTasks = async (
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
-    let whereClauses = [`l.status = 'Pending'`, `l.report = 'False'`];
+    let whereClauses = [`l.status = 'Pending'`, `l.report = 'False'`, `l.duplicated = 'False'`];
     const replacements = {};
 
     if (exWarehouseLot) {
@@ -88,6 +88,7 @@ const getPendingInboundTasks = async (
       WHERE l."jobNo" IN (:paginatedJobNos)
         AND l.status = 'Pending'
         AND l.report = 'False'
+        AND l.duplicated = 'False'
       ORDER BY s."inboundDate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
@@ -119,6 +120,7 @@ const getPendingInboundTasks = async (
         exLmeWarehouse: lot.exLmeWarehouse,
         shape: lot.shape,
         report: lot.report,
+        duplicated: lot.duplicated,
       });
       return acc;
     }, {});
@@ -503,7 +505,8 @@ const findInboundTasksOffice = async (
         l.shape,
         l."expectedBundleCount" AS quantity,
         u.username AS "scheduledBy",
-        l.report AS "hasWarning"
+        l.report AS "hasWarning",
+        l.duplicated AS "isDuplicated"
       FROM public.lot l
       JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
       JOIN public.users u ON s."userId" = u."userid"
@@ -734,6 +737,39 @@ const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
   }
 };
 
+
+const updateDuplicateStatus = async ({ lotId, reportStatus, resolvedBy }) => {
+  try {
+    const query = `
+      WITH updated_lot AS (
+        UPDATE public.lot
+        SET "duplicated" = false
+        WHERE "lotId" = :lotId
+        RETURNING *
+      )
+      UPDATE public.lot_duplicate
+      SET "reportStatus" = :reportStatus,
+          "resolvedById" = :resolvedBy,
+          "resolvedOn" = NOW(),
+          "isResolved" = true,
+          "updatedAt" = NOW()
+      WHERE "lotId" = :lotId
+        AND "reportStatus" = 'pending'
+      RETURNING *;
+    `;
+
+    const result = await db.sequelize.query(query, {
+      replacements: { lotId, reportStatus, resolvedBy },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    return result[0];
+  } catch (error) {
+    console.error("Error updating report resolution:", error);
+    throw error;
+  }
+};
+
 const getReportSupervisorUsername = async (lotId) => {
   try {
     const query = `
@@ -784,6 +820,7 @@ module.exports = {
   findJobNoPendingTasks,
   findInboundTasksOffice,
   updateReportStatus,
+  updateDuplicateStatus,
   pendingTasksUpdateQuantity,
   getReportSupervisorUsername,
   // Outbound
