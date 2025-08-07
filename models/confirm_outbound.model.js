@@ -62,7 +62,6 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
       plain: true,
     });
 
-    // Add detailed print statement to see the retrieved data
     console.log("MODEL (getConfirmationDetailsById): Retrieved data:");
     console.log(JSON.stringify(result, null, 2));
     console.log(
@@ -116,7 +115,8 @@ const getGrnDetailsForSelection = async (
         i."lotNo", i."jobNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
         c."commodityName" as commodity, b."brandName" as brand, s."shapeName" as shape,
         so."releaseWarehouse", so."transportVendor",
-        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'dd-Mon-yyyy') AS "releaseDate"
+        so."deliveryDate", so."exportDate",
+        so."stuffingDate", so."containerNo", so."sealNo"
       FROM public.selectedinbounds si
       JOIN public.inbounds i ON si."inboundId" = i."inboundId"
       JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
@@ -143,7 +143,16 @@ const getGrnDetailsForSelection = async (
 
     const firstLot = lots[0];
     const result = {
-      releaseDate: firstLot.releaseDate,
+      releaseDate: new Date().toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+      }), // dd MMMM YYYY
+      deliveryDate: firstLot.deliveryDate,
+      exportDate: firstLot.exportDate,
+      stuffingDate: firstLot.stuffingDate,
+      containerNo: firstLot.containerNo,
+      sealNo: firstLot.sealNo,
       ourReference: outboundJobNo,
       grnNo,
       warehouse: firstLot.releaseWarehouse ? firstLot.releaseWarehouse : "N/A",
@@ -153,15 +162,18 @@ const getGrnDetailsForSelection = async (
           : "N/A",
         shape: aggregateDetails("shape") ? aggregateDetails("shape") : "N/A",
         brand: aggregateDetails("brand") ? aggregateDetails("brand") : "N/A",
+        transportVendor: firstLot.transportVendor
+          ? firstLot.transportVendor
+          : "N/A",
       },
       lots: lots.map((lot) => ({
         selectedInboundId: lot.selectedInboundId,
         lotNo: lot.lotNo,
         jobNo: lot.jobNo,
         bundles: lot.noOfBundle,
-        // grossWeightMt: lot.grossWeight,
         netWeightMt: lot.netWeight,
         actualWeightMt: lot.actualWeight,
+        grossWeight: lot.grossWeight,
       })),
     };
     console.log(
@@ -293,7 +305,6 @@ const createGrnAndTransactions = async (formData) => {
         replacements: {
           ...lot,
           outboundId: createdOutbound.outboundId,
-          // outboundedDate: createdOutbound.outboundedDate,
           ...formData,
         },
         type: db.sequelize.QueryTypes.INSERT,
@@ -326,13 +337,11 @@ const createGrnAndTransactions = async (formData) => {
   }
 };
 
-// --- MODIFIED FUNCTION ---
-// Now accepts grnPreviewImagePath to store the path to the generated image.
 const updateOutboundWithPdfDetails = async (
   outboundId,
   grnImagePath,
   fileSize,
-  grnPreviewImagePath // New parameter
+  grnPreviewImagePath
 ) => {
   console.log(
     `MODEL (updateOutboundWithPdfDetails): Updating outboundId ${outboundId} with PDF path: ${grnImagePath}, Preview path: ${grnPreviewImagePath}, size: ${fileSize}`
@@ -342,7 +351,7 @@ const updateOutboundWithPdfDetails = async (
       UPDATE public.outbounds
       SET "grnImage" = :grnImagePath, 
           "fileSize" = :fileSize, 
-          "grnPreviewImage" = :grnPreviewImagePath, -- Added field
+          "grnPreviewImage" = :grnPreviewImagePath,
           "updatedAt" = NOW()
       WHERE "outboundId" = :outboundId;
     `;
@@ -352,7 +361,7 @@ const updateOutboundWithPdfDetails = async (
         grnImagePath,
         fileSize,
         grnPreviewImagePath,
-      }, // New replacement
+      },
       type: db.sequelize.QueryTypes.UPDATE,
     });
     console.log(

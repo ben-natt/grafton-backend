@@ -136,15 +136,22 @@ const createGrnAndTransactions = async (req, res) => {
         ? `${scheduleInfo.containerNo} / ${scheduleInfo.sealNo}`
         : "NA";
 
+    // Helper to parse float and fix to decimal places, handling null/NaN
+    const parseAndFix = (val, decimals = 2) => {
+      const num = parseFloat(val);
+      return !isNaN(num) ? num.toFixed(decimals) : (0).toFixed(decimals);
+    };
+
     const pdfData = {
       ...grnDataFromRequest,
+      isWeightVisible: grnDataFromRequest.isWeightVisible, // Pass visibility flag
       ourReference: grnDataFromRequest.outboundJobNo,
       grnNo: createdOutbound.grnNo,
       releaseDate: new Date().toLocaleDateString("en-GB", {
         day: "2-digit",
-        month: "2-digit",
-        year: "2-digit",
-      }), // Format: dd/mm/yy
+        month: "short", // PDF date format remains 'MMM'
+        year: "numeric",
+      }),
       warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "N/A",
       transportVendor:
         lotsForPdf.length > 0 ? lotsForPdf[0].transportVendor : "N/A",
@@ -157,9 +164,10 @@ const createGrnAndTransactions = async (req, res) => {
       lots: lotsForPdf.map((lot) => ({
         lotNo: `${lot.jobNo}-${lot.lotNo}`,
         bundles: lot.noOfBundle,
-        grossWeightMt: parseFloat(lot.grossWeight).toFixed(2),
-        netWeightMt: parseFloat(lot.netWeight).toFixed(2),
-        actualWeightMt: parseFloat(lot.actualWeight).toFixed(2) || "0.00",
+        // Use helper to prevent NaN values in PDF
+        grossWeightMt: parseAndFix(lot.grossWeight, 2),
+        netWeightMt: parseAndFix(lot.netWeight, 2),
+        actualWeightMt: parseAndFix(lot.actualWeight, 2),
       })),
     };
     console.log(
@@ -207,7 +215,6 @@ const createGrnAndTransactions = async (req, res) => {
     const pdfBuffer = await fs.readFile(outputPath);
     const base64Pdf = pdfBuffer.toString("base64");
 
-    // --- NEW: Read preview image and encode it ---
     const previewImageBuffer = await fs.readFile(previewImagePath);
     const base64PreviewImage = previewImageBuffer.toString("base64");
 
@@ -216,7 +223,6 @@ const createGrnAndTransactions = async (req, res) => {
       `CONTROLLER: 6. Sending JSON response with Base64 PDF and Image data.`
     );
 
-    // --- MODIFICATION: Return both PDF and image data ---
     res.status(200).json({
       pdf: base64Pdf,
       previewImage: base64PreviewImage,
