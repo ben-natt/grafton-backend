@@ -153,6 +153,45 @@ router.post("/acknowledge-report", async (req, res) => {
   }
 });
 
+
+router.post("/acknowledge-duplicated", async (req, res) => {
+  try {
+    const { lotId, reportStatus, resolvedBy } = req.body;
+
+    if (!lotId || !reportStatus || !resolvedBy) {
+      return res
+        .status(400)
+        .json({ error: "lotId, reportStatus, and resolvedBy are required" });
+    }
+
+    if (!["accepted", "declined"].includes(reportStatus)) {
+      return res.status(400).json({
+        error: "Invalid reportStatus. Must be 'accepted' or 'declined'",
+      });
+    }
+
+    const updatedReports = await pendingTasksModel.updateDuplicateStatus({
+      lotId,
+      reportStatus,
+      resolvedBy,
+    });
+
+    if (!updatedReports || updatedReports.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "No pending report found to update for this lotId." });
+    }
+
+    res.status(200).json({
+      message: `Report ${reportStatus} successfully.`,
+      updatedReport: updatedReports[0],
+    });
+  } catch (error) {
+    console.error("Error resolving report:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/report-supervisor/:lotId", async (req, res) => {
   try {
     const lotId = parseInt(req.params.lotId);

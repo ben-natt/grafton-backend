@@ -1,6 +1,6 @@
 const db = require("../database");
 
-// MODAL TO REPORT
+// MODAL TO REPORT DISCREPANCIES
 const reportConfirmation = async (lotIds, reportedBy = null) => {
   try {
     const results = [];
@@ -42,6 +42,55 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
     throw error;
   }
 };
+
+/**
+ * Inserts records into the lot_duplicate table to report duplicated lots.
+ * @param {number[]} lotIds - An array of lot IDs to be reported as duplicates.
+ * @param {number|null} reportedBy - The ID of the user reporting the duplicates.
+ * @returns {Promise<object[]>} - A promise that resolves to an array of the created duplicate report records.
+ */
+const reportDuplication = async (lotIds, reportedBy = null) => {
+  try {
+    const results = [];
+
+    for (const lotId of lotIds) {
+      // Insert a new record into the lot_duplicate table for each lotId.
+      const insertQuery = `
+        INSERT INTO public.lot_duplicate
+        ("lotId", "reportedById", "reportedOn", "reportStatus")
+        VALUES (:lotId, :reportedBy, CURRENT_TIMESTAMP, 'pending')
+        RETURNING *;
+      `;
+
+      const insertResult = await db.sequelize.query(insertQuery, {
+        replacements: {
+          lotId,
+          reportedBy,
+        },
+        type: db.sequelize.QueryTypes.INSERT,
+      });
+
+      const createdDuplicateReport = insertResult[0][0];
+      results.push(createdDuplicateReport);
+
+       const updateQuery = `
+        UPDATE public.lot
+        SET "duplicated" = true
+        WHERE "lotId" = :lotId;
+      `;
+      await db.sequelize.query(updateQuery, {
+        replacements: { lotId },
+        type: db.sequelize.QueryTypes.UPDATE,
+      });
+    }
+
+    return results;
+  } catch (error) {
+    console.error("Error creating duplicate reports:", error);
+    throw error;
+  }
+};
+
 
 // MODAL TO CHANGE THE LOT STATUS AND INSERT INTO INBOUND
 const insertInboundFromLots = async (lotsArray, userId) => {
@@ -240,5 +289,6 @@ const insertInboundFromLots = async (lotsArray, userId) => {
 
 module.exports = {
   reportConfirmation,
+  reportDuplication,
   insertInboundFromLots,
 };
