@@ -1,7 +1,7 @@
 const db = require("../database");
 
 const grnModel = {
-  // MODIFIED: To support pagination and robust filtering
+  // MODIFIED: To support pagination, robust filtering, and new search functionality
   async getAllGrns(filters = {}) {
     console.log("MODEL (getAllGrns): Fetching GRNs with filters:", filters);
     try {
@@ -16,10 +16,17 @@ const grnModel = {
         whereClauses.push(`o."grnNo" = :grnNo`);
         replacements.grnNo = filters.grnNo;
       } else if (filters.jobNo) {
-        // FIX: Reverted to the original, correct filtering logic.
-        // This filters based on the prefix of the main grnNo column.
         whereClauses.push(`o."grnNo" LIKE :jobNo`);
         replacements.jobNo = `${filters.jobNo}/%`;
+      }
+
+      // NEW: Search functionality
+      if (filters.searchQuery) {
+        // Search by grnNo (SINO/SINI), jobNo, or commodity
+        whereClauses.push(
+          `(o."grnNo" ILIKE :searchPattern OR ot_summary.jobNos ILIKE :searchPattern OR ot_summary.commodities ILIKE :searchPattern)`
+        );
+        replacements.searchPattern = `%${filters.searchQuery}%`;
       }
 
       if (filters.startDate && filters.endDate) {
@@ -74,7 +81,7 @@ const grnModel = {
       const dataQuery = `
         SELECT
           o."outboundId",
-          TO_CHAR(o."createdAt" AT TIME ZONE 'Asia/Singapore', 'DD-MM-YYYY') AS "date",
+          TO_CHAR(o."createdAt" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
           o."grnNo",
           o."grnImage",
           o."grnPreviewImage",
