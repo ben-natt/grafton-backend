@@ -104,6 +104,15 @@ repackDescription: {
   allowNull: true,
   field: 'repackDescription' 
 },
+  incompleteBundle: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  noOfPieces: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   createdAt: {
     type: DataTypes.DATE,
     allowNull: false
@@ -196,6 +205,15 @@ models.Inbound = sequelize.define('Inbound', {
   },
   repackDescription: {
     type: DataTypes.STRING(255),
+    allowNull: true
+  },
+    incompleteBundle: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  noOfPieces: {
+    type: DataTypes.INTEGER,
     allowNull: true
   },
   userId: {
@@ -297,6 +315,16 @@ models.InboundBundle = sequelize.define('InboundBundle', {
   },
   repackDescription: {
     type: DataTypes.TEXT,
+    allowNull: true
+  },
+  // New columns
+  incompleteBundle: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false
+  },
+  noOfPieces: {
+    type: DataTypes.INTEGER,
     allowNull: true
   },
   createdAt: {
