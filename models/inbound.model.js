@@ -218,7 +218,9 @@ const getAllScheduleInbound = async () => {
         JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
         LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
         LEFT JOIN public.users u1 ON u1."userid" = si."userId"
-        LEFT JOIN public.users u2 ON u2."userid" = i."processedId";
+        LEFT JOIN public.users u2 ON u2."userid" = i."processedId"
+        ORDER BY
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
 
         `;
         const result = await db.sequelize.query(query, {
@@ -266,6 +268,8 @@ const getScheduleInboundByDate = async (date) => {
             LEFT JOIN public.users u2 ON u2."userid" = i."processedId"
             WHERE
                 TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
+            ORDER BY
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
@@ -312,6 +316,8 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
                 LEFT JOIN public.users u2 ON u2."userid" = i."processedId"
             WHERE
                 TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
+            ORDER BY
+                TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
 
         const result = await db.sequelize.query(query, {

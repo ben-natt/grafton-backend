@@ -144,8 +144,10 @@ const createGrnAndTransactions = async (req, res) => {
         day: "2-digit",
         month: "2-digit",
         year: "2-digit",
-      }),
-      warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "",
+      }), // Format: dd/mm/yy
+      warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "N/A",
+      transportVendor:
+        lotsForPdf.length > 0 ? lotsForPdf[0].transportVendor : "N/A",
       containerAndSealNo: containerAndSealNo,
       cargoDetails: {
         commodity: aggregateDetails("commodity"),
@@ -157,6 +159,7 @@ const createGrnAndTransactions = async (req, res) => {
         bundles: lot.noOfBundle,
         grossWeightMt: parseFloat(lot.grossWeight).toFixed(2),
         netWeightMt: parseFloat(lot.netWeight).toFixed(2),
+        actualWeightMt: parseFloat(lot.actualWeight).toFixed(2) || "0.00",
       })),
     };
     console.log(

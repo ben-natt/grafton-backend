@@ -51,7 +51,17 @@ exports.createScheduleInbound = async (req, res) => {
   try {
     for (const jobNo in jobDataMap) {
       const { lots } = jobDataMap[jobNo];
-    console.log(lots);
+      for (const lot of lots) {
+        if (lot.shape && typeof lot.shape === 'string') {
+          const shapeLower = lot.shape.toLowerCase();
+          if (shapeLower === 'ing') {
+            lot.shape = 'Ingot';
+          } else if (shapeLower === 'tbar') {
+            lot.shape = 'T-bar';
+          }
+        }
+      }
+
       // This logic now uses raw SQL queries, avoiding the model import errors.
       for (const lot of lots) {
         await findOrCreateRaw('commodities', 'commodityName', lot.commodity, transaction);

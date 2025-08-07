@@ -78,6 +78,7 @@ async function generateGrnPdf(data) {
     drawText(data.grnNo, 300, 527, boldFont);
     drawText(data.releaseDate, 300, 509, boldFont);
     drawText(data.warehouse, 300, 492, boldFont);
+    drawText(data.transportVendor, 224, 450, boldFont);
     drawText(data.cargoDetails.commodity, 80, 421, boldFont);
     drawText(data.cargoDetails.shape, 198, 421, boldFont);
     drawText(data.cargoDetails.brand, 300, 421, boldFont);
@@ -92,7 +93,7 @@ async function generateGrnPdf(data) {
       if (startY < 270) break;
       drawText(lot.lotNo, 48, startY);
       drawText(lot.bundles, 186, startY);
-      drawText(lot.grossWeightMt, 228, startY);
+      drawText(lot.actualWeightMt, 228, startY);
       drawText(lot.netWeightMt, 266, startY);
       totalBundles += Number(lot.bundles || 0);
       startY -= rowHeight;
