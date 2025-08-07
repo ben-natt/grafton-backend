@@ -145,9 +145,9 @@ const getGrnDetailsForSelection = async (
     const result = {
       releaseDate: new Date().toLocaleDateString("en-GB", {
         day: "2-digit",
-        month: "short",
+        month: "long",
         year: "numeric",
-      }), // dd MMM YYYY
+      }), // dd MMMM YYYY
       deliveryDate: firstLot.deliveryDate,
       exportDate: firstLot.exportDate,
       stuffingDate: firstLot.stuffingDate,
