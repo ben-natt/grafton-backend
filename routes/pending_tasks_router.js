@@ -243,6 +243,57 @@ router.post("/tasks-inbound-office", async (req, res) => {
   }
 });
 
+// GET: Fetch inbound schedule date by jobNo
+router.get("/inbound-schedule/:jobNo", async (req, res) => {
+  try {
+    const jobNo = req.params.jobNo;
+    
+    if (!jobNo) {
+      return res.status(400).json({ error: "jobNo is required" });
+    }
+
+    const result = await pendingTasksModel.getInboundScheduleByJobNo(jobNo);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching inbound schedule date:", error);
+    if (error.message === "Schedule inbound not found") {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: "Failed to fetch inbound schedule date" });
+  }
+});
+
+// PUT: Update inbound schedule date by jobNo
+router.put("/inbound-schedule/:jobNo", async (req, res) => {
+  try {
+    const jobNo = req.params.jobNo;
+    const { inboundDate } = req.body;
+    
+    if (!jobNo) {
+      return res.status(400).json({ error: "jobNo is required" });
+    }
+
+    if (!inboundDate) {
+      return res.status(400).json({ error: "inboundDate is required" });
+    }
+
+    // Validate date format
+    const dateObj = new Date(inboundDate);
+    if (isNaN(dateObj.getTime())) {
+      return res.status(400).json({ error: "Invalid date format" });
+    }
+
+    const result = await pendingTasksModel.updateInboundScheduleByJobNo(jobNo, inboundDate);
+    res.status(200).json({
+      message: "Inbound schedule date updated successfully",
+      data: result
+    });
+  } catch (error) {
+    console.error("Error updating inbound schedule date:", error);
+    res.status(500).json({ error: "Failed to update inbound schedule date" });
+  }
+});
+
 // --- OUTBOUND ROUTES ---
 router.post("/tasks-outbound-office", async (req, res) => {
   try {
@@ -257,6 +308,80 @@ router.post("/tasks-outbound-office", async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch pending outbound tasks." });
+  }
+});
+
+// GET: Fetch outbound schedule dates by outbound jobNo
+router.get("/outbound-schedule/:outboundJobNo", async (req, res) => {
+  try {
+    const outboundJobNo = req.params.outboundJobNo;
+    
+    if (!outboundJobNo) {
+      return res.status(400).json({ error: "outboundJobNo is required" });
+    }
+
+    const result = await pendingTasksModel.getOutboundScheduleByJobNo(outboundJobNo);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching outbound schedule dates:", error);
+    if (error.message === "Schedule outbound not found") {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: "Failed to fetch outbound schedule dates" });
+  }
+});
+
+// PUT: Update outbound schedule dates by outbound jobNo
+router.put("/outbound-schedule/:outboundJobNo", async (req, res) => {
+  try {
+    const outboundJobNo = req.params.outboundJobNo;
+    
+    if (!outboundJobNo) {
+      return res.status(400).json({ error: "outboundJobNo is required" });
+    }
+
+    const {
+      releaseDate,
+      releaseEndDate,
+      exportDate,
+      deliveryDate,
+      stuffingDate,
+      containerNo,
+      sealNo,
+      storageReleaseLocation,
+      releaseWarehouse,
+      transportVendor
+    } = req.body;
+
+    // Validate that at least one field is provided
+    const hasUpdates = [
+      releaseDate, releaseEndDate, exportDate, deliveryDate, stuffingDate,
+      containerNo, sealNo, storageReleaseLocation, releaseWarehouse, transportVendor
+    ].some(field => field !== undefined);
+
+    if (!hasUpdates) {
+      return res.status(400).json({ error: "At least one field to update is required" });
+    }
+
+    // Validate date formats if provided
+    const dateFields = { releaseDate, releaseEndDate, exportDate, deliveryDate, stuffingDate };
+    for (const [fieldName, dateValue] of Object.entries(dateFields)) {
+      if (dateValue !== undefined && dateValue !== null) {
+        const dateObj = new Date(dateValue);
+        if (isNaN(dateObj.getTime())) {
+          return res.status(400).json({ error: `Invalid date format for ${fieldName}` });
+        }
+      }
+    }
+
+    const result = await pendingTasksModel.updateOutboundScheduleByJobNo(outboundJobNo, req.body);
+    res.status(200).json({
+      message: "Outbound schedule dates updated successfully",
+      data: result
+    });
+  } catch (error) {
+    console.error("Error updating outbound schedule dates:", error);
+    res.status(500).json({ error: "Failed to update outbound schedule dates" });
   }
 });
 

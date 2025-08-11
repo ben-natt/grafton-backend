@@ -68,145 +68,206 @@ const findRelatedId = async (providedId, isLotId) => {
   }
 };
 
-const upsertBundle = async (idValue, isInbound, bundleNo, weight, meltNo, relatedId = null) => {
+const upsertBundle = async (idValue, isInbound, bundleNo, weight, meltNo, relatedId = null, transaction = null) => {
+  const options = transaction ? { transaction } : {};
+  const idField = isInbound ? 'inboundId' : 'lotId';
+  const relatedIdField = isInbound ? 'lotId' : 'inboundId';
+
   try {
-    const idField = isInbound ? 'inboundId' : 'lotId';
-    const relatedIdField = isInbound ? 'lotId' : 'inboundId';
-    
-    // Find ANY bundle with this ID and bundle number (ignore repack flags)
-    const findQuery = `
-      SELECT "inboundBundleId", "isRelabelled", "isRebundled", "isRepackProvided"
-      FROM public.inboundbundles 
+    // First try to update existing bundle
+    const updateQuery = `
+      UPDATE public.inboundbundles 
+      SET 
+        weight = :weight, 
+        "meltNo" = :meltNo,
+        "${relatedIdField}" = COALESCE(:relatedId, "${relatedIdField}"),
+        "updatedAt" = NOW()
       WHERE "${idField}" = :idValue 
       AND "bundleNo" = :bundleNo
-      ORDER BY "createdAt" DESC
-      LIMIT 1
+      RETURNING *
     `;
 
-    console.log("Find Query:", findQuery);
-    const existing = await db.sequelize.query(findQuery, {
-      replacements: { idValue, bundleNo },
-      type: db.sequelize.QueryTypes.SELECT,
+    const updateResult = await db.sequelize.query(updateQuery, {
+      replacements: { 
+        idValue, 
+        bundleNo, 
+        weight, 
+        meltNo: meltNo || null,
+        relatedId
+      },
+      type: db.sequelize.QueryTypes.UPDATE,
+      ...options
     });
 
-    console.log(`Found ${existing.length} existing bundles`);
-    if (existing.length > 0) {
-      console.log("Existing bundle flags:", {
-        id: existing[0].inboundBundleId,
-        isRelabelled: existing[0].isRelabelled,
-        isRebundled: existing[0].isRebundled,
-        isRepackProvided: existing[0].isRepackProvided
-      });
+    // If update affected any rows, return the result
+    if (updateResult.length > 0 && updateResult[1] > 0) {
+      console.log("Updated existing bundle");
+      return updateResult[0];
     }
 
-    if (existing.length > 0) {
-      // Update the bundle regardless of repack flags, and update related ID if provided
-      const updateQuery = `
-        UPDATE public.inboundbundles 
-        SET weight = :weight, 
-            "meltNo" = :meltNo, 
-            "${relatedIdField}" = COALESCE(:relatedId, "${relatedIdField}"),
-            "updatedAt" = NOW()
-        WHERE "${idField}" = :idValue 
-        AND "bundleNo" = :bundleNo
-        AND "inboundBundleId" = :bundleId
-        RETURNING *
-      `;
-
-      const result = await db.sequelize.query(updateQuery, {
-        replacements: { 
-          idValue, 
-          bundleNo, 
-          weight, 
-          meltNo: meltNo || null,
-          relatedId,
-          bundleId: existing[0].inboundBundleId
-        },
-        type: db.sequelize.QueryTypes.UPDATE,
-      });
-
-      if (result.length > 0) {
-        console.log("Updated existing bundle (ignoring repack flags)");
-        return result[0];
-      } else {
-        console.log("Update failed");
-      }
-    } else {
-      // Insert new bundle with both IDs
-      const insertQuery = `
-        INSERT INTO public.inboundbundles 
-        ("inboundId", "lotId", "bundleNo", weight, "meltNo", "isOutbounded", "createdAt", "updatedAt",
-         "isRelabelled", "isRebundled", "isRepackProvided")
-        VALUES (:inboundId, :lotId, :bundleNo, :weight, :meltNo, false, NOW(), NOW(), false, false, false)
-        RETURNING *
-      `;
-      
-      const replacements = {
-        inboundId: isInbound ? idValue : relatedId,
-        lotId: isInbound ? relatedId : idValue,
-        bundleNo,
-        weight,
-        meltNo: meltNo || null
-      };
-      
-      const result = await db.sequelize.query(insertQuery, {
-        replacements,
-        type: db.sequelize.QueryTypes.INSERT,
-      });
-      
-      console.log("Inserted new bundle with both IDs");
-      return result.length > 0 ? result[0] : null;
-    }
-    return null;
+    // If no rows were updated, try to insert
+    const insertQuery = `
+      INSERT INTO public.inboundbundles 
+      ("inboundId", "lotId", "bundleNo", weight, "meltNo", "isOutbounded", "createdAt", "updatedAt")
+      VALUES (:inboundId, :lotId, :bundleNo, :weight, :meltNo, false, NOW(), NOW())
+      ON CONFLICT ("inboundId", "bundleNo") DO UPDATE SET
+        weight = EXCLUDED.weight,
+        "meltNo" = EXCLUDED."meltNo",
+        "lotId" = COALESCE(EXCLUDED."lotId", inboundbundles."lotId"),
+        "updatedAt" = NOW()
+      RETURNING *
+    `;
+    
+    const replacements = {
+      inboundId: isInbound ? idValue : relatedId,
+      lotId: isInbound ? relatedId : idValue,
+      bundleNo,
+      weight,
+      meltNo: meltNo || null
+    };
+    
+    const insertResult = await db.sequelize.query(insertQuery, {
+      replacements,
+      type: db.sequelize.QueryTypes.INSERT,
+      ...options
+    });
+    
+    console.log("Upserted bundle");
+    return insertResult.length > 0 ? insertResult[0] : null;
   } catch (error) {
     console.error("Error in upsert:", error);
     throw error;
   }
 };
 
-const updateInboundActualWeight = async (inboundId, actualWeight) => {
+// update the inboundId actual weight
+const updateInboundActualWeight = async (inboundId, actualWeight, strictValidation = false) => {
+  const transaction = await db.sequelize.transaction();
   try {
-    const query = `
+    // First get current bundle status
+    const checkQuery = `
+      SELECT 
+        COUNT(*) as total_count,
+        SUM(CASE WHEN weight > 0 THEN 1 ELSE 0 END) as valid_weights,
+        SUM(CASE WHEN "meltNo" IS NOT NULL AND "meltNo" != '' THEN 1 ELSE 0 END) as valid_melt_nos
+      FROM public.inboundbundles 
+      WHERE "inboundId" = :inboundId
+    `;
+    
+    const [bundleStatus] = await db.sequelize.query(checkQuery, {
+      replacements: { inboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+      transaction
+    });
+
+    // Determine if weighted based on strictValidation
+    let isWeighted;
+    if (strictValidation) {
+      isWeighted = bundleStatus.total_count > 0 && 
+                  bundleStatus.total_count === bundleStatus.valid_weights && 
+                  bundleStatus.total_count === bundleStatus.valid_melt_nos;
+    } else {
+      isWeighted = true;
+    }
+
+    // Update the inbound
+    const updateQuery = `
       UPDATE public.inbounds 
-      SET "actualWeight" = :actualWeight, 
-          "isWeighted" = true, 
-          "updatedAt" = NOW()
+      SET 
+        "actualWeight" = :actualWeight, 
+        "isWeighted" = :isWeighted,
+        "updatedAt" = NOW()
       WHERE "inboundId" = :inboundId
       RETURNING *
     `;
 
-    const result = await db.sequelize.query(query, {
-      replacements: { inboundId, actualWeight },
+    const result = await db.sequelize.query(updateQuery, {
+      replacements: { 
+        inboundId, 
+        actualWeight,
+        isWeighted
+      },
       type: db.sequelize.QueryTypes.UPDATE,
+      transaction
     });
 
-    if (result.length > 0) {
-      console.log("Inbound updated successfully:", result[0]);
-      return result[0];
-    }
-    return null;
+    await transaction.commit();
+    return result.length > 0 ? result[0] : null;
   } catch (error) {
+    await transaction.rollback();
     console.error("Error updating inbound actual weight:", error);
     throw error;
   }
 };
 
-const saveInboundWithBundles = async (inboundId, actualWeight, bundles) => {
+const updateLotActualWeight = async (lotId, actualWeight, strictValidation = false) => {
+  const transaction = await db.sequelize.transaction();
+  try {
+    // First get current bundle status
+    const checkQuery = `
+      SELECT 
+        COUNT(*) as total_count,
+        SUM(CASE WHEN weight > 0 THEN 1 ELSE 0 END) as valid_weights,
+        SUM(CASE WHEN "meltNo" IS NOT NULL AND "meltNo" != '' THEN 1 ELSE 0 END) as valid_melt_nos
+      FROM public.inboundbundles 
+      WHERE "lotId" = :lotId
+    `;
+    
+    const [bundleStatus] = await db.sequelize.query(checkQuery, {
+      replacements: { lotId },
+      type: db.sequelize.QueryTypes.SELECT,
+      transaction
+    });
+
+    // Determine if weighted based on strictValidation
+    let isWeighted;
+    if (strictValidation) {
+      isWeighted = bundleStatus.total_count > 0 && 
+                  bundleStatus.total_count === bundleStatus.valid_weights && 
+                  bundleStatus.total_count === bundleStatus.valid_melt_nos;
+    } else {
+      isWeighted = true;
+    }
+
+    // Update the lot
+    const updateQuery = `
+      UPDATE public.lot 
+      SET 
+        "actualWeight" = :actualWeight, 
+        "isWeighted" = :isWeighted,
+        "updatedAt" = NOW()
+      WHERE "lotId" = :lotId
+      RETURNING *
+    `;
+
+    const result = await db.sequelize.query(updateQuery, {
+      replacements: { 
+        lotId, 
+        actualWeight,
+        isWeighted
+      },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction
+    });
+
+    await transaction.commit();
+    return result.length > 0 ? result[0] : null;
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error updating lot actual weight:", error);
+    throw error;
+  }
+};
+
+// Modified saveInboundWithBundles
+const saveInboundWithBundles = async (inboundId, actualWeight, bundles, strictValidation = false) => {
   const transaction = await db.sequelize.transaction();
   
   try {
     // Find related lotId
     const relatedLotId = await findRelatedId(inboundId, false);
     
-    // Update inbound actual weight
-    await updateInboundActualWeight(inboundId, actualWeight);
-    
-    // Also update related lot if exists
-    if (relatedLotId) {
-      await updateLotActualWeight(relatedLotId, actualWeight);
-    }
-    
-    // Upsert bundles (update existing, insert new)
+    // Upsert all bundles first
     const savedBundles = [];
     for (const bundle of bundles) {
       const savedBundle = await upsertBundle(
@@ -215,15 +276,76 @@ const saveInboundWithBundles = async (inboundId, actualWeight, bundles) => {
         bundle.bundleNo,
         bundle.weight,
         bundle.meltNo,
-        relatedLotId
+        relatedLotId,
+        transaction
       );
-      if (savedBundle) {
-        savedBundles.push(savedBundle);
-      }
+      if (savedBundle) savedBundles.push(savedBundle);
+    }
+
+    // Check bundle completion status for isWeighted
+    const bundleCheckQuery = `
+      SELECT 
+        COUNT(*) as total_count,
+        SUM(CASE WHEN weight > 0 THEN 1 ELSE 0 END) as valid_weights,
+        SUM(CASE WHEN "meltNo" IS NOT NULL AND "meltNo" != '' THEN 1 ELSE 0 END) as valid_melt_nos
+      FROM public.inboundbundles 
+      WHERE "inboundId" = :inboundId
+    `;
+    
+    const [bundleStatus] = await db.sequelize.query(bundleCheckQuery, {
+      replacements: { inboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+      transaction
+    });
+
+    // Determine isWeighted
+    const isWeighted = strictValidation 
+      ? bundleStatus.total_count > 0 && 
+        bundleStatus.total_count === bundleStatus.valid_weights && 
+        bundleStatus.total_count === bundleStatus.valid_melt_nos
+      : true;
+
+    // Update inbound
+    const updateQuery = `
+      UPDATE public.inbounds 
+      SET 
+        "actualWeight" = :actualWeight, 
+        "isWeighted" = :isWeighted,
+        "updatedAt" = NOW()
+      WHERE "inboundId" = :inboundId
+      RETURNING *
+    `;
+
+    const inboundResult = await db.sequelize.query(updateQuery, {
+      replacements: { inboundId, actualWeight, isWeighted },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction
+    });
+
+    // Update related lot if exists
+    if (relatedLotId) {
+      await db.sequelize.query(`
+        UPDATE public.lot 
+        SET 
+          "actualWeight" = :actualWeight, 
+          "isWeighted" = :isWeighted,
+          "updatedAt" = NOW()
+        WHERE "lotId" = :lotId
+      `, {
+        replacements: { lotId: relatedLotId, actualWeight, isWeighted },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction
+      });
     }
 
     await transaction.commit();
-    return { inboundId, lotId: relatedLotId, actualWeight, bundles: savedBundles };
+    return { 
+      inboundId, 
+      lotId: relatedLotId, 
+      actualWeight, 
+      bundles: savedBundles,
+      isWeighted
+    };
   } catch (error) {
     await transaction.rollback();
     console.error("Error saving inbound with bundles:", error);
@@ -231,51 +353,34 @@ const saveInboundWithBundles = async (inboundId, actualWeight, bundles) => {
   }
 };
 
-// update the lotId actual weight
-const updateLotActualWeight = async (lotId, actualWeight) => {
-  try {
-    const query = `
-      UPDATE public.lot 
-      SET "actualWeight" = :actualWeight, 
-          "isWeighted" = true, 
-          "updatedAt" = NOW()
-      WHERE "lotId" = :lotId
-      RETURNING *
-    `;
-
-    const result = await db.sequelize.query(query, {
-      replacements: { lotId, actualWeight },
-      type: db.sequelize.QueryTypes.UPDATE,
-    });
-
-    if (result.length > 0) {
-      console.log("Lot updated successfully:", result[0]);
-      return result[0];
-    }
-    return null;
-  } catch (error) {
-    console.error("Error updating lot actual weight:", error);
-    throw error;
-  }
-};
-
 // combination of the lotId and inboundId, has the related Id
-const saveLotWithBundles = async (lotId, actualWeight, bundles) => {
+const saveLotWithBundles = async (lotId, actualWeight, bundles, strictValidation = false) => {
   const transaction = await db.sequelize.transaction();
   
   try {
+    // Only validate all bundles are filled if strictValidation is true
+    if (strictValidation) {
+      const incompleteBundles = bundles.filter(b => 
+        !b.weight || b.weight <= 0 || !b.meltNo || b.meltNo.trim() === ''
+      );
+      
+      if (incompleteBundles.length > 0) {
+        throw new Error(
+          `Cannot set isWeighted=true - incomplete bundles: ${
+            incompleteBundles.map(b => b.bundleNo).join(', ')
+          }`
+        );
+      }
+      
+      if (bundles.length === 0) {
+        throw new Error("Cannot set isWeighted=true - no bundles provided");
+      }
+    }
+
     // Find related inboundId
     const relatedInboundId = await findRelatedId(lotId, true);
     
-    // Update lot actual weight
-    await updateLotActualWeight(lotId, actualWeight);
-    
-    // Also update related inbound if exists
-    if (relatedInboundId) {
-      await updateInboundActualWeight(relatedInboundId, actualWeight);
-    }
-    
-    // Upsert bundles (update existing, insert new)
+    // Upsert bundles first
     const savedBundles = [];
     for (const bundle of bundles) {
       const savedBundle = await upsertBundle(
@@ -284,11 +389,20 @@ const saveLotWithBundles = async (lotId, actualWeight, bundles) => {
         bundle.bundleNo,
         bundle.weight,
         bundle.meltNo,
-        relatedInboundId
+        relatedInboundId,
+        transaction
       );
       if (savedBundle) {
         savedBundles.push(savedBundle);
       }
+    }
+
+    // Now update weights with proper validation
+    await updateLotActualWeight(lotId, actualWeight, strictValidation, transaction);
+    
+    // Also update related inbound if exists
+    if (relatedInboundId) {
+      await updateInboundActualWeight(relatedInboundId, actualWeight, strictValidation, transaction);
     }
 
     await transaction.commit();
@@ -300,57 +414,178 @@ const saveLotWithBundles = async (lotId, actualWeight, bundles) => {
   }
 };
 
+
 // get bundles if weighted from backend
-const getBundlesIfWeighted = async (idValue, isInbound) => {
+const getBundlesIfWeighted = async (idValue, isInbound, strictValidation = false) => {
+  const idField = isInbound ? 'inboundId' : 'lotId';
+  
   try {
-    const idField = isInbound ? 'inboundId' : 'lotId';
-    const table = isInbound ? 'inbounds' : 'lot';
+    // Remove the isWeighted check - fetch all bundles regardless
+    const query = `
+      SELECT * FROM inboundbundles
+      WHERE "${idField}" = ?
+      ORDER BY "bundleNo"
+    `;
     
-    // Check if weighted
-    const checkQuery = `
-      SELECT "isWeighted" FROM public.${table} 
-      WHERE "${idField}" = :idValue
-      LIMIT 1;
-    `;
-
-    const [record] = await db.sequelize.query(checkQuery, {
-      replacements: { idValue },
-      type: db.sequelize.QueryTypes.SELECT,
+    const bundles = await db.sequelize.query(query, {
+      replacements: [idValue],
+      type: db.sequelize.QueryTypes.SELECT
     });
 
-    if (!record || record.isWeighted !== true) return [];
-
-    // Get bundles
-    const bundlesQuery = `
-      SELECT 
-        "inboundBundleId",
-        "inboundId",
-        "lotId",
-        "bundleNo",
-        weight,
-        "meltNo",
-        "isOutbounded",
-        "isRelabelled",
-        "isRebundled",
-        "isRepackProvided",
-        "noOfMetalStrap",
-        "repackDescription",
-        "createdAt",
-        "updatedAt"
-      FROM public.inboundbundles
-      WHERE "${idField}" = :idValue
-      ORDER BY "bundleNo";
-    `;
-
-    return await db.sequelize.query(bundlesQuery, {
-      replacements: { idValue },
-      type: db.sequelize.QueryTypes.SELECT,
-    });
+    console.log(`Found ${bundles.length} bundles for ${idField}: ${idValue}`);
+    return bundles; // This should already be an array
   } catch (error) {
-    console.error("Error getting bundles if weighted:", error);
+    console.error('Error in getBundlesIfWeighted:', error);
     throw error;
   }
 };
+
+// by joblvl
+// const checkIncompleteBundles = async (inboundId, strictValidation = false) => {
+//   try {
+//     console.log(`[checkIncompleteBundles] Starting check for inboundId: ${inboundId}, strictValidation: ${strictValidation}`);
+
+//     // Step 1: Get all bundles
+//     const bundles = await getBundlesIfWeighted(inboundId, true, strictValidation);
+//     console.log(`[checkIncompleteBundles] Found ${bundles.length} bundles for inboundId: ${inboundId}`);
+
+//     // Step 2: Get ALL lotIds related to inboundId
+//     const lotResults = await db.sequelize.query(
+//       `SELECT "lotId", "lotNo" FROM public.lot WHERE "inboundId" = :inboundId`,
+//       { replacements: { inboundId }, type: db.sequelize.QueryTypes.SELECT }
+//     );
+//     console.log(`[checkIncompleteBundles] Found ${lotResults.length} lots for inboundId: ${inboundId}`);
+
+//     // Step 3: Group bundles by lotId and check incompleteness
+//     let incompleteLotNos = [];
+//     for (const lot of lotResults) {
+//       const lotBundles = bundles.filter(b => b.lotId === lot.lotId);
+
+//       let incompleteWeight = 0;
+//       let incompleteMeltNo = 0;
+//       const totalBundles = lotBundles.length;
+
+//       lotBundles.forEach(bundle => {
+//         const hasWeight = bundle.weight && bundle.weight > 0;
+//         const hasMeltNo = bundle.meltNo && bundle.meltNo.trim() !== '';
+//         if (!hasWeight) incompleteWeight++;
+//         if (!hasMeltNo) incompleteMeltNo++;
+//       });
+
+//       const isIncompleteLot = strictValidation
+//         ? incompleteWeight > 0 || incompleteMeltNo > 0
+//         : (incompleteWeight > 0 && incompleteWeight < totalBundles) ||
+//           (incompleteMeltNo > 0 && incompleteMeltNo < totalBundles);
+
+//       if (isIncompleteLot) {
+//         incompleteLotNos.push(lot.lotNo);
+//       }
+//     }
+
+//     // Step 4: Build final result
+//     const isInboundIncomplete = incompleteLotNos.length > 0;
+//     const result = {
+//       isIncomplete: isInboundIncomplete,
+//       details: {
+//         totalBundles: bundles.length,
+//         incompleteLotCount: incompleteLotNos.length,
+//       },
+//       inboundId,
+//       incompleteLotNos // NEW FIELD
+//     };
+
+//     console.log(`[checkIncompleteBundles] Final result for inboundId ${inboundId}:`, JSON.stringify(result, null, 2));
+//     return result;
+
+//   } catch (error) {
+//     console.error(`[checkIncompleteBundles] Error for inboundId ${inboundId}:`, error);
+//     throw error;
+//   }
+// };
+
+const checkIncompleteBundles = async (inboundId, strictValidation = false) => {
+  try {
+    console.log(`[checkIncompleteBundles] Starting check for inboundId: ${inboundId}, strictValidation: ${strictValidation}`);
+
+    // Step 1: Get all bundles
+    const bundles = await getBundlesIfWeighted(inboundId, true, strictValidation);
+    console.log(`[checkIncompleteBundles] Found ${bundles.length} bundles for inboundId: ${inboundId}`);
+
+    // Step 2: Get the jobNo and lotNo from the specific inbound record
+    const inboundResult = await db.sequelize.query(
+      `SELECT "jobNo", "lotNo" FROM public.inbounds WHERE "inboundId" = :inboundId`,
+      { replacements: { inboundId }, type: db.sequelize.QueryTypes.SELECT }
+    );
+    
+    if (inboundResult.length === 0) {
+      console.log(`[checkIncompleteBundles] No inbound record found for inboundId: ${inboundId}`);
+      return {
+        isIncomplete: false,
+        details: { totalBundles: 0, incompleteLotCount: 0 },
+        inboundId,
+        incompleteLotNos: []
+      };
+    }
+
+    const { jobNo, lotNo } = inboundResult[0];
+    console.log(`[checkIncompleteBundles] Found jobNo: ${jobNo}, lotNo: ${lotNo} for inboundId: ${inboundId}`);
+
+    // Step 3: Get the corresponding lot record
+    const lotResults = await db.sequelize.query(
+      `SELECT "lotId", "lotNo" FROM public.lot WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo`,
+      { replacements: { jobNo, lotNo }, type: db.sequelize.QueryTypes.SELECT }
+    );
+    console.log(`[checkIncompleteBundles] Found ${lotResults.length} lot records for jobNo: ${jobNo}, lotNo: ${lotNo}`);
+
+    // Step 4: Group bundles by lotId and check incompleteness
+    let incompleteLotNos = [];
+    for (const lot of lotResults) {
+      const lotBundles = bundles.filter(b => b.lotId === lot.lotId);
+
+      let incompleteWeight = 0;
+      let incompleteMeltNo = 0;
+      const totalBundles = lotBundles.length;
+
+      lotBundles.forEach(bundle => {
+        const hasWeight = bundle.weight && bundle.weight > 0;
+        const hasMeltNo = bundle.meltNo && bundle.meltNo.trim() !== '';
+        if (!hasWeight) incompleteWeight++;
+        if (!hasMeltNo) incompleteMeltNo++;
+      });
+
+      const isIncompleteLot = strictValidation
+        ? incompleteWeight > 0 || incompleteMeltNo > 0
+        : (incompleteWeight > 0 && incompleteWeight < totalBundles) ||
+          (incompleteMeltNo > 0 && incompleteMeltNo < totalBundles);
+
+      if (isIncompleteLot) {
+        incompleteLotNos.push(lot.lotNo);
+      }
+    }
+
+    // Step 5: Build final result
+    const isInboundIncomplete = incompleteLotNos.length > 0;
+    const result = {
+      isIncomplete: isInboundIncomplete,
+      details: {
+        totalBundles: bundles.length,
+        incompleteLotCount: incompleteLotNos.length,
+      },
+      inboundId,
+      incompleteLotNos // This will contain the lotNo(s) that are incomplete
+    };
+
+    console.log(`[checkIncompleteBundles] Final result for inboundId ${inboundId}:`, JSON.stringify(result, null, 2));
+    return result;
+
+  } catch (error) {
+    console.error(`[checkIncompleteBundles] Error for inboundId ${inboundId}:`, error);
+    throw error;
+  }
+};
+
+
+
 
 module.exports = {
   // Helper function
@@ -360,7 +595,8 @@ module.exports = {
   updateLotActualWeight,
   saveLotWithBundles,
   getBundlesIfWeighted,
-  upsertBundle
+  upsertBundle,
+  checkIncompleteBundles
 };
 
 

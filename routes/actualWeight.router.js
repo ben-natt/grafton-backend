@@ -6,7 +6,7 @@ const actualWeightModel = require("../models/actualWeight.model");
 
 // Save actual weight for inbound or lot
 router.post("/actual/save-weight", async (req, res) => {
-  const { inboundId, lotId, actualWeight, bundles } = req.body;
+  const { inboundId, lotId, actualWeight, bundles, strictValidation } = req.body;
   
   try {
     // Validation
@@ -40,13 +40,15 @@ router.post("/actual/save-weight", async (req, res) => {
       result = await actualWeightModel.saveInboundWithBundles(
         inboundId, 
         actualWeight, 
-        bundles
+        bundles,
+        strictValidation // Pass the strictValidation flag
       );
     } else if (lotId) {
       result = await actualWeightModel.saveLotWithBundles(
         lotId, 
         actualWeight, 
-        bundles
+        bundles,
+        strictValidation // Pass the strictValidation flag
       );
     }
     
@@ -64,23 +66,65 @@ router.post("/actual/save-weight", async (req, res) => {
   }
 });
 
+// router
 router.post("/actual/get-bundles-if-weighted", async (req, res) => {
-  const { inboundId, lotId } = req.body;
-
   try {
-    let result;
-    if (inboundId) {
-      result = await actualWeightModel.getBundlesIfWeighted(inboundId, true);
-    } else if (lotId) {
-      result = await actualWeightModel.getBundlesIfWeighted(lotId, false);
-    } else {
+    const { inboundId, lotId, strictValidation = false } = req.body;
+    
+    if (!inboundId && !lotId) {
       return res.status(400).json({ error: "Either inboundId or lotId must be provided" });
     }
-    res.status(200).json(result);
+
+    const isInbound = inboundId !== undefined;
+    const idValue = isInbound ? inboundId : lotId;
+    
+    const bundles = await actualWeightModel.getBundlesIfWeighted(
+      idValue, 
+      isInbound,
+      strictValidation
+    );
+    
+    console.log(`Returning ${bundles.length} bundles`);
+    res.status(200).json(bundles); // Make sure bundles is an array
   } catch (error) {
+    console.error('Error in /get-bundles-if-weighted:', error);
     res.status(500).json({ error: error.message });
   }
 });
+
+
+router.post("/actual/check-incomplete", async (req, res) => {
+  try {
+    console.log(`[POST /actual/check-incomplete] Request received`);
+    console.log(`[POST /actual/check-incomplete] Request body:`, JSON.stringify(req.body, null, 2));
+    
+    const { inboundId, strictValidation = false } = req.body;
+    
+    if (!inboundId) {
+      console.log(`[POST /actual/check-incomplete] ERROR - inboundId is missing`);
+      return res.status(400).json({ 
+        error: "inboundId is required" 
+      });
+    }
+    
+    console.log(`[POST /actual/check-incomplete] Processing inboundId: ${inboundId}, strictValidation: ${strictValidation}`);
+    
+    const result = await actualWeightModel.checkIncompleteBundles(
+      inboundId, 
+      strictValidation
+    );
+    
+    console.log(`[POST /actual/check-incomplete] Success - sending result:`, JSON.stringify(result, null, 2));
+    res.status(200).json(result);
+  } catch (error) {
+    console.error(`[POST /actual/check-incomplete] Error occurred:`, error);
+    console.error(`[POST /actual/check-incomplete] Error stack:`, error.stack);
+    res.status(500).json({ 
+      error: error.message || "Internal server error" 
+    });
+  }
+});
+
 
 
 
