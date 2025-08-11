@@ -110,7 +110,7 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-    // --- 5. Group the Flat Results into the Nested Structure for the Frontend ---
+  // --- 5. Group the Flat Results into the Nested Structure for the Frontend ---
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
@@ -121,6 +121,10 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
             inboundDate: formatDate(lot.inboundDate),
           },
           lotDetails: [],
+          inboundId: lot.inboundId,
+          // Initialize incomplete status - will be calculated on frontend
+          isIncomplete: false,
+          incompleteLotNos: [], // Initialize empty array
         };
       }
 
@@ -142,7 +146,6 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
     }, {});
 
     const finalData = Object.values(groupedByJobNo);
-
     return { data: finalData, page, pageSize, totalPages, totalCount };
   } catch (error) {
     console.error("Error fetching pending tasks records:", error);
