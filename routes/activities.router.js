@@ -43,6 +43,7 @@ router.get("/inbound-records", async (req, res) => {
       inboundWarehouse: req.query.inboundWarehouse,
       exWarehouseLocation: req.query.exWarehouseLocation,
       exLmeWarehouse: req.query.exLmeWarehouse,
+      search: req.query.search,
     };
     // Remove null/undefined/empty filters so we don't pass them to the model
     Object.keys(filters).forEach(
@@ -92,6 +93,7 @@ router.get("/outbound-records", async (req, res) => {
       inboundWarehouse: req.query.inboundWarehouse,
       exWarehouseLocation: req.query.exWarehouseLocation,
       exLmeWarehouse: req.query.exLmeWarehouse,
+      search: req.query.search,
     };
     Object.keys(filters).forEach(
       (key) =>
@@ -199,7 +201,6 @@ router.get("/scheduled-inbound", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 // router.js
 
