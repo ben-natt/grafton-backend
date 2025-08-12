@@ -37,10 +37,10 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     so."releaseWarehouse",
     so."storageReleaseLocation",
     so."transportVendor",
-    TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "exportDate",
-    TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
-    TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "deliveryDate",
-    TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate",
+    so."exportDate",
+    so."releaseDate",
+    so."deliveryDate",
+    so."stuffingDate",
     so."containerNo",
     so."sealNo",
     i."jobNo",
@@ -110,7 +110,7 @@ const getGrnDetailsForSelection = async (
       w."exLmeWarehouseName" AS "exLmeWarehouse",
       s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
       so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
-      so."outboundType", so."exportDate", so."stuffingDate", so."containerNo", so."sealNo",
+      so."outboundType", so."deliveryDate", so."exportDate", so."stuffingDate", so."containerNo", so."sealNo",
       so."lotReleaseWeight",
       so."userId" AS "scheduledBy"
   FROM public.selectedinbounds si

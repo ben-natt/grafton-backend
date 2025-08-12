@@ -7,7 +7,7 @@ const formatDate = (date) => {
   if (!date) return "N/A";
   const d = new Date(date);
   const day = d.getDate();
-  const month = d.toLocaleString("en-US", { month: "short" });
+  const month = d.toLocaleString("en-US", { month: "long" });
   const year = d.getFullYear();
   return `${day} ${month} ${year}`;
 };
@@ -742,7 +742,6 @@ const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
     throw error;
   }
 };
-
 
 const updateDuplicateStatus = async ({ lotId, reportStatus, resolvedBy }) => {
   try {
