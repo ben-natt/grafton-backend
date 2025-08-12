@@ -1,6 +1,10 @@
 const db = require("../database");
 
-// Get all reports for notifications (filtered by status)
+/**
+ * Fetches discrepancy reports from the lot_reports table based on their status.
+ * @param {string} status - The status of the reports to fetch ('pending', 'accepted', 'declined').
+ * @returns {Promise<Array<Object>>} A promise that resolves to an array of report objects.
+ */
 const getReportsByStatus = async (status = 'pending') => {
   try {
     const query = `
@@ -33,7 +37,6 @@ const getReportsByStatus = async (status = 'pending') => {
       type: db.sequelize.QueryTypes.SELECT,
     });
     
-
     return result;
   } catch (error) {
     console.error("Error fetching reports by status:", error);
@@ -41,7 +44,52 @@ const getReportsByStatus = async (status = 'pending') => {
   }
 };
 
-// Get all reports for a specific lot
+/**
+ * Fetches duplicate lot reports from the lot_duplicate table based on their status.
+ * @param {string} status - The status of the reports to fetch ('pending', 'accepted', 'declined').
+ * @returns {Promise<Array<Object>>} A promise that resolves to an array of duplicate report objects.
+ */
+const getDuplicateReportsByStatus = async (status = 'pending') => {
+  try {
+    const query = `
+      SELECT 
+        ld."duplicatedId",
+        ld."lotId",
+        ld."reportedById",
+        ld."reportedOn",
+        ld."reportStatus",
+        ld."resolvedById",
+        ld."resolvedOn",
+        l."jobNo",
+        l."lotNo",
+        u.username as "reportedByUsername",
+        ru.username as "resolvedByUsername"
+      FROM lot_duplicate ld
+      JOIN lot l ON ld."lotId" = l."lotId"
+      JOIN users u ON ld."reportedById" = u.userid
+      LEFT JOIN users ru ON ld."resolvedById" = ru.userid
+      WHERE ld."reportStatus" = :status
+      ORDER BY ld."reportedOn" DESC;
+    `;
+    
+    const result = await db.sequelize.query(query, {
+      replacements: { status },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    
+    return result;
+  } catch (error) {
+    console.error("Error fetching duplicate reports by status:", error);
+    throw error;
+  }
+};
+
+
+/**
+ * Fetches all discrepancy reports for a specific lot ID.
+ * @param {number} lotId - The ID of the lot.
+ * @returns {Promise<Array<Object>>} A promise that resolves to an array of report objects.
+ */
 const getReportsByLotId = async (lotId) => {
   try {
     const query = `
@@ -70,5 +118,6 @@ const getReportsByLotId = async (lotId) => {
 
 module.exports = {
   getReportsByStatus,
-  getReportsByLotId
+  getReportsByLotId,
+  getDuplicateReportsByStatus,
 };
