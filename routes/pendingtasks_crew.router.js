@@ -2,8 +2,6 @@ const express = require("express");
 const router = express.Router();
 const pendingTasksCrewModal = require("../models/pendingtasks_crew_model");
 
-
-
 // This is now the single endpoint for fetching all pending task data.
 router.get("/tasks-jobNo", async (req, res) => {
   try {
