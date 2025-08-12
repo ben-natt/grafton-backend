@@ -22,10 +22,11 @@ const getPendingInboundTasks = async (
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
+    // WHERE conditions
     let whereClauses = [
       `l.status = 'Pending'`,
-      `l.report = 'False'`,
-      `l.duplicated = 'False'`,
+      `l.report = False`,
+      `(l."reportDuplicate" = False OR l."isDuplicated" = True)` // Show only visible rows
     ];
     const replacements = {};
 
@@ -75,15 +76,16 @@ const getPendingInboundTasks = async (
     });
 
     const paginatedJobNos = jobNoResults.map((j) => j.jobNo);
-
     if (paginatedJobNos.length === 0) {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
+    // Get details
     const detailsQuery = `
       SELECT
           l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
           l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
+          l."isDuplicated",
           s."inboundDate",
           u.username
       FROM public.lot l
@@ -91,8 +93,8 @@ const getPendingInboundTasks = async (
       JOIN public.users u ON s."userId" = u.userid
       WHERE l."jobNo" IN (:paginatedJobNos)
         AND l.status = 'Pending'
-        AND l.report = 'False'
-        AND l.duplicated = 'False'
+        AND l.report = False
+        AND (l."reportDuplicate" = False OR l."isDuplicated" = True)
       ORDER BY s."inboundDate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
@@ -124,7 +126,7 @@ const getPendingInboundTasks = async (
         exLmeWarehouse: lot.exLmeWarehouse,
         shape: lot.shape,
         report: lot.report,
-        duplicated: lot.duplicated,
+        isDuplicated: lot.isDuplicated,
       });
       return acc;
     }, {});
@@ -510,7 +512,7 @@ const findInboundTasksOffice = async (
         l."expectedBundleCount" AS quantity,
         u.username AS "scheduledBy",
         l.report AS "hasWarning",
-        l.duplicated AS "isDuplicated"
+        l."reportDuplicate" AS "isDuplicated"
       FROM public.lot l
       JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
       JOIN public.users u ON s."userId" = u."userid"
@@ -722,8 +724,8 @@ const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
       UPDATE public.lot_reports
       SET "reportStatus" = :reportStatus,
           "resolvedBy" = :resolvedBy,
-          "resolvedOn" = NOW(),
-          "updatedAt" = NOW()
+          "resolvedOn" = (NOW() AT TIME ZONE 'Asia/Singapore'),
+          "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
       WHERE "lotId" = :lotId
         AND "reportStatus" = 'pending'
       RETURNING *;
@@ -746,16 +748,20 @@ const updateDuplicateStatus = async ({ lotId, reportStatus, resolvedBy }) => {
     const query = `
       WITH updated_lot AS (
         UPDATE public.lot
-        SET "duplicated" = false
+        SET "reportDuplicate" = false,
+            "isDuplicated" = CASE 
+                WHEN :reportStatus = 'accepted' THEN true 
+                ELSE false 
+            END
         WHERE "lotId" = :lotId
         RETURNING *
       )
       UPDATE public.lot_duplicate
       SET "reportStatus" = :reportStatus,
           "resolvedById" = :resolvedBy,
-          "resolvedOn" = NOW(),
+          "resolvedOn" = (NOW() AT TIME ZONE 'Asia/Singapore'),
           "isResolved" = true,
-          "updatedAt" = NOW()
+          "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
       WHERE "lotId" = :lotId
         AND "reportStatus" = 'pending'
       RETURNING *;
@@ -768,7 +774,7 @@ const updateDuplicateStatus = async ({ lotId, reportStatus, resolvedBy }) => {
 
     return result[0];
   } catch (error) {
-    console.error("Error updating report resolution:", error);
+    console.error("Error updating duplicate status:", error);
     throw error;
   }
 };
