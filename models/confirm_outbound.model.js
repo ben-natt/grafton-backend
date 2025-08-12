@@ -110,7 +110,7 @@ const getGrnDetailsForSelection = async (
       w."exLmeWarehouseName" AS "exLmeWarehouse",
       s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
       so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
-      so."outboundType", so."exportDate", so."stuffingDate", so."containerNo", so."sealNo",
+      so."outboundType", so."deliveryDate", so."exportDate", so."stuffingDate", so."containerNo", so."sealNo",
       so."lotReleaseWeight",
       so."userId" AS "scheduledBy"
   FROM public.selectedinbounds si
