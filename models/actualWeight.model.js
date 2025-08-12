@@ -136,8 +136,8 @@ const upsertBundle = async (idValue, isInbound, bundleNo, weight, meltNo, relate
       const insertQuery = `
         INSERT INTO public.inboundbundles 
         ("inboundId", "lotId", "bundleNo", weight, "meltNo", "isOutbounded", "createdAt", "updatedAt",
-         "isRelabelled", "isRebundled", "isRepackProvided")
-        VALUES (:inboundId, :lotId, :bundleNo, :weight, :meltNo, false, NOW(), NOW(), false, false, false)
+         "isRelabelled", "isRebundled", "isRepackProvided", "isDuplicated")
+        VALUES (:inboundId, :lotId, :bundleNo, :weight, :meltNo, false, NOW(), NOW(), false, false, false, false)
         RETURNING *
       `;
       
@@ -352,6 +352,157 @@ const getBundlesIfWeighted = async (idValue, isInbound) => {
   }
 };
 
+// User-provided function to update the report status
+const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
+  try {
+    const query = `
+      WITH updated_lot AS (
+        UPDATE public.lot
+        SET "reportDuplicate" = false,
+            "isDuplicated" = CASE 
+                WHEN :reportStatus = 'accepted' THEN true 
+                ELSE false 
+            END
+        WHERE "lotId" = :lotId
+        RETURNING *
+      )
+      UPDATE public.lot_duplicate
+      SET "reportStatus" = :reportStatus,
+          "resolvedById" = :resolvedBy,
+          "resolvedOn" = NOW(),
+          "isResolved" = true,
+          "updatedAt" = NOW()
+      WHERE "lotId" = :lotId
+        AND "reportStatus" = 'pending'
+      RETURNING *;
+    `;
+
+    const result = await db.sequelize.query(query, {
+      replacements: { lotId, reportStatus, resolvedBy },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    return result[0];
+  } catch (error) {
+    console.error("Error updating report resolution:", error);
+    throw error;
+  }
+};
+
+const duplicateActualWeightBundles = async (sourceExWLot, targetExWLot, resolvedBy) => {
+  console.log(`[DEBUG] Model: Starting duplicateActualWeightBundles.`);
+  const transaction = await db.sequelize.transaction();
+  try {
+    // 1. Find the target "coming lot"
+    const targetLotQuery = `
+      SELECT "lotId" 
+      FROM public.lot 
+      WHERE "exWarehouseLot" = :targetExWLot
+      ORDER BY "createdAt" DESC
+      LIMIT 1;
+    `;
+    const [targetLot] = await db.sequelize.query(targetLotQuery, {
+      replacements: { targetExWLot },
+      type: db.sequelize.QueryTypes.SELECT,
+      transaction,
+    });
+
+    if (!targetLot) {
+      throw new Error(`Target "coming lot" with Ex-Warehouse Lot '${targetExWLot}' not found.`);
+    }
+    const targetLotId = targetLot.lotId;
+
+    // 2. Find the source inboundId from the latest outbound transaction
+    const sourceTransactionQuery = `
+      SELECT "inboundId"
+      FROM public.outboundtransactions
+      WHERE "exWarehouseLot" = :sourceExWLot
+      ORDER BY "createdAt" DESC
+      LIMIT 1;
+    `;
+    const [sourceTransaction] = await db.sequelize.query(sourceTransactionQuery, {
+        replacements: { sourceExWLot },
+        type: db.sequelize.QueryTypes.SELECT,
+        transaction,
+    });
+    
+    if (!sourceTransaction || !sourceTransaction.inboundId) {
+        throw new Error(`No previous outbounded transaction found for Ex-Warehouse Lot '${sourceExWLot}' to copy weights from.`);
+    }
+    const sourceInboundId = sourceTransaction.inboundId;
+    
+    // 3. Fetch all original bundles
+    const sourceBundlesQuery = `
+      SELECT * FROM public.inboundbundles
+      WHERE "inboundId" = :sourceInboundId
+      AND "isRelabelled" = false 
+      AND "isRebundled" = false
+      AND "isRepackProvided" = false;
+    `;
+    const sourceBundles = await db.sequelize.query(sourceBundlesQuery, {
+      replacements: { sourceInboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+      transaction,
+    });
+
+    if (sourceBundles.length === 0) {
+      throw new Error(`No original weighted bundles found for the historical inbound record (inboundId: ${sourceInboundId}).`);
+    }
+
+    // 4. Calculate total actual weight
+    const totalActualWeight = sourceBundles.reduce((sum, bundle) => sum + parseFloat(bundle.weight || 0), 0);
+
+    // 5. Update the target lot's weight
+    await updateLotActualWeight(targetLotId, totalActualWeight, transaction);
+    
+    // 6. Insert the copied bundles
+    const insertQuery = `
+      INSERT INTO public.inboundbundles
+      ("inboundId", "lotId", "bundleNo", weight, "meltNo", "isOutbounded", "createdAt", "updatedAt",
+       "isRelabelled", "isRebundled", "isRepackProvided", "isDuplicated")
+      VALUES (NULL, :lotId, :bundleNo, :weight, :meltNo, false, NOW(), NOW(), false, false, false, true)
+    `;
+    for (const bundle of sourceBundles) {
+      await db.sequelize.query(insertQuery, {
+        replacements: {
+          lotId: targetLotId,
+          bundleNo: bundle.bundleNo,
+          weight: bundle.weight,
+          meltNo: bundle.meltNo || null,
+        },
+        type: db.sequelize.QueryTypes.INSERT,
+        transaction,
+      });
+    }
+    await transaction.commit();
+
+    // STEP 7: Update Report Status ----
+    try {
+        await updateReportStatus({
+            lotId: targetLotId,
+            reportStatus: 'accepted', // Set status to accepted
+            resolvedBy: resolvedBy     // Use the provided user ID
+        });
+        console.log(`[DEBUG] Model: Successfully updated report status for lotId ${targetLotId}.`);
+    } catch (reportError) {
+        console.error(`[ERROR] Duplication succeeded, but failed to update report status for lotId ${targetLotId}:`, reportError);
+    }
+
+    return {
+      message: `Successfully duplicated ${sourceBundles.length} bundles to lot ${targetLotId}.`,
+      targetLotId,
+    };
+
+  } catch (error) {
+    await transaction.rollback();
+    console.error("[DEBUG] Error inside duplicateActualWeightBundles model function:", error);
+    throw error;
+  }
+};
+
+
+
+
 module.exports = {
   // Helper function
   findRelatedId,
@@ -360,7 +511,7 @@ module.exports = {
   updateLotActualWeight,
   saveLotWithBundles,
   getBundlesIfWeighted,
-  upsertBundle
+  upsertBundle,
+  duplicateActualWeightBundles,
+  updateReportStatus
 };
-
-

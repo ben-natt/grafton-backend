@@ -1,6 +1,11 @@
 const db = require("../database");
 
-// MODAL TO REPORT DISCREPANCIES
+/**
+ * Creates discrepancy reports for a list of lot IDs.
+ * @param {number[]} lotIds - An array of lot IDs to report.
+ * @param {number|null} reportedBy - The ID of the user reporting.
+ * @returns {Promise<object[]>} - A promise resolving to the created report records.
+ */
 const reportConfirmation = async (lotIds, reportedBy = null) => {
   try {
     const results = [];
@@ -9,7 +14,7 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
       const insertQuery = `
         INSERT INTO public.lot_reports 
         ("lotId", "reportedBy", "reportStatus", "reportedOn")
-        VALUES (:lotId, :reportedBy, 'pending', CURRENT_TIMESTAMP)
+        VALUES (:lotId, :reportedBy, 'pending', (NOW() AT TIME ZONE 'Asia/Singapore'))
         RETURNING *;
       `;
 
@@ -26,7 +31,7 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
 
       const updateQuery = `
         UPDATE public.lot
-        SET "report" = true
+        SET "report" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
         WHERE "lotId" = :lotId;
       `;
 
@@ -44,21 +49,20 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
 };
 
 /**
- * Inserts records into the lot_duplicate table to report duplicated lots.
- * @param {number[]} lotIds - An array of lot IDs to be reported as duplicates.
- * @param {number|null} reportedBy - The ID of the user reporting the duplicates.
- * @returns {Promise<object[]>} - A promise that resolves to an array of the created duplicate report records.
+ * Creates duplicate lot reports for a list of lot IDs.
+ * @param {number[]} lotIds - An array of lot IDs to report as duplicates.
+ * @param {number|null} reportedBy - The ID of the user reporting.
+ * @returns {Promise<object[]>} - A promise resolving to the created duplicate report records.
  */
 const reportDuplication = async (lotIds, reportedBy = null) => {
   try {
     const results = [];
 
     for (const lotId of lotIds) {
-      // Insert a new record into the lot_duplicate table for each lotId.
       const insertQuery = `
         INSERT INTO public.lot_duplicate
         ("lotId", "reportedById", "reportedOn", "reportStatus")
-        VALUES (:lotId, :reportedBy, CURRENT_TIMESTAMP, 'pending')
+        VALUES (:lotId, :reportedBy, (NOW() AT TIME ZONE 'Asia/Singapore'), 'pending')
         RETURNING *;
       `;
 
@@ -75,7 +79,7 @@ const reportDuplication = async (lotIds, reportedBy = null) => {
 
        const updateQuery = `
         UPDATE public.lot
-        SET "duplicated" = true
+        SET "reportDuplicate" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
         WHERE "lotId" = :lotId;
       `;
       await db.sequelize.query(updateQuery, {
@@ -92,9 +96,13 @@ const reportDuplication = async (lotIds, reportedBy = null) => {
 };
 
 
-// MODAL TO CHANGE THE LOT STATUS AND INSERT INTO INBOUND
+/**
+ * Changes lot status to 'Received' and inserts records into the inbounds table.
+ * @param {Array<Object>} lotsArray - An array of lot objects to process.
+ * @param {number} userId - The ID of the user performing the confirmation.
+ * @returns {Promise<Array<Object>>} - A promise resolving to the created inbound records.
+ */
 const insertInboundFromLots = async (lotsArray, userId) => {
-  // Using the original parameter name 'userId'
   const transaction = await db.sequelize.transaction();
 
   try {
@@ -121,7 +129,6 @@ const insertInboundFromLots = async (lotsArray, userId) => {
     };
 
     for (const { lotId } of lotsArray) {
-      // 1. Fetch lot
       const lotQuery = `
         SELECT *
         FROM public.lot
@@ -143,7 +150,6 @@ const insertInboundFromLots = async (lotsArray, userId) => {
 
       const lot = lots[0];
 
-      // Fetch the original scheduler's User ID from the scheduleinbounds table
       const scheduleInboundQuery = `
         SELECT "userId" FROM public.scheduleinbounds WHERE "scheduleInboundId" = :scheduleInboundId
       `;
@@ -163,7 +169,6 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       }
       const schedulerUserId = scheduleInboundResult[0].userId;
 
-      // Check for existing record
       const existingQuery = `
         SELECT 1 FROM public.inbounds
         WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
@@ -182,48 +187,16 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         continue;
       }
 
-      // Convert name fields to ID
-      const commodityId = await getIdByName(
-        "commodities",
-        "commodityName",
-        "commodityId",
-        lot.commodity
-      );
-      const shapeId = await getIdByName(
-        "shapes",
-        "shapeName",
-        "shapeId",
-        lot.shape
-      );
-      const brandId = await getIdByName(
-        "brands",
-        "brandName",
-        "brandId",
-        lot.brand
-      );
-      const exLmeWarehouseId = await getIdByName(
-        "exlmewarehouses",
-        "exLmeWarehouseName",
-        "exLmeWarehouseId",
-        lot.exLmeWarehouse
-      );
-      const inboundWarehouseId = await getIdByName(
-        "inboundwarehouses",
-        "inboundWarehouseName",
-        "inboundWarehouseId",
-        lot.inboundWarehouse
-      );
-      const exWarehouseLocationId = await getIdByName(
-        "exwarehouselocations",
-        "exWarehouseLocationName",
-        "exWarehouseLocationId",
-        lot.exWarehouseLocation
-      );
+      const commodityId = await getIdByName("commodities", "commodityName", "commodityId", lot.commodity);
+      const shapeId = await getIdByName("shapes", "shapeName", "shapeId", lot.shape);
+      const brandId = await getIdByName("brands", "brandName", "brandId", lot.brand);
+      const exLmeWarehouseId = await getIdByName("exlmewarehouses", "exLmeWarehouseName", "exLmeWarehouseId", lot.exLmeWarehouse);
+      const inboundWarehouseId = await getIdByName("inboundwarehouses", "inboundWarehouseName", "inboundWarehouseId", lot.inboundWarehouse);
+      const exWarehouseLocationId = await getIdByName("exwarehouselocations", "exWarehouseLocationName", "exWarehouseLocationId", lot.exWarehouseLocation);
 
-      // Update lot status
       await db.sequelize.query(
         `UPDATE public.lot
-         SET status = 'Received', "isConfirm" = true, "updatedAt" = NOW()
+         SET status = 'Received', "isConfirm" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
          WHERE "lotId" = :lotId`,
         {
           replacements: { lotId },
@@ -232,7 +205,6 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         }
       );
 
-      // Update the INSERT statement
       const insertQuery = `
         INSERT INTO public.inbounds (
           "jobNo", "lotNo", "noOfBundle", "barcodeNo", "commodityId", "shapeId",
@@ -245,8 +217,10 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           :jobNo, :lotNo, :noOfBundle, :barcodeNo, :commodityId, :shapeId,
           :exLmeWarehouseId, :exWarehouseWarrant, :inboundWarehouseId,
           :grossWeight, :netWeight, :actualWeight, false, false,
-          false, 0, false, '', :userId, :processedId, NOW(), NOW(),
-          :brandId, NOW(), :exWarehouseLot, NOW(), :exWarehouseLocationId
+          false, 0, false, '', :userId, :processedId, 
+          (NOW() AT TIME ZONE 'Asia/Singapore'), (NOW() AT TIME ZONE 'Asia/Singapore'),
+          :brandId, (NOW() AT TIME ZONE 'Asia/Singapore'), :exWarehouseLot, 
+          (NOW() AT TIME ZONE 'Asia/Singapore'), :exWarehouseLocationId
         )
         RETURNING *;
       `;
@@ -265,8 +239,8 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           grossWeight: lot.grossWeight,
           netWeight: lot.netWeight,
           actualWeight: lot.actualWeight,
-          userId: schedulerUserId, // Original scheduler's ID
-          processedId: userId, // Logged-in user's ID (from the function parameter)
+          userId: schedulerUserId,
+          processedId: userId,
           brandId,
           exWarehouseLot: lot.exWarehouseLot,
           exWarehouseLocationId,

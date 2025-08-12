@@ -82,6 +82,40 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
   }
 });
 
+router.post("/actual/duplicate-bundles", async (req, res) => {
+    console.log("[DEBUG] Request Body:", req.body);
+
+    // Get resolvedBy from the request body
+    const { sourceExWLot, targetExWLot, resolvedBy } = req.body;
+    // console.log("resolvedBy:", resolvedBy);
+
+    try {
+        // Add validation for the new parameter
+        if (!sourceExWLot || !targetExWLot || !resolvedBy) {
+            return res.status(400).json({
+                error: "sourceExWLot, targetExWLot, and resolvedBy must be provided"
+            });
+        }
+
+        const result = await actualWeightModel.duplicateActualWeightBundles(
+            sourceExWLot,
+            targetExWLot,
+            resolvedBy // Pass resolvedBy to the model function
+        );
+
+        res.status(200).json({
+            success: true,
+            message: "Bundles duplicated and status updated successfully",
+            data: result
+        });
+
+    } catch (error) {
+        console.error("[DEBUG] Error caught in /actual/duplicate-bundles route:", error);
+        res.status(500).json({
+            error: error.message || "Internal server error"
+        });
+    }
+});
 
 
 module.exports = router;
