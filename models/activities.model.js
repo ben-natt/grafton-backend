@@ -117,14 +117,23 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
 
     if (filters.search) {
       whereClauses.push(`(
+        CAST(i."inboundId" AS TEXT) ILIKE :searchQuery OR
         i."jobNo" ILIKE :searchQuery OR
-        i."lotNo"::text ILIKE :searchQuery OR
-        i."noOfBundle"::text ILIKE :searchQuery OR
+        CAST(i."lotNo" AS TEXT) ILIKE :searchQuery OR
+        CAST(i."noOfBundle" AS TEXT) ILIKE :searchQuery OR
         c."commodityName" ILIKE :searchQuery OR
         b."brandName" ILIKE :searchQuery OR
         s."shapeName" ILIKE :searchQuery OR
-        u."username" ILIKE :searchQuery OR
-        i."exWarehouseLot" ILIKE :searchQuery
+        CAST(i."grossWeight" AS TEXT) ILIKE :searchQuery OR
+        CAST(i."netWeight" AS TEXT) ILIKE :searchQuery OR
+        CAST(i."actualWeight" AS TEXT) ILIKE :searchQuery OR
+        exlme."exLmeWarehouseName" ILIKE :searchQuery OR
+        i."exWarehouseLot" ILIKE :searchQuery OR
+        i."exWarehouseWarrant" ILIKE :searchQuery OR
+        exwhl."exWarehouseLocationName" ILIKE :searchQuery OR
+        iw."inboundWarehouseName" ILIKE :searchQuery OR
+        u_scheduled."username" ILIKE :searchQuery OR
+        u_processed."username" ILIKE :searchQuery
       )`);
       replacements.searchQuery = `%${filters.search}%`;
     }
@@ -141,7 +150,7 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
       Qty: 'i."noOfBundle"',
-      "Scheduled By": 'u."username"',
+      "Scheduled By": 'u_scheduled."username"',
     };
 
     let orderByClause = 'ORDER BY i."inboundDate" DESC NULLS LAST';
@@ -160,7 +169,9 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       LEFT JOIN 
         public.shapes s ON s."shapeId" = i."shapeId"
       LEFT JOIN 
-        public.users u ON u.userid = i."userId"
+        public.users u_scheduled ON u_scheduled.userid = i."userId"
+      LEFT JOIN
+        public.users u_processed ON u_processed.userid = i."processedId"
       LEFT JOIN 
         public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
       LEFT JOIN 
@@ -187,8 +198,8 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
         b."brandName" AS "Brand",
         s."shapeName" AS "Shape",
         i."noOfBundle" AS "Qty", 
-        u."username" AS "Scheduled By",
-        exlme."exLmeWarehouseName" AS "Ex LME Warehouse"
+        u_scheduled."username" AS "Scheduled By",
+        u_processed."username" AS "Processed By"
       ${baseQuery}
       ${orderByClause}
       LIMIT :limit OFFSET :offset;`;
@@ -257,15 +268,21 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
 
     if (filters.search) {
       whereClauses.push(`(
-              o."jobNo" ILIKE :searchQuery OR
-              o."lotNo"::text ILIKE :searchQuery OR
-              o."noOfBundle"::text ILIKE :searchQuery OR
-              o."commodity" ILIKE :searchQuery OR
-              o."brands" ILIKE :searchQuery OR
-              o."shape" ILIKE :searchQuery OR
-              u."username" ILIKE :searchQuery OR
-              o."exWarehouseLot" ILIKE :searchQuery
-            )`);
+        o."jobNo" ILIKE :searchQuery OR
+        CAST(o."lotNo" AS TEXT) ILIKE :searchQuery OR
+        CAST(o."noOfBundle" AS TEXT) ILIKE :searchQuery OR
+        o."commodity" ILIKE :searchQuery OR
+        o."brands" ILIKE :searchQuery OR
+        o."shape" ILIKE :searchQuery OR
+        CAST(o."actualWeight" AS TEXT) ILIKE :searchQuery OR
+        o."exLmeWarehouse" ILIKE :searchQuery OR
+        o."exWarehouseLot" ILIKE :searchQuery OR
+        o."releaseWarehouse" ILIKE :searchQuery OR
+        o."storageReleaseLocation" ILIKE :searchQuery OR
+        o."transportVendor" ILIKE :searchQuery OR
+        u_scheduled."username" ILIKE :searchQuery OR
+        u_processed."username" ILIKE :searchQuery
+      )`);
       replacements.searchQuery = `%${filters.search}%`;
     }
 
@@ -281,7 +298,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       Brand: 'o."brands"',
       Shape: 'o."shape"',
       Qty: 'o."noOfBundle"',
-      "Scheduled By": 'u."username"',
+      "Scheduled By": 'u_scheduled."username"',
     };
 
     let orderByClause = 'ORDER BY o."releaseDate" DESC NULLS LAST';
@@ -294,11 +311,9 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
     const baseQuery = `FROM 
           public.outboundtransactions o
         LEFT JOIN
-          public.users u ON u.userid = o."scheduledBy"
-        LEFT JOIN 
-          public.inbounds i ON o."inboundId" = i."inboundId"
-        LEFT JOIN 
-          public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
+          public.users u_scheduled ON u_scheduled.userid = o."scheduledBy"
+        LEFT JOIN
+          public.users u_processed ON u_processed.userid = o."outboundedBy"
         ${whereString}`;
 
     const countQuery = `SELECT COUNT(o."outboundTransactionId")::int ${baseQuery}`;
@@ -319,8 +334,8 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
         o."brands" AS "Brand",
         o."shape" AS "Shape",
         o."noOfBundle" AS "Qty",
-        u."username" AS "Scheduled By",
-        w."exLmeWarehouseName" AS "Ex LME Warehouse"
+        u_scheduled."username" AS "Scheduled By",
+        u_processed."username" AS "Processed By"
       ${baseQuery}
       ${orderByClause}
       LIMIT :limit OFFSET :offset;`;

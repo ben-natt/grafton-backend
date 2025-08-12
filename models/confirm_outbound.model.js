@@ -31,52 +31,44 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
   );
   try {
     const query = `
-      SELECT
-        so."lotReleaseWeight",
-        s."shapeName" AS shape,
-        so."releaseWarehouse",
-        so."storageReleaseLocation",
-        so."transportVendor",
-        TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "exportDate",
-        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
-        i."jobNo",
-        i."lotNo",
-        i."actualWeight",
-        i."noOfBundle" AS "expectedBundleCount",
-        b."brandName" AS "brand",
-        c."commodityName" AS "commodity",
-        w."exLmeWarehouseName" AS "exLmeWarehouse",
-        i."exWarehouseLot"
-      FROM public.selectedinbounds si
-      JOIN public.inbounds i ON si."inboundId" = i."inboundId"
-      JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
-      LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
-      LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
-      LEFT JOIN public.brands b ON i."brandId" = b."brandId"
-      LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
-      WHERE si."selectedInboundId" = :selectedInboundId;
-    `;
+  SELECT
+    so."lotReleaseWeight",
+    s."shapeName" AS shape,
+    so."releaseWarehouse",
+    so."storageReleaseLocation",
+    so."transportVendor",
+    TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "exportDate",
+    TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
+    TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "deliveryDate",
+    TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate",
+    so."containerNo",
+    so."sealNo",
+    i."jobNo",
+    i."lotNo",
+    i."actualWeight",
+    i."noOfBundle" AS "expectedBundleCount",
+    b."brandName" AS "brand",
+    c."commodityName" AS "commodity",
+    w."exLmeWarehouseName" AS "exLmeWarehouse",
+    i."exWarehouseLot"
+  FROM public.selectedinbounds si
+  JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+  JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
+  LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
+  LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
+  LEFT JOIN public.brands b ON i."brandId" = b."brandId"
+  LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
+  WHERE si."selectedInboundId" = :selectedInboundId;
+`;
     const result = await db.sequelize.query(query, {
       replacements: { selectedInboundId },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
 
-    // Add detailed print statement to see the retrieved data
     console.log("MODEL (getConfirmationDetailsById): Retrieved data:");
     console.log(JSON.stringify(result, null, 2));
-    console.log(
-      "MODEL (getConfirmationDetailsById): actualWeight value:",
-      result?.actualWeight
-    );
-    console.log(
-      "MODEL (getConfirmationDetailsById): actualWeight type:",
-      typeof result?.actualWeight
-    );
 
-    console.log(
-      "MODEL (getConfirmationDetailsById): Details fetched successfully."
-    );
     return result;
   } catch (error) {
     console.error("MODEL ERROR in getConfirmationDetailsById:", error);
@@ -111,20 +103,25 @@ const getGrnDetailsForSelection = async (
     );
 
     const lotsQuery = `
-      SELECT
-        si."selectedInboundId",
-        i."lotNo", i."jobNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
-        c."commodityName" as commodity, b."brandName" as brand, s."shapeName" as shape,
-        so."releaseWarehouse", so."transportVendor",
-        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'dd-Mon-yyyy') AS "releaseDate"
-      FROM public.selectedinbounds si
-      JOIN public.inbounds i ON si."inboundId" = i."inboundId"
-      JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
-      LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
-      LEFT JOIN public.brands b ON i."brandId" = b."brandId"
-      LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
-      WHERE si."selectedInboundId" IN (:selectedInboundIds);
-    `;
+  SELECT
+      si."inboundId", si."scheduleOutboundId",
+      i."jobNo", i."lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
+      i."exWarehouseLot", i."exWarehouseWarrant",
+      w."exLmeWarehouseName" AS "exLmeWarehouse",
+      s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
+      so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
+      so."outboundType", so."exportDate", so."stuffingDate", so."containerNo", so."sealNo",
+      so."lotReleaseWeight",
+      so."userId" AS "scheduledBy"
+  FROM public.selectedinbounds si
+  JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+  JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
+  LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
+  LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
+  LEFT JOIN public.brands b ON i."brandId" = b."brandId"
+  LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
+  WHERE si."selectedInboundId" IN (:selectedInboundIds);
+`;
     const lots = await db.sequelize.query(lotsQuery, {
       replacements: { selectedInboundIds },
       type: db.sequelize.QueryTypes.SELECT,
@@ -143,7 +140,16 @@ const getGrnDetailsForSelection = async (
 
     const firstLot = lots[0];
     const result = {
-      releaseDate: firstLot.releaseDate,
+      releaseDate: new Date().toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+      }), // dd MMMM YYYY
+      deliveryDate: firstLot.deliveryDate,
+      exportDate: firstLot.exportDate,
+      stuffingDate: firstLot.stuffingDate,
+      containerNo: firstLot.containerNo,
+      sealNo: firstLot.sealNo,
       ourReference: outboundJobNo,
       grnNo,
       warehouse: firstLot.releaseWarehouse ? firstLot.releaseWarehouse : "N/A",
@@ -153,15 +159,18 @@ const getGrnDetailsForSelection = async (
           : "N/A",
         shape: aggregateDetails("shape") ? aggregateDetails("shape") : "N/A",
         brand: aggregateDetails("brand") ? aggregateDetails("brand") : "N/A",
+        transportVendor: firstLot.transportVendor
+          ? firstLot.transportVendor
+          : "N/A",
       },
       lots: lots.map((lot) => ({
         selectedInboundId: lot.selectedInboundId,
         lotNo: lot.lotNo,
         jobNo: lot.jobNo,
         bundles: lot.noOfBundle,
-        // grossWeightMt: lot.grossWeight,
         netWeightMt: lot.netWeight,
         actualWeightMt: lot.actualWeight,
+        grossWeight: lot.grossWeight,
       })),
     };
     console.log(
@@ -293,7 +302,6 @@ const createGrnAndTransactions = async (formData) => {
         replacements: {
           ...lot,
           outboundId: createdOutbound.outboundId,
-          // outboundedDate: createdOutbound.outboundedDate,
           ...formData,
         },
         type: db.sequelize.QueryTypes.INSERT,
@@ -326,13 +334,11 @@ const createGrnAndTransactions = async (formData) => {
   }
 };
 
-// --- MODIFIED FUNCTION ---
-// Now accepts grnPreviewImagePath to store the path to the generated image.
 const updateOutboundWithPdfDetails = async (
   outboundId,
   grnImagePath,
   fileSize,
-  grnPreviewImagePath // New parameter
+  grnPreviewImagePath
 ) => {
   console.log(
     `MODEL (updateOutboundWithPdfDetails): Updating outboundId ${outboundId} with PDF path: ${grnImagePath}, Preview path: ${grnPreviewImagePath}, size: ${fileSize}`
@@ -342,7 +348,7 @@ const updateOutboundWithPdfDetails = async (
       UPDATE public.outbounds
       SET "grnImage" = :grnImagePath, 
           "fileSize" = :fileSize, 
-          "grnPreviewImage" = :grnPreviewImagePath, -- Added field
+          "grnPreviewImage" = :grnPreviewImagePath,
           "updatedAt" = NOW()
       WHERE "outboundId" = :outboundId;
     `;
@@ -352,7 +358,7 @@ const updateOutboundWithPdfDetails = async (
         grnImagePath,
         fileSize,
         grnPreviewImagePath,
-      }, // New replacement
+      },
       type: db.sequelize.QueryTypes.UPDATE,
     });
     console.log(

@@ -254,7 +254,10 @@ const getPendingOutboundTasks = async (
           },
           userInfo: {
             username: item.username,
-            releaseDate: formatDate(item.scheduleReleaseDate),
+            // UPDATED: Both dates now check for null before formatting
+            releaseDate: item.scheduleReleaseDate
+              ? formatDate(item.scheduleReleaseDate)
+              : null,
             releaseEndDate: item.scheduleReleaseEndDate
               ? formatDate(item.scheduleReleaseEndDate)
               : null,

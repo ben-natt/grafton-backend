@@ -25,6 +25,9 @@ async function generateGrnPdf(data) {
     const fontSize = 7;
     const textColor = rgb(0, 0, 0);
 
+    // Check visibility flag from data, default to true if not provided
+    const isWeightVisible = data.isWeightVisible !== false;
+
     const drawText = (text, x, y, customFont = font, size = fontSize) => {
       page.drawText(String(text || "N/A"), {
         x,
@@ -33,6 +36,18 @@ async function generateGrnPdf(data) {
         size,
         color: textColor,
       });
+    };
+
+    const formatDate = (dateString) => {
+      if (!dateString) return "N/A";
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString; // Return original if invalid date
+
+      const day = String(date.getDate()).padStart(2, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const year = String(date.getFullYear()).slice(-2);
+
+      return `${day}/${month}/${year}`;
     };
 
     const embedSignature = async (
@@ -49,7 +64,6 @@ async function generateGrnPdf(data) {
         );
         return;
       }
-      // Log first 30 chars to check if it looks like a valid base64 string
       console.log(
         `PDF SERVICE: Embedding ${signatureName} signature. Base64 (first 30 chars): ${base64.substring(
           0,
@@ -69,14 +83,13 @@ async function generateGrnPdf(data) {
         console.error(
           `Error message: ${e.message}. The signature will be skipped.`
         );
-        // Allow PDF generation to continue without this signature.
       }
     };
 
     console.log("PDF SERVICE: Drawing text fields...");
     drawText(data.ourReference, 115, 526, boldFont);
     drawText(data.grnNo, 300, 527, boldFont);
-    drawText(data.releaseDate, 300, 509, boldFont);
+    drawText(formatDate(data.releaseDate), 300, 509, boldFont);
     drawText(data.warehouse, 300, 492, boldFont);
     drawText(data.transportVendor, 224, 450, boldFont);
     drawText(data.cargoDetails.commodity, 80, 421, boldFont);
@@ -93,8 +106,13 @@ async function generateGrnPdf(data) {
       if (startY < 270) break;
       drawText(lot.lotNo, 48, startY);
       drawText(lot.bundles, 186, startY);
-      drawText(lot.actualWeightMt, 228, startY);
-      drawText(lot.netWeightMt, 266, startY);
+
+      // Conditionally draw weights based on the visibility flag
+      if (isWeightVisible) {
+        drawText(lot.actualWeightMt, 228, startY);
+        drawText(lot.netWeightMt, 266, startY);
+      }
+
       totalBundles += Number(lot.bundles || 0);
       startY -= rowHeight;
     }
@@ -136,7 +154,7 @@ async function generateGrnPdf(data) {
 
     const safeGrnNo = data.grnNo.replace(/[\/\\?%*:|"<>]/g, "_");
     const pdfFileName = `GRN_${safeGrnNo}.pdf`;
-    const previewImageFileName = `GRN_${safeGrnNo}_preview`; // Base name for the image
+    const previewImageFileName = `GRN_${safeGrnNo}_preview`;
 
     const outputPath = path.join(grnDir, pdfFileName);
     const previewImagePath = path.join(
@@ -149,19 +167,17 @@ async function generateGrnPdf(data) {
 
     console.log("--- PDF SERVICE: PDF generation complete. ---");
 
-    // --- NEW: Generate Preview Image ---
     console.log(`PDF SERVICE: Generating preview image for ${outputPath}`);
     let opts = {
       format: "png",
       out_dir: previewDir,
       out_prefix: previewImageFileName,
-      page: 1, // Explicitly convert only the first page
-      singleFile: true, // Prevent adding the page number suffix
+      page: 1,
+      singleFile: true,
     };
 
     await poppler.convert(outputPath, opts);
 
-    // Rename the generated file if it has a '-1' suffix
     const generatedImagePath = path.join(
       previewDir,
       `${previewImageFileName}-1.png`
@@ -179,10 +195,8 @@ async function generateGrnPdf(data) {
     }
 
     console.log(`PDF SERVICE: Preview image generated at ${previewImagePath}`);
-    // --- END NEW ---
-
     console.log("--- PDF SERVICE: PDF and Image generation complete. ---");
-    // --- MODIFICATION: Return both PDF and image paths ---
+
     return { pdfBytes, outputPath, previewImagePath };
   } catch (error) {
     console.error("--- PDF SERVICE FATAL ERROR during PDF generation: ---");
