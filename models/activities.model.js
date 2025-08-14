@@ -570,12 +570,21 @@ const getAllScheduleInbound = async ({
     if (filters.search) {
       whereClauses.push(`(
         l."jobNo" ILIKE :searchQuery OR
-        l."lotNo"::text ILIKE :searchQuery OR
+        CAST(l."lotNo" AS TEXT) ILIKE :searchQuery OR
+        CAST(l."expectedBundleCount" AS TEXT) ILIKE :searchQuery OR
         l."commodity" ILIKE :searchQuery OR
         l."brand" ILIKE :searchQuery OR
         l."shape" ILIKE :searchQuery OR
+        l."exLmeWarehouse" ILIKE :searchQuery OR
+        l."exWarehouseLot" ILIKE :searchQuery OR
+        l."exWarehouseWarrant" ILIKE :searchQuery OR
+        l."exWarehouseLocation" ILIKE :searchQuery OR
+        l."inboundWarehouse" ILIKE :searchQuery OR
+        CAST(l."grossWeight" AS TEXT) ILIKE :searchQuery OR
+        CAST(l."netWeight" AS TEXT) ILIKE :searchQuery OR
+        CAST(l."actualWeight" AS TEXT) ILIKE :searchQuery OR
         u1."username" ILIKE :searchQuery OR
-        l."exWarehouseLot" ILIKE :searchQuery
+        u2."username" ILIKE :searchQuery
       )`);
       replacements.searchQuery = `%${filters.search}%`;
     }
@@ -612,7 +621,9 @@ const getAllScheduleInbound = async ({
     // NEW: Query for total count
     const countQuery = `SELECT COUNT(*) FROM public.lot l 
                         JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
+                        LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
                         LEFT JOIN public.users u1 ON si."userId" = u1.userid
+                        LEFT JOIN public.users u2 ON u2.userid = i."processedId"
                         ${whereString}`;
 
     const totalResult = await db.sequelize.query(countQuery, {
@@ -718,12 +729,19 @@ const getAllScheduleOutbound = async ({
     if (filters.search) {
       whereClauses.push(`(
         i."jobNo" ILIKE :searchQuery OR
-        i."lotNo"::text ILIKE :searchQuery OR
+        CAST(i."lotNo" AS TEXT) ILIKE :searchQuery OR
+        CAST(i."noOfBundle" AS TEXT) ILIKE :searchQuery OR
         c."commodityName" ILIKE :searchQuery OR
         b."brandName" ILIKE :searchQuery OR
         s."shapeName" ILIKE :searchQuery OR
+        exlme."exLmeWarehouseName" ILIKE :searchQuery OR
+        i."exWarehouseLot" ILIKE :searchQuery OR
+        o."releaseWarehouse" ILIKE :searchQuery OR
+        CAST(o."lotReleaseWeight" AS TEXT) ILIKE :searchQuery OR
+        o."storageReleaseLocation" ILIKE :searchQuery OR
+        o."transportVendor" ILIKE :searchQuery OR
         u1."username" ILIKE :searchQuery OR
-        i."exWarehouseLot" ILIKE :searchQuery
+        u2."username" ILIKE :searchQuery
       )`);
       replacements.searchQuery = `%${filters.search}%`;
     }
