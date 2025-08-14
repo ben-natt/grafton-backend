@@ -72,7 +72,7 @@ const getChangedFields = (existingData, newData) => {
     'isRepackProvided',
     'noOfMetalStrap',
     'repackDescription',
-        'incompleteBundle',
+    'incompleteBundle',
     'noOfPieces'
   ];
 
@@ -86,6 +86,7 @@ const getChangedFields = (existingData, newData) => {
 };
 
 
+// Helper function to get IDs from jobNo and lotNo
 const getIdsFromJobAndLot = async (jobNo, lotNo) => {
   const [inbound, lot] = await Promise.all([
     Inbound.findOne({
@@ -107,7 +108,6 @@ const getIdsFromJobAndLot = async (jobNo, lotNo) => {
 // Helper function to find related ID (inboundId if lotId is provided, or lotId if inboundId is provided)
 const findRelatedId = async (providedId, isLotId) => {
   if (isLotId) {
-    // If lotId is provided, find corresponding inboundId
     const lot = await Lot.findByPk(providedId);
     if (!lot) return null;
     
@@ -119,7 +119,6 @@ const findRelatedId = async (providedId, isLotId) => {
     });
     return inbound ? inbound.inboundId : null;
   } else {
-    // If inboundId is provided, find corresponding lotId
     const inbound = await Inbound.findByPk(providedId);
     if (!inbound) return null;
     
@@ -134,6 +133,7 @@ const findRelatedId = async (providedId, isLotId) => {
 };
 
 // Common function to handle repack for both inbound and lot
+// Replace the existing handleRepack function with this fixed version
 const handleRepack = async (req, res, isMobile = false) => {
   try {
     let {
@@ -153,16 +153,8 @@ const handleRepack = async (req, res, isMobile = false) => {
       existingAfterImages  
     } = req.body;
 
-    // ===== DEBUG LOGS FOR INCOMPLETE BUNDLE =====
-    // console.log('=== INCOMPLETE BUNDLE DEBUG START ===');
-    // console.log('Raw req.body incompleteBundle:', req.body.incompleteBundle);
-    // console.log('Raw req.body noOfPieces:', req.body.noOfPieces);
-    // console.log('Type of incompleteBundle:', typeof req.body.incompleteBundle);
-    // console.log('Type of noOfPieces:', typeof req.body.noOfPieces);
-    // console.log('=== INCOMPLETE BUNDLE DEBUG END ===');
-
     // Validate required fields
-    if ((inboundId === undefined && lotId === undefined && (!jobNo || !lotNo)) || !noOfBundle) {
+    if ((!inboundId && !lotId && (!jobNo || !lotNo)) || !noOfBundle) {
       return res.status(400).json({
         error: 'Missing required fields: either inboundId or lotId or (jobNo+lotNo), and noOfBundle'
       });
@@ -173,88 +165,89 @@ const handleRepack = async (req, res, isMobile = false) => {
     let isLotRepack = false;
     let parentRecord;
 
-   // Resolve IDs if jobNo and lotNo are provided
-    if (jobNo && lotNo) {
+    // Resolve IDs if jobNo and lotNo are provided
+    if (jobNo && lotNo && (!inboundId || !lotId)) {
       const ids = await getIdsFromJobAndLot(jobNo, lotNo);
       resolvedInboundId = ids.inboundId;
       resolvedLotId = ids.lotId;
     } else {
-      // NEW: Find the related ID if only one is provided
+      // Find the related ID if only one is provided (but don't fail if not found)
       if (resolvedInboundId && !resolvedLotId) {
         resolvedLotId = await findRelatedId(parseInt(resolvedInboundId), false);
+        // Don't fail if lotId is not found - some inbound records might not have lots
       } else if (resolvedLotId && !resolvedInboundId) {
         resolvedInboundId = await findRelatedId(parseInt(resolvedLotId), true);
+        // Don't fail if inboundId is not found - some lot records might not have inbound
       }
     }
 
+    // Convert string booleans to actual booleans
     const isRelabelledBool = isRelabelled === 'true';
     const isRebundledBool = isRebundled === 'true';
     const isRepackProvidedBool = isRepackProvided === 'true';
-
-    // ===== FIXED: Handle incompleteBundle and noOfPieces properly =====
     const incompleteBundleBool = incompleteBundle === 'true';
     const noOfPiecesInt = incompleteBundleBool && noOfPieces ? parseInt(noOfPieces) : null;
 
-    // console.log('=== PROCESSED VALUES DEBUG ===');
-    // console.log('incompleteBundleBool:', incompleteBundleBool);
-    // console.log('noOfPiecesInt:', noOfPiecesInt);
-    // console.log('=== PROCESSED VALUES DEBUG END ===');
-
-    // Determine which ID to use and get parent record
+    // Determine parent record and repack type
+    // Priority: if inboundId exists, use it; otherwise use lotId
     if (resolvedInboundId && resolvedInboundId !== 'null') {
       parentRecord = await Inbound.findByPk(parseInt(resolvedInboundId));
-      if (!parentRecord) {
-        return res.status(404).json({ error: 'Inbound record not found' });
+      if (parentRecord) {
+        isLotRepack = false;
+      } else if (resolvedLotId && resolvedLotId !== 'null') {
+        // If inbound record doesn't exist, try lot record
+        parentRecord = await Lot.findByPk(parseInt(resolvedLotId));
+        if (parentRecord) {
+          isLotRepack = true;
+          resolvedInboundId = null; // Set to null since inbound doesn't exist
+        }
       }
-      isLotRepack = false;
     } else if (resolvedLotId && resolvedLotId !== 'null') {
       parentRecord = await Lot.findByPk(parseInt(resolvedLotId));
-      if (!parentRecord) {
-        return res.status(404).json({ error: 'Lot record not found' });
+      if (parentRecord) {
+        isLotRepack = true;
       }
-      isLotRepack = true;
-    } else {
-      return res.status(400).json({ error: 'Invalid ID provided' });
     }
 
-    // ===== REMOVED DUPLICATE CODE BLOCK =====
-    // The duplicate if/else block for inboundId/lotId was removed
+    if (!parentRecord) {
+      return res.status(404).json({ error: 'Neither Inbound nor Lot record found' });
+    }
 
-    // Check if bundle already exists
-const whereClause = {
-  bundleNo: parseInt(noOfBundle),
-  [Op.or]: [
-    { inboundId: resolvedInboundId ? parseInt(resolvedInboundId) : null },
-    { lotId: resolvedLotId ? parseInt(resolvedLotId) : null }
-  ]
-};
+    // Build the where clause for finding/creating bundle
+    const whereClause = {
+      bundleNo: parseInt(noOfBundle),
+    };
 
+    // Add the appropriate ID to the where clause
     if (isLotRepack) {
-      whereClause.lotId = resolvedLotId ? parseInt(resolvedLotId) : null;
+      whereClause.lotId = parseInt(resolvedLotId);
+      if (resolvedInboundId && resolvedInboundId !== 'null') {
+        whereClause.inboundId = parseInt(resolvedInboundId);
+      } else {
+        whereClause.inboundId = null;
+      }
     } else {
-      whereClause.inboundId = resolvedInboundId ? parseInt(resolvedInboundId) : null;
+      whereClause.inboundId = parseInt(resolvedInboundId);
+      if (resolvedLotId && resolvedLotId !== 'null') {
+        whereClause.lotId = parseInt(resolvedLotId);
+      } else {
+        whereClause.lotId = null;
+      }
     }
 
     let inboundBundle = await InboundBundle.findOne({ 
       where: whereClause,
       include: [
-        {
-          model: BeforeImage,
-          as: 'beforeImages'
-        },
-        {
-          model: AfterImage,
-          as: 'afterImages'
-        }
+        { model: BeforeImage, as: 'beforeImages' },
+        { model: AfterImage, as: 'afterImages' }
       ]
     });
 
-    // FIXED: noOfMetalStrap should only be set if isRebundled is true
     const metalStrapValue = isRebundledBool && noOfMetalStrap ? parseInt(noOfMetalStrap) : null;
 
     const newBundleData = {
-      inboundId: resolvedInboundId ? parseInt(resolvedInboundId) : null,  // Set both IDs
-      lotId: resolvedLotId ? parseInt(resolvedLotId) : null,
+      inboundId: resolvedInboundId && resolvedInboundId !== 'null' ? parseInt(resolvedInboundId) : null,
+      lotId: resolvedLotId && resolvedLotId !== 'null' ? parseInt(resolvedLotId) : null,
       bundleNo: parseInt(noOfBundle),
       isRelabelled: isRelabelledBool,
       isRebundled: isRebundledBool,
@@ -265,17 +258,7 @@ const whereClause = {
       noOfPieces: noOfPiecesInt
     };
 
-    // console.log('=== NEW BUNDLE DATA DEBUG ===');
-    // console.log('newBundleData:', JSON.stringify(newBundleData, null, 2));
-    // console.log('=== NEW BUNDLE DATA DEBUG END ===');
-
     if (inboundBundle) {
-      // console.log('=== EXISTING BUNDLE FOUND ===');
-      // console.log('Existing bundle ID:', inboundBundle.inboundBundleId);
-      // console.log('Existing incompleteBundle:', inboundBundle.incompleteBundle);
-      // console.log('Existing noOfPieces:', inboundBundle.noOfPieces);
-
-      // OPTIMIZATION: Only update if there are actual changes
       const existingBundleData = {
         isRelabelled: inboundBundle.isRelabelled,
         isRebundled: inboundBundle.isRebundled,
@@ -285,9 +268,6 @@ const whereClause = {
         incompleteBundle: inboundBundle.incompleteBundle,
         noOfPieces: inboundBundle.noOfPieces,
       };
-
-      // console.log('=== EXISTING BUNDLE DATA ===');
-      // console.log('existingBundleData:', JSON.stringify(existingBundleData, null, 2));
 
       const changes = getChangedFields(existingBundleData, {
         isRelabelled: isRelabelledBool,
@@ -299,47 +279,17 @@ const whereClause = {
         noOfPieces: noOfPiecesInt
       });
 
-      // console.log('=== DETECTED CHANGES ===');
-      // console.log('changes:', JSON.stringify(changes, null, 2));
-      // console.log('Number of changes:', Object.keys(changes).length);
-
-      // Only update if there are changes
       if (Object.keys(changes).length > 0) {
         changes.updatedAt = new Date();
-        
-        // console.log('=== UPDATING BUNDLE ===');
-        // console.log('Bundle ID:', inboundBundle.inboundBundleId);
-        // console.log('Changes to apply:', JSON.stringify(changes, null, 2));
-        
         await inboundBundle.update(changes);
-        
-        // console.log('=== BUNDLE UPDATED SUCCESSFULLY ===');
-        
-        // Reload the bundle to verify changes
         await inboundBundle.reload();
-        // console.log('=== RELOADED BUNDLE DATA ===');
-        // console.log('Updated incompleteBundle:', inboundBundle.incompleteBundle);
-        // console.log('Updated noOfPieces:', inboundBundle.noOfPieces);
-        
-      } else {
-        console.log('No changes detected in bundle data');
       }
     } else {
-      // console.log('=== CREATING NEW BUNDLE ===');
-      console.log('New bundle data:', JSON.stringify(newBundleData, null, 2));
-      
-      // Create new bundle
       inboundBundle = await InboundBundle.create(newBundleData);
-      
-      // console.log('=== NEW BUNDLE CREATED ===');
-      // console.log('Created bundle ID:', inboundBundle.inboundBundleId);
-      // console.log('Created incompleteBundle:', inboundBundle.incompleteBundle);
-      // console.log('Created noOfPieces:', inboundBundle.noOfPieces);
     }
 
-    // Handle image uploads only if isRepackProvided is true
+    // Handle image uploads if isRepackProvided is true
     if (isRepackProvidedBool) {
-      // Parse existing images that should be kept
       let keepBeforeImages = [];
       let keepAfterImages = [];
       
@@ -348,38 +298,24 @@ const whereClause = {
         keepAfterImages = existingAfterImages ? JSON.parse(existingAfterImages) : [];
       } catch (error) {
         console.error('Error parsing existing images:', error);
-        keepBeforeImages = [];
-        keepAfterImages = [];
       }
 
-      // Get current images from database
-      const currentBeforeImages = inboundBundle.beforeImages || [];
-      const currentAfterImages = inboundBundle.afterImages || [];
-
-      // BEFORE IMAGES PROCESSING
+      // Process before images
       const beforeFiles = req.files?.beforeImage || [];
-      
-      // Delete before images that are NOT in the keepBeforeImages list
+      const currentBeforeImages = inboundBundle.beforeImages || [];
+
       for (const currentImage of currentBeforeImages) {
         const shouldKeep = keepBeforeImages.some(keepImg => 
           parseInt(keepImg.beforeImagesId) === parseInt(currentImage.beforeImagesId)
         );
         
         if (!shouldKeep) {
-          // Delete from database
-          await BeforeImage.destroy({
-            where: { beforeImagesId: currentImage.beforeImagesId }
-          });
-          
-          // Delete physical file
+          await BeforeImage.destroy({ where: { beforeImagesId: currentImage.beforeImagesId } });
           deleteImageFile(currentImage.imageUrl);
-          console.log(`Removed before image: ${currentImage.beforeImagesId}`);
         }
       }
 
-      // Add new before images (only if there are new files uploaded)
       if (beforeFiles.length > 0) {
-        // Get jobNo and lotNo from parent record
         const parentJobNo = parentRecord.jobNo;
         const parentLotNo = parentRecord.lotNo;
         
@@ -387,51 +323,36 @@ const whereClause = {
           const uniqueName = `${parentJobNo}-${parentLotNo}-${noOfBundle}/before-${uuidv4()}${path.extname(file.originalname)}`;
           const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
 
-          // Ensure directory exists
-          const dir = path.dirname(newPath);
-          if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-          }
-
+          fs.mkdirSync(path.dirname(newPath), { recursive: true });
           fs.renameSync(file.path, newPath);
 
           await BeforeImage.create({
-            inboundId: isLotRepack ? null : parseInt(resolvedInboundId),
-            lotId: isLotRepack ? parseInt(resolvedLotId) : null,
+            inboundId: resolvedInboundId && resolvedInboundId !== 'null' ? parseInt(resolvedInboundId) : null,
+            lotId: resolvedLotId && resolvedLotId !== 'null' ? parseInt(resolvedLotId) : null,
             inboundBundleId: inboundBundle.inboundBundleId,
             imageUrl: `uploads/img/repacked/${uniqueName}`,
             createdAt: new Date(),
             updatedAt: new Date()
           });
-          
-          console.log(`Added new before image: ${uniqueName}`);
         }
       }
 
-      // AFTER IMAGES PROCESSING
+      // Process after images
       const afterFiles = req.files?.afterImage || [];
-      
-      // Delete after images that are NOT in the keepAfterImages list
+      const currentAfterImages = inboundBundle.afterImages || [];
+
       for (const currentImage of currentAfterImages) {
         const shouldKeep = keepAfterImages.some(keepImg => 
           parseInt(keepImg.afterImagesId) === parseInt(currentImage.afterImagesId)
         );
         
         if (!shouldKeep) {
-          // Delete from database
-          await AfterImage.destroy({
-            where: { afterImagesId: currentImage.afterImagesId }
-          });
-          
-          // Delete physical file
+          await AfterImage.destroy({ where: { afterImagesId: currentImage.afterImagesId } });
           deleteImageFile(currentImage.imageUrl);
-          console.log(`Removed after image: ${currentImage.afterImagesId}`);
         }
       }
 
-      // Add new after images (only if there are new files uploaded)
       if (afterFiles.length > 0) {
-        // Get jobNo and lotNo from parent record
         const parentJobNo = parentRecord.jobNo;
         const parentLotNo = parentRecord.lotNo;
         
@@ -439,194 +360,112 @@ const whereClause = {
           const uniqueName = `${parentJobNo}-${parentLotNo}-${noOfBundle}/after-${uuidv4()}${path.extname(file.originalname)}`;
           const newPath = path.join(__dirname, `../uploads/img/repacked/${uniqueName}`);
 
-          // Ensure directory exists
-          const dir = path.dirname(newPath);
-          if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-          }
-
+          fs.mkdirSync(path.dirname(newPath), { recursive: true });
           fs.renameSync(file.path, newPath);
 
           await AfterImage.create({
-            inboundId: isLotRepack ? null : parseInt(resolvedInboundId),
-            lotId: isLotRepack ? parseInt(resolvedLotId) : null,
+            inboundId: resolvedInboundId && resolvedInboundId !== 'null' ? parseInt(resolvedInboundId) : null,
+            lotId: resolvedLotId && resolvedLotId !== 'null' ? parseInt(resolvedLotId) : null,
             inboundBundleId: inboundBundle.inboundBundleId,
             imageUrl: `uploads/img/repacked/${uniqueName}`,
             createdAt: new Date(),
             updatedAt: new Date()
           });
-          
-          console.log(`Added new after image: ${uniqueName}`);
         }
       }
     } else {
-      // If isRepackProvided is false, remove all existing images
+      // Remove all images if isRepackProvided is false
       if (inboundBundle) {
-        const existingBeforeImages = await BeforeImage.findAll({
-          where: { inboundBundleId: inboundBundle.inboundBundleId }
-        });
-        
-        const existingAfterImages = await AfterImage.findAll({
-          where: { inboundBundleId: inboundBundle.inboundBundleId }
-        });
+        const [existingBeforeImages, existingAfterImages] = await Promise.all([
+          BeforeImage.findAll({ where: { inboundBundleId: inboundBundle.inboundBundleId } }),
+          AfterImage.findAll({ where: { inboundBundleId: inboundBundle.inboundBundleId } })
+        ]);
 
-        // Delete all before images
-        for (const image of existingBeforeImages) {
-          deleteImageFile(image.imageUrl);
-        }
-        await BeforeImage.destroy({
-          where: { inboundBundleId: inboundBundle.inboundBundleId }
-        });
+        await Promise.all([
+          BeforeImage.destroy({ where: { inboundBundleId: inboundBundle.inboundBundleId } }),
+          AfterImage.destroy({ where: { inboundBundleId: inboundBundle.inboundBundleId } })
+        ]);
 
-        // Delete all after images
-        for (const image of existingAfterImages) {
-          deleteImageFile(image.imageUrl);
-        }
-        await AfterImage.destroy({
-          where: { inboundBundleId: inboundBundle.inboundBundleId }
-        });
-        
-        console.log('Removed all images as isRepackProvided is false');
+        [...existingBeforeImages, ...existingAfterImages].forEach(img => deleteImageFile(img.imageUrl));
       }
     }
 
-    // NEW LOGIC: Get aggregate values from ALL bundles for this parent record
-    const aggregateWhereClause = isLotRepack 
-      ? { lotId: parseInt(resolvedLotId) }
-      : { inboundId: parseInt(resolvedInboundId) };
+    // Update parent records with aggregate values
+    const updatePromises = [];
+    
+    if (resolvedInboundId && resolvedInboundId !== 'null') {
+      const allInboundBundles = await InboundBundle.findAll({
+        where: { inboundId: parseInt(resolvedInboundId) },
+        attributes: [
+          'isRelabelled', 
+          'isRebundled', 
+          'isRepackProvided', 
+          'noOfMetalStrap', 
+          'repackDescription',
+          'incompleteBundle',
+          'noOfPieces'
+        ]
+      });
 
-const allBundles = await InboundBundle.findAll({
-  where: aggregateWhereClause,
-  attributes: [
-    'isRelabelled', 
-    'isRebundled', 
-    'isRepackProvided', 
-    'noOfMetalStrap', 
-    'repackDescription',
-    'incompleteBundle',
-    'noOfPieces'
-  ]
-});
+      const inboundAggregateValues = {
+        isRelabelled: allInboundBundles.some(b => b.isRelabelled),
+        isRebundled: allInboundBundles.some(b => b.isRebundled),
+        isRepackProvided: allInboundBundles.some(b => b.isRepackProvided),
+        noOfMetalStraps: allInboundBundles.reduce((max, b) => Math.max(max, b.noOfMetalStrap || 0), 0) || null,
+        repackDescription: [...new Set(allInboundBundles.filter(b => b.repackDescription).map(b => b.repackDescription))].join('; ') || null,
+        incompleteBundle: allInboundBundles.some(b => b.incompleteBundle),
+        noOfPieces: allInboundBundles.reduce((max, b) => Math.max(max, b.noOfPieces || 0), 0) || null
+      };
 
-// Calculate aggregate values
-const aggregateIsRelabelled = allBundles.some(bundle => bundle.isRelabelled === true);
-const aggregateIsRebundled = allBundles.some(bundle => bundle.isRebundled === true);
-const aggregateIsRepackProvided = allBundles.some(bundle => bundle.isRepackProvided === true);
-const aggregateIncompleteBundle = allBundles.some(bundle => bundle.incompleteBundle === true);
+      updatePromises.push(
+        Inbound.update(inboundAggregateValues, {
+          where: { inboundId: parseInt(resolvedInboundId) }
+        })
+      );
+    }
+    
+    if (resolvedLotId && resolvedLotId !== 'null') {
+      const allLotBundles = await InboundBundle.findAll({
+        where: { lotId: parseInt(resolvedLotId) },
+        attributes: [
+          'isRelabelled', 
+          'isRebundled', 
+          'isRepackProvided', 
+          'noOfMetalStrap', 
+          'repackDescription',
+          'incompleteBundle',
+          'noOfPieces'
+        ]
+      });
 
-// For numeric fields, get the maximum value
-const aggregateNoOfMetalStrap = allBundles.reduce((max, bundle) => 
-  Math.max(max, bundle.noOfMetalStrap || 0), 0) || null;
-const aggregateNoOfPieces = allBundles.reduce((max, bundle) => 
-  Math.max(max, bundle.noOfPieces || 0), 0) || null;
+      const lotAggregateValues = {
+        isRelabelled: allLotBundles.some(b => b.isRelabelled),
+        isRebundled: allLotBundles.some(b => b.isRebundled),
+        isRepackProvided: allLotBundles.some(b => b.isRepackProvided),
+        noOfMetalStraps: allLotBundles.reduce((max, b) => Math.max(max, b.noOfMetalStrap || 0), 0) || null,
+        repackDescription: [...new Set(allLotBundles.filter(b => b.repackDescription).map(b => b.repackDescription))].join('; ') || null,
+        incompleteBundle: allLotBundles.some(b => b.incompleteBundle),
+        noOfPieces: allLotBundles.reduce((max, b) => Math.max(max, b.noOfPieces || 0), 0) || null
+      };
 
-// For descriptions, concatenate unique values
-const aggregateRepackDescription = [...new Set(
-  allBundles
-    .filter(b => b.repackDescription)
-    .map(b => b.repackDescription)
-)].join('; ') || null;
+      updatePromises.push(
+        Lot.update(lotAggregateValues, {
+          where: { lotId: parseInt(resolvedLotId) }
+        })
+      );
+    }
 
+    if (updatePromises.length > 0) {
+      await Promise.all(updatePromises);
+    }
 
-    // testing
-    // console.log('Aggregate values calculated:', {
-    //   aggregateIsRelabelled,
-    //   aggregateIsRebundled,
-    //   aggregateIsRepackProvided,
-    //   aggregateNoOfMetalStrap,
-    //   aggregateRepackDescription
-    // });
-
-    // OPTIMIZATION: Only update parent record if the aggregate values are different
-    const shouldUpdateParent = 
-  aggregateIsRelabelled !== parentRecord.isRelabelled ||
-  aggregateIsRebundled !== parentRecord.isRebundled ||
-  aggregateIsRepackProvided !== parentRecord.isRepackProvided ||
-  aggregateNoOfMetalStrap !== (parentRecord.noOfMetalStraps || 0) ||
-  aggregateRepackDescription !== (parentRecord.repackDescription || null) ||
-  aggregateIncompleteBundle !== (parentRecord.incompleteBundle || false) ||
-  aggregateNoOfPieces !== (parentRecord.noOfPieces || null);
-
-// After finding parentRecord, add this check:
-if (!parentRecord) {
-  return res.status(404).json({ 
-    error: 'Parent record not found',
-    details: isLotRepack ? 
-      `Lot with ID ${resolvedLotId} not found` : 
-      `Inbound with ID ${resolvedInboundId} not found`
-  });
-}
-
-// testing
-// console.log('=== PARENT UPDATE CHECK ===');
-// console.log('shouldUpdateParent:', shouldUpdateParent);
-
-if (shouldUpdateParent) {
-  const parentUpdateData = {
-    isRelabelled: aggregateIsRelabelled,
-    isRebundled: aggregateIsRebundled,
-    isRepackProvided: aggregateIsRepackProvided,
-    noOfMetalStraps: aggregateNoOfMetalStrap,
-    repackDescription: aggregateRepackDescription,
-    incompleteBundle: aggregateIncompleteBundle,
-    noOfPieces: aggregateNoOfPieces,
-    updatedAt: new Date()
-  };
-
-  console.log('Updating parent with:', JSON.stringify(parentUpdateData, null, 2));
-
-// Update both tables if both IDs are available
-  const updatePromises = [];
-  
-  if (resolvedInboundId && resolvedInboundId !== 'null') {
-    console.log('Updating Inbound table for ID:', resolvedInboundId);
-    updatePromises.push(
-      Inbound.update(parentUpdateData, {
-        where: { inboundId: parseInt(resolvedInboundId) }
-      })
-    );
-  }
-  
-  if (resolvedLotId && resolvedLotId !== 'null') {
-    console.log('Updating Lot table for ID:', resolvedLotId);
-    updatePromises.push(
-      Lot.update(parentUpdateData, {
-        where: { lotId: parseInt(resolvedLotId) }
-      })
-    );
-  }
-  
-  // Execute all updates
-  if (updatePromises.length > 0) {
-    await Promise.all(updatePromises);
-    console.log('Successfully updated parent records');
-  } else {
-    console.log('No valid IDs found for parent update');
-  }
-  
-} else {
-  console.log('No changes needed for parent record');
-}
-
-    // Return the saved bundle with images
+    // Return the saved bundle
     const savedBundle = await InboundBundle.findByPk(inboundBundle.inboundBundleId, {
       include: [
-        {
-          model: BeforeImage,
-          as: 'beforeImages'
-        },
-        {
-          model: AfterImage,
-          as: 'afterImages'
-        }
+        { model: BeforeImage, as: 'beforeImages' },
+        { model: AfterImage, as: 'afterImages' }
       ]
     });
-
-    // testing
-    // console.log('=== FINAL SAVED BUNDLE ===');
-    // console.log('Final bundle incompleteBundle:', savedBundle.incompleteBundle);
-    // console.log('Final bundle noOfPieces:', savedBundle.noOfPieces);
-    // console.log('=== FINAL SAVED BUNDLE END ===');
 
     res.status(200).json({
       message: 'Bundle repack saved successfully',
@@ -671,91 +510,276 @@ router.post('/mobile/bundle-repack', upload.fields([
   await handleRepack(req, res, true);
 });
 
-// GET /api/bundle-repack/:type/:id/:bundleNo
-// In your GET /api/bundle-repack/:type/:id/:bundleNo route
+// // GET /api/bundle-repack/:type/:id/:bundleNo
+// router.get('/bundle-repack/:type/:id/:bundleNo', async (req, res) => {
+//   try {
+//     const { type, id, bundleNo } = req.params;
+//     const { jobNo, lotNo } = req.query;
+
+//     if (!['inbound', 'lot'].includes(type)) {
+//       return res.status(400).json({ error: 'Invalid type. Must be "inbound" or "lot"' });
+//     }
+
+//     let whereClause = { bundleNo: parseInt(bundleNo) };
+
+//     if (type === 'inbound') {
+//       if (id !== 'null') {
+//         whereClause.inboundId = parseInt(id);
+//       } else if (jobNo && lotNo) {
+//         const inbound = await Inbound.findOne({ where: { jobNo, lotNo } });
+//         if (inbound) whereClause.inboundId = inbound.inboundId;
+//       }
+//     } else {
+//       if (id !== 'null') {
+//         whereClause.lotId = parseInt(id);
+//       } else if (jobNo && lotNo) {
+//         const lot = await Lot.findOne({ where: { jobNo, lotNo } });
+//         if (lot) whereClause.lotId = lot.lotId;
+//       }
+//     }
+
+//     const bundle = await InboundBundle.findOne({
+//       where: whereClause,
+//       include: [
+//         { model: BeforeImage, as: 'beforeImages' },
+//         { model: AfterImage, as: 'afterImages' },
+//         { 
+//           model: type === 'inbound' ? Inbound : Lot, 
+//           as: type,
+//           attributes: ['jobNo', 'lotNo']
+//         }
+//       ]
+//     });
+
+//     if (!bundle) {
+//       return res.status(200).json({
+//         message: 'No bundle found',
+//         data: null
+//       });
+//     }
+
+//     res.status(200).json({
+//       message: 'Bundle found',
+//       data: {
+//         inboundBundleId: bundle.inboundBundleId,
+//         inboundId: bundle.inboundId,
+//         lotId: bundle.lotId,
+//         bundleNo: bundle.bundleNo,
+//         isRelabelled: bundle.isRelabelled,
+//         isRebundled: bundle.isRebundled,
+//         isRepackProvided: bundle.isRepackProvided,
+//         noOfMetalStrap: bundle.noOfMetalStrap,
+//         repackDescription: bundle.repackDescription,
+//         incompleteBundle: bundle.incompleteBundle || false,
+//         noOfPieces: bundle.noOfPieces || null,
+//         beforeImages: bundle.beforeImages?.map(img => ({
+//           beforeImagesId: img.beforeImagesId,
+//           imageUrl: img.imageUrl,
+//           createdAt: img.createdAt
+//         })) || [],
+//         afterImages: bundle.afterImages?.map(img => ({
+//           afterImagesId: img.afterImagesId,
+//           imageUrl: img.imageUrl,
+//           createdAt: img.createdAt
+//         })) || []
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error('Error fetching bundle:', error);
+//     res.status(500).json({
+//       error: 'Internal server error',
+//       details: error.message
+//     });
+//   }
+// });
+
+// // FOR ACTUAL WEIGHT SCREEN BUT FOR REPACK
+// router.get('/check-repack/:type/:id/:bundleNo', async (req, res) => {
+//   try {
+//     const { type, id, bundleNo } = req.params;
+//     const { jobNo, lotNo } = req.query;
+
+//     if (!['inbound', 'lot'].includes(type)) {
+//       return res.status(400).json({ error: 'Invalid type. Must be "inbound" or "lot"' });
+//     }
+
+//     let whereClause = { bundleNo: parseInt(bundleNo) };
+
+//     if (type === 'inbound') {
+//       if (id !== 'null') {
+//         whereClause.inboundId = parseInt(id);
+//       } else if (jobNo && lotNo) {
+//         const inbound = await Inbound.findOne({ where: { jobNo, lotNo } });
+//         if (inbound) whereClause.inboundId = inbound.inboundId;
+//       }
+//     } else {
+//       if (id !== 'null') {
+//         whereClause.lotId = parseInt(id);
+//       } else if (jobNo && lotNo) {
+//         const lot = await Lot.findOne({ where: { jobNo, lotNo } });
+//         if (lot) whereClause.lotId = lot.lotId;
+//       }
+//     }
+
+//     const bundle = await InboundBundle.findOne({
+//       where: whereClause,
+//       attributes: [
+//         'isRelabelled',
+//         'isRebundled',
+//         'isRepackProvided',
+//         'noOfMetalStrap',
+//         'repackDescription',
+//         'incompleteBundle',
+//         'noOfPieces'
+//       ]
+//     });
+
+//     const isRepacked = bundle ? 
+//       (bundle.isRelabelled || bundle.isRebundled || bundle.isRepackProvided ||
+//        bundle.noOfMetalStrap > 0 || bundle.repackDescription ||
+//        bundle.incompleteBundle || bundle.noOfPieces > 0) : false;
+
+//     res.status(200).json({
+//       isRepacked,
+//       bundleData: bundle
+//     });
+
+//   } catch (error) {
+//     console.error('Error checking repack status:', error);
+//     res.status(500).json({
+//       error: 'Internal server error',
+//       details: error.message
+//     });
+//   }
+// });
+
+// Replace your existing GET route with this fixed version
 router.get('/bundle-repack/:type/:id/:bundleNo', async (req, res) => {
   try {
     const { type, id, bundleNo } = req.params;
+    const { jobNo, lotNo } = req.query;
 
     if (!['inbound', 'lot'].includes(type)) {
       return res.status(400).json({ error: 'Invalid type. Must be "inbound" or "lot"' });
     }
 
-    const whereClause = {
-      bundleNo: parseInt(bundleNo)
-    };
+    let whereClause = { bundleNo: parseInt(bundleNo) };
+    let includeClause = [
+      { model: BeforeImage, as: 'beforeImages' },
+      { model: AfterImage, as: 'afterImages' }
+    ];
 
-    if (type === 'inbound') {
-      whereClause.inboundId = parseInt(id);
+    // Handle ID resolution
+    if (id !== 'null' && id !== 'undefined' && !isNaN(parseInt(id))) {
+      // Direct ID provided
+      if (type === 'inbound') {
+        whereClause.inboundId = parseInt(id);
+        // Try to find related lotId
+        const inbound = await Inbound.findByPk(parseInt(id));
+        if (inbound && inbound.jobNo && inbound.lotNo) {
+          const lot = await Lot.findOne({ 
+            where: { jobNo: inbound.jobNo, lotNo: inbound.lotNo } 
+          });
+          if (lot) {
+            whereClause = {
+              bundleNo: parseInt(bundleNo),
+              [Op.or]: [
+                { inboundId: parseInt(id) },
+                { lotId: lot.lotId }
+              ]
+            };
+          }
+        }
+      } else {
+        whereClause.lotId = parseInt(id);
+        // Try to find related inboundId
+        const lot = await Lot.findByPk(parseInt(id));
+        if (lot && lot.jobNo && lot.lotNo) {
+          const inbound = await Inbound.findOne({ 
+            where: { jobNo: lot.jobNo, lotNo: lot.lotNo } 
+          });
+          if (inbound) {
+            whereClause = {
+              bundleNo: parseInt(bundleNo),
+              [Op.or]: [
+                { lotId: parseInt(id) },
+                { inboundId: inbound.inboundId }
+              ]
+            };
+          }
+        }
+      }
+    } else if (jobNo && lotNo) {
+      // Use jobNo and lotNo to find records
+      const [inbound, lot] = await Promise.all([
+        Inbound.findOne({ where: { jobNo, lotNo } }),
+        Lot.findOne({ where: { jobNo, lotNo } })
+      ]);
+
+      if (inbound && lot) {
+        // Both exist
+        whereClause = {
+          bundleNo: parseInt(bundleNo),
+          [Op.or]: [
+            { inboundId: inbound.inboundId },
+            { lotId: lot.lotId }
+          ]
+        };
+      } else if (inbound) {
+        // Only inbound exists
+        whereClause.inboundId = inbound.inboundId;
+      } else if (lot) {
+        // Only lot exists
+        whereClause.lotId = lot.lotId;
+      } else {
+        // Neither exists
+        return res.status(200).json({
+          message: 'No bundle found',
+          data: null
+        });
+      }
     } else {
-      whereClause.lotId = parseInt(id);
+      return res.status(400).json({ error: 'Invalid parameters provided' });
     }
 
     const bundle = await InboundBundle.findOne({
       where: whereClause,
-      include: [
-        {
-          model: BeforeImage,
-          as: 'beforeImages',
-          attributes: ['beforeImagesId', 'imageUrl', 'createdAt']
-        },
-        {
-          model: AfterImage,
-          as: 'afterImages',
-          attributes: ['afterImagesId', 'imageUrl', 'createdAt']
-        },
-        {
-          model: Inbound,
-          as: 'inbound',
-          attributes: ['jobNo', 'lotNo'],
-          required: type === 'inbound'
-        },
-        {
-          model: Lot,
-          as: 'lot',
-          attributes: ['jobNo', 'lotNo'],
-          required: type === 'lot'
-        }
-      ]
+      include: includeClause
     });
 
     if (!bundle) {
       return res.status(200).json({
         message: 'No bundle found',
-        data: null // Explicitly return null when no data exists
+        data: null
       });
     }
 
-    // Prepare the response data
-    const responseData = {
-      inboundBundleId: bundle.inboundBundleId,
-      inboundId: bundle.inboundId,
-      lotId: bundle.lotId,
-      bundleNo: bundle.bundleNo,
-      isRelabelled: bundle.isRelabelled,
-      isRebundled: bundle.isRebundled,
-      isRepackProvided: bundle.isRepackProvided,
-      noOfMetalStrap: bundle.noOfMetalStrap,
-      repackDescription: bundle.repackDescription,
-      incompleteBundle: bundle.incompleteBundle || false,
-      noOfPieces: bundle.noOfPieces || null,
-      beforeImages: bundle.beforeImages?.map(img => ({
-        beforeImagesId: img.beforeImagesId,
-        imageUrl: img.imageUrl,
-        createdAt: img.createdAt
-      })) || [],
-      afterImages: bundle.afterImages?.map(img => ({
-        afterImagesId: img.afterImagesId,
-        imageUrl: img.imageUrl,
-        createdAt: img.createdAt
-      })) || [],
-      createdAt: bundle.createdAt,
-      updatedAt: bundle.updatedAt
-    };
-
     res.status(200).json({
       message: 'Bundle found',
-      data: responseData
+      data: {
+        inboundBundleId: bundle.inboundBundleId,
+        inboundId: bundle.inboundId,
+        lotId: bundle.lotId,
+        bundleNo: bundle.bundleNo,
+        isRelabelled: bundle.isRelabelled,
+        isRebundled: bundle.isRebundled,
+        isRepackProvided: bundle.isRepackProvided,
+        noOfMetalStrap: bundle.noOfMetalStrap,
+        repackDescription: bundle.repackDescription,
+        incompleteBundle: bundle.incompleteBundle || false,
+        noOfPieces: bundle.noOfPieces || null,
+        beforeImages: bundle.beforeImages?.map(img => ({
+          beforeImagesId: img.beforeImagesId,
+          imageUrl: img.imageUrl,
+          createdAt: img.createdAt
+        })) || [],
+        afterImages: bundle.afterImages?.map(img => ({
+          afterImagesId: img.afterImagesId,
+          imageUrl: img.imageUrl,
+          createdAt: img.createdAt
+        })) || []
+      }
     });
 
   } catch (error) {
@@ -767,23 +791,81 @@ router.get('/bundle-repack/:type/:id/:bundleNo', async (req, res) => {
   }
 });
 
-// FOR ACTUAL WEIGHT SCREEN BUT FOR REPACK
+// Also update the check-repack route
 router.get('/check-repack/:type/:id/:bundleNo', async (req, res) => {
   try {
     const { type, id, bundleNo } = req.params;
+    const { jobNo, lotNo } = req.query;
 
     if (!['inbound', 'lot'].includes(type)) {
       return res.status(400).json({ error: 'Invalid type. Must be "inbound" or "lot"' });
     }
 
-    const whereClause = {
-      bundleNo: parseInt(bundleNo)
-    };
+    let whereClause = { bundleNo: parseInt(bundleNo) };
 
-    if (type === 'inbound') {
-      whereClause.inboundId = parseInt(id);
-    } else {
-      whereClause.lotId = parseInt(id);
+    // Handle ID resolution - similar to above
+    if (id !== 'null' && id !== 'undefined' && !isNaN(parseInt(id))) {
+      if (type === 'inbound') {
+        whereClause.inboundId = parseInt(id);
+        // Try to find related lotId
+        const inbound = await Inbound.findByPk(parseInt(id));
+        if (inbound && inbound.jobNo && inbound.lotNo) {
+          const lot = await Lot.findOne({ 
+            where: { jobNo: inbound.jobNo, lotNo: inbound.lotNo } 
+          });
+          if (lot) {
+            whereClause = {
+              bundleNo: parseInt(bundleNo),
+              [Op.or]: [
+                { inboundId: parseInt(id) },
+                { lotId: lot.lotId }
+              ]
+            };
+          }
+        }
+      } else {
+        whereClause.lotId = parseInt(id);
+        // Try to find related inboundId
+        const lot = await Lot.findByPk(parseInt(id));
+        if (lot && lot.jobNo && lot.lotNo) {
+          const inbound = await Inbound.findOne({ 
+            where: { jobNo: lot.jobNo, lotNo: lot.lotNo } 
+          });
+          if (inbound) {
+            whereClause = {
+              bundleNo: parseInt(bundleNo),
+              [Op.or]: [
+                { lotId: parseInt(id) },
+                { inboundId: inbound.inboundId }
+              ]
+            };
+          }
+        }
+      }
+    } else if (jobNo && lotNo) {
+      const [inbound, lot] = await Promise.all([
+        Inbound.findOne({ where: { jobNo, lotNo } }),
+        Lot.findOne({ where: { jobNo, lotNo } })
+      ]);
+
+      if (inbound && lot) {
+        whereClause = {
+          bundleNo: parseInt(bundleNo),
+          [Op.or]: [
+            { inboundId: inbound.inboundId },
+            { lotId: lot.lotId }
+          ]
+        };
+      } else if (inbound) {
+        whereClause.inboundId = inbound.inboundId;
+      } else if (lot) {
+        whereClause.lotId = lot.lotId;
+      } else {
+        return res.status(200).json({
+          isRepacked: false,
+          bundleData: null
+        });
+      }
     }
 
     const bundle = await InboundBundle.findOne({
@@ -801,11 +883,8 @@ router.get('/check-repack/:type/:id/:bundleNo', async (req, res) => {
 
     const isRepacked = bundle ? 
       (bundle.isRelabelled || bundle.isRebundled || bundle.isRepackProvided ||
-       (bundle.noOfMetalStrap && bundle.noOfMetalStrap > 0) ||
-       (bundle.repackDescription && bundle.repackDescription.trim().length > 0) ||
-       bundle.incompleteBundle ||
-       (bundle.noOfPieces && bundle.noOfPieces > 0)) 
-      : false;
+       bundle.noOfMetalStrap > 0 || bundle.repackDescription ||
+       bundle.incompleteBundle || bundle.noOfPieces > 0) : false;
 
     res.status(200).json({
       isRepacked,
