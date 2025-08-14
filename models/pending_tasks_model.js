@@ -502,7 +502,7 @@ const findInboundTasksOffice = async (
     const tasksQuery = `
       SELECT
         l."jobNo",
-        TO_CHAR(s."inboundDate" AT TIME ZONE 'Asia/Singapore', 'DD-MM-YYYY') AS "date",
+        TO_CHAR(s."inboundDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YYYY') AS "date",
         l."lotId",
         LPAD(l."lotNo"::text, 2, '0') AS "lotNo",
         l."exWarehouseLot" AS "exWLot",
