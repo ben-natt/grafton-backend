@@ -1,8 +1,8 @@
-const db = require('../database');
+const db = require("../database");
 
 const getAllStock = async () => {
-    try {
-        const query = `
+  try {
+    const query = `
         SELECT
             c."commodityName" AS "Metal",
             SUM(i."noOfBundle") AS "Bundles",
@@ -30,25 +30,25 @@ const getAllStock = async () => {
             c."commodityName";
         `;
 
-        const result = await db.sequelize.query(query, {
-            type: db.sequelize.QueryTypes.SELECT
-        });
+    const result = await db.sequelize.query(query, {
+      type: db.sequelize.QueryTypes.SELECT,
+    });
 
-        return result;
-    } catch (error) {
-        console.error('Error fetching all stock records:', error);
-        throw error;
-    }
+    return result;
+  } catch (error) {
+    console.error("Error fetching all stock records:", error);
+    throw error;
+  }
 };
 
 const getInventory = async (filters) => {
-    try {
-        const page = parseInt(filters.page, 10) || 1;
-        const pageSize = parseInt(filters.pageSize, 10) || 25;
-        const offset = (page - 1) * pageSize;
-        const replacements = { pageSize, offset };
+  try {
+    const page = parseInt(filters.page, 10) || 1;
+    const pageSize = parseInt(filters.pageSize, 10) || 25;
+    const offset = (page - 1) * pageSize;
+    const replacements = { pageSize, offset };
 
-        const cteQuery = `
+    const cteQuery = `
             WITH grouped_inventory AS (
                 SELECT
                     i."jobNo" AS "Job No",
@@ -57,7 +57,14 @@ const getInventory = async (filters) => {
                     b."brandName" AS "Brand",
                     s."shapeName" AS "Shape",
                     SUM(i."noOfBundle") AS "Qty",
-                    SUM(i."netWeight") AS "Weight"
+                    SUM(i."netWeight") AS "Weight",
+                    SUM(i."grossWeight") AS "GrossWeight",
+                    SUM(i."actualWeight") AS "ActualWeight",
+                    elme."exLmeWarehouseName" AS "ExLMEWarehouse",
+                    exwhl."exWarehouseLocationName" AS "ExWarehouseLocation",
+                    iw."inboundWarehouseName" AS "InboundWarehouse",
+                    u1."username" AS "ScheduledBy",
+                    u2."username" AS "ProcessedBy"
                 FROM
                     public.inbounds i
                 LEFT JOIN
@@ -69,19 +76,24 @@ const getInventory = async (filters) => {
                 JOIN
                     public.commodities c ON c."commodityId" = i."commodityId"
                 JOIN
-                    public.shapes s ON s."shapeId" = i."shapeId"
+                    public.shapes s ON s."shapeId" = s."shapeId"
+                LEFT JOIN public.exlmewarehouses elme ON elme."exLmeWarehouseId" = i."exLmeWarehouseId"
+                LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
+                LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
+                LEFT JOIN public.users u1 ON u1.userid = i."userId"
+                LEFT JOIN public.users u2 ON u2.userid = i."processedId"
                 WHERE
                     o."inboundId" IS NULL
                     AND ot."inboundId" IS NULL
                 GROUP BY
-                    i."jobNo", c."commodityName", b."brandName", s."shapeName"
+                    i."jobNo", c."commodityName", b."brandName", s."shapeName", elme."exLmeWarehouseName", exwhl."exWarehouseLocationName", iw."inboundWarehouseName", u1."username", u2."username"
             )
         `;
 
-        let finalWhereClause = '';
-        if (filters.search) {
-            replacements.search = `%${filters.search}%`;
-            finalWhereClause = `
+    let finalWhereClause = "";
+    if (filters.search) {
+      replacements.search = `%${filters.search}%`;
+      finalWhereClause = `
                 WHERE
                     "Job No" ILIKE :search OR
                     "Metal" ILIKE :search OR
@@ -89,26 +101,38 @@ const getInventory = async (filters) => {
                     "Shape" ILIKE :search OR
                     CAST("Lot No" AS TEXT) ILIKE :search OR
                     CAST("Qty" AS TEXT) ILIKE :search OR
-                    CAST("Weight" AS TEXT) ILIKE :search
+                    CAST("Weight" AS TEXT) ILIKE :search OR
+                    CAST("GrossWeight" AS TEXT) ILIKE :search OR
+                    CAST("ActualWeight" AS TEXT) ILIKE :search OR
+                    "ExLMEWarehouse" ILIKE :search OR
+                    "ExWarehouseLocation" ILIKE :search OR
+                    "InboundWarehouse" ILIKE :search OR
+                    "ScheduledBy" ILIKE :search OR
+                    "ProcessedBy" ILIKE :search
             `;
-        }
+    }
 
-        // --- START: Sorting Logic for getInventory ---
-        const sortableColumns = {
-            'Job No': '"Job No"', 'Lots': '"Lot No"', 'Metal': '"Metal"',
-            'Brand': '"Brand"', 'Shape': '"Shape"', 'Qty': '"Qty"', 'Weight': '"Weight"'
-        };
-        let orderByClause = 'ORDER BY "Job No" ASC'; // Default sort
-        if (filters.sortBy && sortableColumns[filters.sortBy]) {
-            const sortColumn = sortableColumns[filters.sortBy];
-            const sortOrder = filters.sortOrder === 'desc' ? 'DESC' : 'ASC';
-            orderByClause = `ORDER BY ${sortColumn} ${sortOrder}`;
-        }
-        // --- END: Sorting Logic ---
+    // --- START: Sorting Logic for getInventory ---
+    const sortableColumns = {
+      "Job No": '"Job No"',
+      Lots: '"Lot No"',
+      Metal: '"Metal"',
+      Brand: '"Brand"',
+      Shape: '"Shape"',
+      Qty: '"Qty"',
+      Weight: '"Weight"',
+    };
+    let orderByClause = 'ORDER BY "Job No" ASC'; // Default sort
+    if (filters.sortBy && sortableColumns[filters.sortBy]) {
+      const sortColumn = sortableColumns[filters.sortBy];
+      const sortOrder = filters.sortOrder === "desc" ? "DESC" : "ASC";
+      orderByClause = `ORDER BY ${sortColumn} ${sortOrder}`;
+    }
+    // --- END: Sorting Logic ---
 
-        const countQuery = `${cteQuery} SELECT COUNT(*)::int AS "totalItems" FROM grouped_inventory ${finalWhereClause};`;
+    const countQuery = `${cteQuery} SELECT COUNT(*)::int AS "totalItems" FROM grouped_inventory ${finalWhereClause};`;
 
-        const dataQuery = `
+    const dataQuery = `
             ${cteQuery}
             SELECT *
             FROM grouped_inventory
@@ -117,69 +141,106 @@ const getInventory = async (filters) => {
             LIMIT :pageSize OFFSET :offset;
         `;
 
-        const countReplacements = { ...replacements };
-        delete countReplacements.pageSize;
-        delete countReplacements.offset;
+    const countReplacements = { ...replacements };
+    delete countReplacements.pageSize;
+    delete countReplacements.offset;
 
-        const [countResult, items] = await Promise.all([
-            db.sequelize.query(countQuery, { replacements: countReplacements, type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(dataQuery, { replacements, type: db.sequelize.QueryTypes.SELECT })
-        ]);
+    const [countResult, items] = await Promise.all([
+      db.sequelize.query(countQuery, {
+        replacements: countReplacements,
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+      db.sequelize.query(dataQuery, {
+        replacements,
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+    ]);
 
-        const totalItems = countResult.length > 0 ? countResult[0].totalItems : 0;
-        return { items, totalItems };
-    } catch (error) {
-        console.error('Error fetching inventory records:', error);
-        throw error;
-    }
+    const totalItems = countResult.length > 0 ? countResult[0].totalItems : 0;
+    return { items, totalItems };
+  } catch (error) {
+    console.error("Error fetching inventory records:", error);
+    throw error;
+  }
 };
-
 
 const getFilterOptions = async () => {
-    try {
-        const brandsQuery = 'SELECT DISTINCT "brandName" FROM public.brands WHERE "brandName" IS NOT NULL ORDER BY "brandName";';
-        const shapesQuery = 'SELECT DISTINCT "shapeName" FROM public.shapes WHERE "shapeName" IS NOT NULL ORDER BY "shapeName";';
-        const commoditiesQuery = 'SELECT DISTINCT "commodityName" FROM public.commodities WHERE "commodityName" IS NOT NULL ORDER BY "commodityName";';
-        const jobNosQuery = 'SELECT DISTINCT "jobNo" FROM public.inbounds WHERE "jobNo" IS NOT NULL ORDER BY "jobNo";';
-        const exLMEWarehouseQuery = 'SELECT DISTINCT "exLmeWarehouseName" FROM public.exlmewarehouses WHERE "exLmeWarehouseName" IS NOT NULL ORDER BY "exLmeWarehouseName";';
-        const exWarehouseLocationQuery = 'SELECT DISTINCT "exWarehouseLocationName" FROM public.exwarehouselocations WHERE "exWarehouseLocationName" IS NOT NULL ORDER BY "exWarehouseLocationName";';
-        const inboundWarehouseQuery = 'SELECT DISTINCT "inboundWarehouseName" FROM public.inboundwarehouses WHERE "inboundWarehouseName" IS NOT NULL ORDER BY "inboundWarehouseName";';
+  try {
+    const brandsQuery =
+      'SELECT DISTINCT "brandName" FROM public.brands WHERE "brandName" IS NOT NULL ORDER BY "brandName";';
+    const shapesQuery =
+      'SELECT DISTINCT "shapeName" FROM public.shapes WHERE "shapeName" IS NOT NULL ORDER BY "shapeName";';
+    const commoditiesQuery =
+      'SELECT DISTINCT "commodityName" FROM public.commodities WHERE "commodityName" IS NOT NULL ORDER BY "commodityName";';
+    const jobNosQuery =
+      'SELECT DISTINCT "jobNo" FROM public.inbounds WHERE "jobNo" IS NOT NULL ORDER BY "jobNo";';
+    const exLMEWarehouseQuery =
+      'SELECT DISTINCT "exLmeWarehouseName" FROM public.exlmewarehouses WHERE "exLmeWarehouseName" IS NOT NULL ORDER BY "exLmeWarehouseName";';
+    const exWarehouseLocationQuery =
+      'SELECT DISTINCT "exWarehouseLocationName" FROM public.exwarehouselocations WHERE "exWarehouseLocationName" IS NOT NULL ORDER BY "exWarehouseLocationName";';
+    const inboundWarehouseQuery =
+      'SELECT DISTINCT "inboundWarehouseName" FROM public.inboundwarehouses WHERE "inboundWarehouseName" IS NOT NULL ORDER BY "inboundWarehouseName";';
 
-        const [brands, shapes, commodities, jobNos, exlmewarehouse, exWarehouseLocation, inboundWarehouse] = await Promise.all([
-            db.sequelize.query(brandsQuery, { type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(shapesQuery, { type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(commoditiesQuery, { type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(jobNosQuery, { type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(exLMEWarehouseQuery, { type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(exWarehouseLocationQuery, { type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(inboundWarehouseQuery, { type: db.sequelize.QueryTypes.SELECT })
-        ]);
-        if (!brands || !shapes || !commodities || !jobNos || !exlmewarehouse || !exWarehouseLocation || !inboundWarehouse) {
-            throw new Error('Failed to fetch filter options');
-        }
-
-        return {
-            brands: brands.map(item => item.brandName),
-            shapes: shapes.map(item => item.shapeName),
-            commodities: commodities.map(item => item.commodityName),
-            jobNos: jobNos.map(item => item.jobNo),
-            exLMEWarehouse: exlmewarehouse.map(item => item.exLmeWarehouseName),
-            exWarehouseLocation: exWarehouseLocation.map(item => item.exWarehouseLocationName),
-            inboundWarehouse: inboundWarehouse.map(item => item.inboundWarehouseName)
-
-
-        };
-    } catch (error) {
-        console.error('Error fetching filter options:', error);
-        throw error;
+    const [
+      brands,
+      shapes,
+      commodities,
+      jobNos,
+      exlmewarehouse,
+      exWarehouseLocation,
+      inboundWarehouse,
+    ] = await Promise.all([
+      db.sequelize.query(brandsQuery, { type: db.sequelize.QueryTypes.SELECT }),
+      db.sequelize.query(shapesQuery, { type: db.sequelize.QueryTypes.SELECT }),
+      db.sequelize.query(commoditiesQuery, {
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+      db.sequelize.query(jobNosQuery, { type: db.sequelize.QueryTypes.SELECT }),
+      db.sequelize.query(exLMEWarehouseQuery, {
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+      db.sequelize.query(exWarehouseLocationQuery, {
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+      db.sequelize.query(inboundWarehouseQuery, {
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+    ]);
+    if (
+      !brands ||
+      !shapes ||
+      !commodities ||
+      !jobNos ||
+      !exlmewarehouse ||
+      !exWarehouseLocation ||
+      !inboundWarehouse
+    ) {
+      throw new Error("Failed to fetch filter options");
     }
+
+    return {
+      brands: brands.map((item) => item.brandName),
+      shapes: shapes.map((item) => item.shapeName),
+      commodities: commodities.map((item) => item.commodityName),
+      jobNos: jobNos.map((item) => item.jobNo),
+      exLMEWarehouse: exlmewarehouse.map((item) => item.exLmeWarehouseName),
+      exWarehouseLocation: exWarehouseLocation.map(
+        (item) => item.exWarehouseLocationName
+      ),
+      inboundWarehouse: inboundWarehouse.map(
+        (item) => item.inboundWarehouseName
+      ),
+    };
+  } catch (error) {
+    console.error("Error fetching filter options:", error);
+    throw error;
+  }
 };
 
-
 const getLotSummary = async (jobNo, lotNo) => {
-    try {
-        // Query 1: Get the details for the specific AVAILABLE lot you clicked on
-        const detailsQuery = `
+  try {
+    // Query 1: Get the details for the specific AVAILABLE lot you clicked on
+    const detailsQuery = `
       SELECT
         i."jobNo" AS "JobNo", i."lotNo" AS "LotNo", i."noOfBundle" AS "NoOfBundle",
         i."inboundId", i."barcodeNo" AS "Barcode", c."commodityName" AS "Commodity", b."brandName" AS "Brand",
@@ -215,37 +276,37 @@ const getLotSummary = async (jobNo, lotNo) => {
       LIMIT 1;
     `;
 
-        const lotDetailsResult = await db.sequelize.query(detailsQuery, {
-            type: db.sequelize.QueryTypes.SELECT,
-            replacements: { jobNo, lotNo }
-        });
+    const lotDetailsResult = await db.sequelize.query(detailsQuery, {
+      type: db.sequelize.QueryTypes.SELECT,
+      replacements: { jobNo, lotNo },
+    });
 
-        if (lotDetailsResult.length === 0) {
-            return null;
-        }
+    if (lotDetailsResult.length === 0) {
+      return null;
+    }
 
-        const lotDetails = lotDetailsResult[0];
-        const exactJobNo = lotDetails.JobNo;
+    const lotDetails = lotDetailsResult[0];
+    const exactJobNo = lotDetails.JobNo;
 
-        // --- Outbound Activities ---
-        let outboundActivities = [];
+    // --- Outbound Activities ---
+    let outboundActivities = [];
 
-        if (exactJobNo) {
-            const outboundQuery = `
+    if (exactJobNo) {
+      const outboundQuery = `
         SELECT "jobNo", "lotNo", "createdAt"
         FROM public.outboundtransactions
         WHERE "jobNo" = :jobNo
         ORDER BY "createdAt" DESC;
       `;
 
-            outboundActivities = await db.sequelize.query(outboundQuery, {
-                type: db.sequelize.QueryTypes.SELECT,
-                replacements: { jobNo: exactJobNo }
-            });
-        }
+      outboundActivities = await db.sequelize.query(outboundQuery, {
+        type: db.sequelize.QueryTypes.SELECT,
+        replacements: { jobNo: exactJobNo },
+      });
+    }
 
-        // --- Lot Count Info ---
-        const countsQuery = `
+    // --- Lot Count Info ---
+    const countsQuery = `
       SELECT
         COUNT(*) AS "TotalCount",
         COUNT(CASE WHEN o."inboundId" IS NULL AND ot."inboundId" IS NULL THEN 1 END) AS "AvailableCount"
@@ -256,135 +317,198 @@ const getLotSummary = async (jobNo, lotNo) => {
       WHERE i."jobNo" = :jobNo;
     `;
 
-        const lotCountsResult = await db.sequelize.query(countsQuery, {
-            type: db.sequelize.QueryTypes.SELECT,
-            replacements: { jobNo: exactJobNo }
-        });
+    const lotCountsResult = await db.sequelize.query(countsQuery, {
+      type: db.sequelize.QueryTypes.SELECT,
+      replacements: { jobNo: exactJobNo },
+    });
 
-        // Merge all results into one object
-        const finalResult = {
-            ...lotDetails,
-            ...lotCountsResult[0],
-            "OutboundActivities": outboundActivities
-        };
+    // Merge all results into one object
+    const finalResult = {
+      ...lotDetails,
+      ...lotCountsResult[0],
+      OutboundActivities: outboundActivities,
+    };
 
-        return finalResult;
-
-    } catch (error) {
-        console.error('Error fetching lot summary records:', error);
-        throw error;
-    }
+    return finalResult;
+  } catch (error) {
+    console.error("Error fetching lot summary records:", error);
+    throw error;
+  }
 };
 
-
 const getLotDetails = async (filters) => {
-    try {
-        const replacements = {};
-        let whereClauses = ['o."inboundId" IS NULL', 'ot."inboundId" IS NULL'];
+  try {
+    const replacements = {};
+    let whereClauses = ['o."inboundId" IS NULL', 'ot."inboundId" IS NULL'];
 
-        if (filters.selectedMetal) { whereClauses.push('c."commodityName" = :selectedMetal'); replacements.selectedMetal = filters.selectedMetal; }
-        if (filters.selectedShape) { whereClauses.push('s."shapeName" = :selectedShape'); replacements.selectedShape = filters.selectedShape; }
-        if (filters.jobNo) { whereClauses.push('i."jobNo" ILIKE :jobNo'); replacements.jobNo = `%${filters.jobNo}%`; }
-        if (filters.brands) {
-            try {
-                const brandsList = JSON.parse(filters.brands);
-                if (Array.isArray(brandsList) && brandsList.length > 0) {
-                    whereClauses.push('b."brandName" IN (:brands)');
-                    replacements.brands = brandsList;
-                }
-            } catch (e) { console.error("Error parsing brands filter:", e); }
+    if (filters.selectedMetal) {
+      whereClauses.push('c."commodityName" = :selectedMetal');
+      replacements.selectedMetal = filters.selectedMetal;
+    }
+    if (filters.selectedShape) {
+      whereClauses.push('s."shapeName" = :selectedShape');
+      replacements.selectedShape = filters.selectedShape;
+    }
+    if (filters.jobNo) {
+      whereClauses.push('i."jobNo" ILIKE :jobNo');
+      replacements.jobNo = `%${filters.jobNo}%`;
+    }
+    if (filters.brands) {
+      try {
+        const brandsList = JSON.parse(filters.brands);
+        if (Array.isArray(brandsList) && brandsList.length > 0) {
+          whereClauses.push('b."brandName" IN (:brands)');
+          replacements.brands = brandsList;
         }
-        if (filters.exWarehouseLocation) { whereClauses.push('exwhl."exWarehouseLocationName" = :exWarehouseLocation'); replacements.exWarehouseLocation = filters.exWarehouseLocation; }
-        if (filters.exLMEWarehouse) { whereClauses.push('elme."exLmeWarehouseName" = :exLMEWarehouse'); replacements.exLMEWarehouse = filters.exLMEWarehouse; }
-        if (filters.noOfBundle) {
-            const noOfBundleInt = parseInt(filters.noOfBundle, 10);
-            if (!isNaN(noOfBundleInt)) { whereClauses.push('i."noOfBundle" = :noOfBundle'); replacements.noOfBundle = noOfBundleInt; }
-        }
-        if (filters.inboundWarehouse) { whereClauses.push('iw."inboundWarehouseName" = :inboundWarehouse'); replacements.inboundWarehouse = filters.inboundWarehouse; }
-        if (filters.exWarehouseLot) { whereClauses.push('i."exWarehouseLot" ILIKE :exWarehouseLot'); replacements.exWarehouseLot = `%${filters.exWarehouseLot}%`; }
-        if (filters.search) {
-            whereClauses.push(`(
-                i."jobNo" ILIKE :search OR i."exWarehouseLot" ILIKE :search OR c."commodityName" ILIKE :search OR
-                b."brandName" ILIKE :search OR s."shapeName" ILIKE :search OR CAST(i."lotNo" AS TEXT) ILIKE :search OR
-                CAST(i."netWeight" AS TEXT) ILIKE :search OR CAST(i."noOfBundle" AS TEXT) ILIKE :search 
+      } catch (e) {
+        console.error("Error parsing brands filter:", e);
+      }
+    }
+    if (filters.exWarehouseLocation) {
+      whereClauses.push(
+        'exwhl."exWarehouseLocationName" = :exWarehouseLocation'
+      );
+      replacements.exWarehouseLocation = filters.exWarehouseLocation;
+    }
+    if (filters.exLMEWarehouse) {
+      whereClauses.push('elme."exLmeWarehouseName" = :exLMEWarehouse');
+      replacements.exLMEWarehouse = filters.exLMEWarehouse;
+    }
+    if (filters.noOfBundle) {
+      const noOfBundleInt = parseInt(filters.noOfBundle, 10);
+      if (!isNaN(noOfBundleInt)) {
+        whereClauses.push('i."noOfBundle" = :noOfBundle');
+        replacements.noOfBundle = noOfBundleInt;
+      }
+    }
+    if (filters.inboundWarehouse) {
+      whereClauses.push('iw."inboundWarehouseName" = :inboundWarehouse');
+      replacements.inboundWarehouse = filters.inboundWarehouse;
+    }
+    if (filters.exWarehouseLot) {
+      whereClauses.push('i."exWarehouseLot" ILIKE :exWarehouseLot');
+      replacements.exWarehouseLot = `%${filters.exWarehouseLot}%`;
+    }
+    if (filters.search) {
+      whereClauses.push(`(
+                i."jobNo" ILIKE :search OR
+                i."exWarehouseLot" ILIKE :search OR
+                c."commodityName" ILIKE :search OR
+                b."brandName" ILIKE :search OR
+                s."shapeName" ILIKE :search OR
+                CAST(i."lotNo" AS TEXT) ILIKE :search OR
+                CAST(i."netWeight" AS TEXT) ILIKE :search OR
+                CAST(i."noOfBundle" AS TEXT) ILIKE :search OR
+                CAST(i."grossWeight" AS TEXT) ILIKE :search OR
+                CAST(i."actualWeight" AS TEXT) ILIKE :search OR
+                elme."exLmeWarehouseName" ILIKE :search OR
+                exwhl."exWarehouseLocationName" ILIKE :search OR
+                i."exWarehouseWarrant" ILIKE :search OR
+                iw."inboundWarehouseName" ILIKE :search OR
+                u1."username" ILIKE :search OR
+                u2."username" ILIKE :search
             )`);
-            replacements.search = `%${filters.search}%`;
-        }
+      replacements.search = `%${filters.search}%`;
+    }
 
-        const whereString = ' WHERE ' + whereClauses.join(' AND ');
+    const whereString = " WHERE " + whereClauses.join(" AND ");
 
-        // --- START: Sorting Logic for getLotDetails ---
-        const sortableColumns = {
-            'Lot No': 'i."jobNo" ASC, i."lotNo"', 'Ex-Whse Lot': 'i."exWarehouseLot"', 'Metal': 'c."commodityName"',
-            'Brand': 'b."brandName"', 'Shape': 's."shapeName"', 'Qty': 'i."noOfBundle"', 'Weight': '"Weight"'
-        };
-        let orderByClause = 'ORDER BY i."inboundId" ASC'; // Default sort
-        if (filters.sortBy && sortableColumns[filters.sortBy]) {
-            const sortOrder = filters.sortOrder === 'desc' ? 'DESC' : 'ASC';
-            if (filters.sortBy === 'Lot No') {
-                orderByClause = `ORDER BY i."jobNo" ${sortOrder}, i."lotNo" ${sortOrder}`;
-            } else {
-                orderByClause = `ORDER BY ${sortableColumns[filters.sortBy]} ${sortOrder}`;
-            }
-        }
+    // --- START: Sorting Logic for getLotDetails ---
+    const sortableColumns = {
+      "Lot No": 'i."jobNo" ASC, i."lotNo"',
+      "Ex-Whse Lot": 'i."exWarehouseLot"',
+      Metal: 'c."commodityName"',
+      Brand: 'b."brandName"',
+      Shape: 's."shapeName"',
+      Qty: 'i."noOfBundle"',
+      Weight: '"Weight"',
+    };
+    let orderByClause = 'ORDER BY i."inboundId" ASC'; // Default sort
+    if (filters.sortBy && sortableColumns[filters.sortBy]) {
+      const sortOrder = filters.sortOrder === "desc" ? "DESC" : "ASC";
+      if (filters.sortBy === "Lot No") {
+        orderByClause = `ORDER BY i."jobNo" ${sortOrder}, i."lotNo" ${sortOrder}`;
+      } else {
+        orderByClause = `ORDER BY ${
+          sortableColumns[filters.sortBy]
+        } ${sortOrder}`;
+      }
+    }
 
-        const baseQuery = `
+    const baseQuery = `
             FROM public.inbounds i
+            LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
+            LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
             JOIN public.commodities c ON i."commodityId" = c."commodityId"
             JOIN public.shapes s ON i."shapeId" = s."shapeId"
             LEFT JOIN public.brands b ON i."brandId" = b."brandId"
             LEFT JOIN public.exlmewarehouses elme ON elme."exLmeWarehouseId" = i."exLmeWarehouseId"
             LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
             LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
-            LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
-            LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
+            LEFT JOIN public.users u1 ON u1.userid = i."userId"
+            LEFT JOIN public.users u2 ON u2.userid = i."processedId"
             ${whereString}
         `;
 
-        const countQuery = `SELECT COUNT(i."inboundId")::int AS "totalItems" ${baseQuery.split('GROUP BY')[0]}`;
-        
-        const countResult = await db.sequelize.query(countQuery, { type: db.sequelize.QueryTypes.SELECT, replacements: { ...replacements } });
-        const totalItems = countResult[0].totalItems;
+    const countQuery = `SELECT COUNT(i."inboundId")::int AS "totalItems" ${
+      baseQuery.split("GROUP BY")[0]
+    }`;
 
-        const page = parseInt(filters.page, 10) || 1;
-        const pageSize = parseInt(filters.pageSize, 10) || 25;
-        const offset = (page - 1) * pageSize;
-        replacements.pageSize = pageSize;
-        replacements.offset = offset;
+    const countResult = await db.sequelize.query(countQuery, {
+      type: db.sequelize.QueryTypes.SELECT,
+      replacements: { ...replacements },
+    });
+    const totalItems = countResult[0].totalItems;
 
-        let dataQuery = `
+    const page = parseInt(filters.page, 10) || 1;
+    const pageSize = parseInt(filters.pageSize, 10) || 25;
+    const offset = (page - 1) * pageSize;
+    replacements.pageSize = pageSize;
+    replacements.offset = offset;
+
+    let dataQuery = `
             SELECT
                 i."inboundId" as id, i."jobNo" AS "JobNo", i."lotNo" AS "LotNo",
                 i."exWarehouseLot" AS "Ex-WarehouseLot", elme."exLmeWarehouseName" AS "ExLMEWarehouse",
                 c."commodityName" AS "Metal", b."brandName" AS "Brand", s."shapeName" AS "Shape",
                 i."noOfBundle" AS "Qty", SUM(CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END) AS "Weight",
-                exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse"
+                i."grossWeight" AS "GrossWeight", i."actualWeight" AS "ActualWeight",
+                exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse",
+                i."exWarehouseWarrant" AS "ExWarehouseWarrant", u1."username" AS "ScheduledBy", u2."username" AS "ProcessedBy"
             ${baseQuery}
-            GROUP BY 
+            GROUP BY
                 i."inboundId", i."jobNo", i."lotNo", i."exWarehouseLot", elme."exLmeWarehouseName",
-                c."commodityName", b."brandName", s."shapeName", i."noOfBundle",
-                exwhl."exWarehouseLocationName", iw."inboundWarehouseName"
+                c."commodityName", b."brandName", s."shapeName", i."noOfBundle", i."grossWeight",
+                i."actualWeight", exwhl."exWarehouseLocationName", iw."inboundWarehouseName",
+                i."exWarehouseWarrant", u1."username", u2."username"
             ${orderByClause}
             LIMIT :pageSize OFFSET :offset;
         `;
-        
-        const items = await db.sequelize.query(dataQuery, { type: db.sequelize.QueryTypes.SELECT, replacements });
-        return { items, totalItems };
 
-    } catch (error) {
-        console.error('Error fetching lot details:', error);
-        throw error;
-    }
+    const items = await db.sequelize.query(dataQuery, {
+      type: db.sequelize.QueryTypes.SELECT,
+      replacements,
+    });
+    return { items, totalItems };
+  } catch (error) {
+    console.error("Error fetching lot details:", error);
+    throw error;
+  }
 };
 
 const createScheduleOutbound = async (scheduleData, userId) => {
   const t = await db.sequelize.transaction();
-  console.log('Creating schedule outbound with data:', scheduleData, 'and userId:', userId);
+  console.log(
+    "Creating schedule outbound with data:",
+    scheduleData,
+    "and userId:",
+    userId
+  );
 
   try {
     const {
       releaseStartDate, // Used as releaseDate
-      releaseEndDate,   // Used as releaseEndDate
+      releaseEndDate, // Used as releaseEndDate
       lotReleaseWeight,
       exportDate,
       stuffingDate,
@@ -394,10 +518,11 @@ const createScheduleOutbound = async (scheduleData, userId) => {
       storageReleaseLocation,
       releaseWarehouse,
       transportVendor,
-      selectedLots
+      selectedLots,
     } = scheduleData;
 
-    const outboundType = (containerNo && containerNo.length > 0) ? 'container' : 'flatbed';
+    const outboundType =
+      containerNo && containerNo.length > 0 ? "container" : "flatbed";
 
     const scheduleInsertQuery = `
       INSERT INTO public.scheduleoutbounds (
@@ -427,10 +552,10 @@ const createScheduleOutbound = async (scheduleData, userId) => {
         deliveryDate: deliveryDate || null,
         storageReleaseLocation,
         releaseWarehouse,
-        transportVendor
+        transportVendor,
       },
       type: db.sequelize.QueryTypes.INSERT,
-      transaction: t
+      transaction: t,
     });
 
     const scheduleOutboundId = insertResult?.[0]?.[0]?.scheduleOutboundId;
@@ -460,12 +585,12 @@ const createScheduleOutbound = async (scheduleData, userId) => {
         const quantity = lot.Qty;
 
         if (!inboundId) {
-          console.warn('Skipping lot due to missing inboundId:', lot);
+          console.warn("Skipping lot due to missing inboundId:", lot);
           continue;
         }
 
-        const lotNoString = lot['Lot No']?.toString() ?? '';
-        const [jobNo, lotNoStr] = lotNoString.split('-');
+        const lotNoString = lot["Lot No"]?.toString() ?? "";
+        const [jobNo, lotNoStr] = lotNoString.split("-");
         const lotNo = parseInt(lotNoStr, 10);
 
         if (!jobNo || !Number.isInteger(lotNo)) {
@@ -478,20 +603,20 @@ const createScheduleOutbound = async (scheduleData, userId) => {
             inboundId,
             scheduleOutboundId,
             lotNo,
-            jobNo
+            jobNo,
           },
           type: db.sequelize.QueryTypes.INSERT,
-          transaction: t
+          transaction: t,
         });
 
         if (quantity != null) {
           await db.sequelize.query(updateInboundQuantityQuery, {
             replacements: {
               quantity,
-              inboundId
+              inboundId,
             },
             type: db.sequelize.QueryTypes.UPDATE,
-            transaction: t
+            transaction: t,
           });
         }
       }
@@ -500,121 +625,195 @@ const createScheduleOutbound = async (scheduleData, userId) => {
     await t.commit();
     return {
       success: true,
-      message: 'Schedule created successfully.',
-      scheduleOutboundId
+      message: "Schedule created successfully.",
+      scheduleOutboundId,
     };
-
   } catch (error) {
     await t.rollback();
-    console.error('Error in createScheduleOutbound transaction:', error);
-    throw new Error('Failed to create outbound schedule due to a database error.');
+    console.error("Error in createScheduleOutbound transaction:", error);
+    throw new Error(
+      "Failed to create outbound schedule due to a database error."
+    );
   }
 };
 
-
-
 const EditInformation = async (inboundId, updateData) => {
-    try {
-        const setClauses = [];
-        const replacements = { inboundId };
+  try {
+    const setClauses = [];
+    const replacements = { inboundId };
 
-        for (const key in updateData) {
-            // Map frontend keys to DB columns
-            let dbColumnName;
-            switch (key) {
-                case 'noOfBundle': dbColumnName = 'noOfBundle'; break;
-                case 'barcodeNo': dbColumnName = 'barcodeNo'; break;
-                case 'commodity': dbColumnName = 'commodityId'; break;
-                case 'brand': dbColumnName = 'brandId'; break;
-                case 'shape': dbColumnName = 'shapeId'; break;
-                case 'exLMEWarehouse': dbColumnName = 'exLmeWarehouseId'; break;
-                case 'exWarehouseLot': dbColumnName = 'exWarehouseLot'; break;
-                case 'exWarehouseWarrant': dbColumnName = 'exWarehouseWarrant'; break;
-                case 'exWarehouseLocation': dbColumnName = 'exWarehouseLocationId'; break;
-                case 'inboundWarehouse': dbColumnName = 'inboundWarehouseId'; break;
-                case 'grossWeight': dbColumnName = 'grossWeight'; break;
-                case 'netWeight': dbColumnName = 'netWeight'; break;
-                case 'actualWeight': dbColumnName = 'actualWeight'; break;
-                case 'isRelabelled': dbColumnName = 'isRelabelled'; break;
-                case 'isRebundled': dbColumnName = 'isRebundled'; break;
-                case 'isRepackProvided': dbColumnName = 'isRepackProvided'; break;
-                default:
-                    console.warn(`Unknown key: ${key}`);
-                    continue;
-            }
+    for (const key in updateData) {
+      // Map frontend keys to DB columns
+      let dbColumnName;
+      switch (key) {
+        case "noOfBundle":
+          dbColumnName = "noOfBundle";
+          break;
+        case "barcodeNo":
+          dbColumnName = "barcodeNo";
+          break;
+        case "commodity":
+          dbColumnName = "commodityId";
+          break;
+        case "brand":
+          dbColumnName = "brandId";
+          break;
+        case "shape":
+          dbColumnName = "shapeId";
+          break;
+        case "exLMEWarehouse":
+          dbColumnName = "exLmeWarehouseId";
+          break;
+        case "exWarehouseLot":
+          dbColumnName = "exWarehouseLot";
+          break;
+        case "exWarehouseWarrant":
+          dbColumnName = "exWarehouseWarrant";
+          break;
+        case "exWarehouseLocation":
+          dbColumnName = "exWarehouseLocationId";
+          break;
+        case "inboundWarehouse":
+          dbColumnName = "inboundWarehouseId";
+          break;
+        case "grossWeight":
+          dbColumnName = "grossWeight";
+          break;
+        case "netWeight":
+          dbColumnName = "netWeight";
+          break;
+        case "actualWeight":
+          dbColumnName = "actualWeight";
+          break;
+        case "isRelabelled":
+          dbColumnName = "isRelabelled";
+          break;
+        case "isRebundled":
+          dbColumnName = "isRebundled";
+          break;
+        case "isRepackProvided":
+          dbColumnName = "isRepackProvided";
+          break;
+        default:
+          console.warn(`Unknown key: ${key}`);
+          continue;
+      }
 
-            // Lookup IDs if needed
-            if (['commodityId', 'brandId', 'shapeId', 'exLmeWarehouseId', 'exWarehouseLocationId', 'inboundWarehouseId'].includes(dbColumnName)) {
-                let lookupTable, lookupNameCol, lookupIdCol;
-                switch (dbColumnName) {
-                    case 'commodityId': lookupTable = 'commodities'; lookupNameCol = 'commodityName'; lookupIdCol = 'commodityId'; break;
-                    case 'brandId': lookupTable = 'brands'; lookupNameCol = 'brandName'; lookupIdCol = 'brandId'; break;
-                    case 'shapeId': lookupTable = 'shapes'; lookupNameCol = 'shapeName'; lookupIdCol = 'shapeId'; break;
-                    case 'exLmeWarehouseId': lookupTable = 'exlmewarehouses'; lookupNameCol = 'exLmeWarehouseName'; lookupIdCol = 'exLmeWarehouseId'; break;
-                    case 'exWarehouseLocationId': lookupTable = 'exwarehouselocations'; lookupNameCol = 'exWarehouseLocationName'; lookupIdCol = 'exWarehouseLocationId'; break;
-                    case 'inboundWarehouseId': lookupTable = 'inboundwarehouses'; lookupNameCol = 'inboundWarehouseName'; lookupIdCol = 'inboundWarehouseId'; break;
-                }
-                const lookupQuery = `SELECT "${lookupIdCol}" FROM public."${lookupTable}" WHERE "${lookupNameCol}" = :value LIMIT 1;`;
-                const lookupResult = await db.sequelize.query(lookupQuery, {
-                    type: db.sequelize.QueryTypes.SELECT,
-                    replacements: { value: updateData[key] }
-                });
-                if (lookupResult.length > 0) {
-                    setClauses.push(`"${dbColumnName}" = :${key}_id`);
-                    replacements[`${key}_id`] = lookupResult[0][lookupIdCol];
-                } else {
-                    console.warn(`Lookup failed for ${key}: ${updateData[key]}`);
-                    continue;
-                }
-            }
-            // Handle boolean fields
-            else if (['isRelabelled', 'isRebundled', 'isRepackProvided'].includes(dbColumnName)) {
-                setClauses.push(`"${dbColumnName}" = :${key}`);
-                replacements[key] = (updateData[key] === 'Yes');
-            }
-            // Direct mapping for simple fields
-            else {
-                setClauses.push(`"${dbColumnName}" = :${key}`);
-                replacements[key] = updateData[key];
-            }
+      // Lookup IDs if needed
+      if (
+        [
+          "commodityId",
+          "brandId",
+          "shapeId",
+          "exLmeWarehouseId",
+          "exWarehouseLocationId",
+          "inboundWarehouseId",
+        ].includes(dbColumnName)
+      ) {
+        let lookupTable, lookupNameCol, lookupIdCol;
+        switch (dbColumnName) {
+          case "commodityId":
+            lookupTable = "commodities";
+            lookupNameCol = "commodityName";
+            lookupIdCol = "commodityId";
+            break;
+          case "brandId":
+            lookupTable = "brands";
+            lookupNameCol = "brandName";
+            lookupIdCol = "brandId";
+            break;
+          case "shapeId":
+            lookupTable = "shapes";
+            lookupNameCol = "shapeName";
+            lookupIdCol = "shapeId";
+            break;
+          case "exLmeWarehouseId":
+            lookupTable = "exlmewarehouses";
+            lookupNameCol = "exLmeWarehouseName";
+            lookupIdCol = "exLmeWarehouseId";
+            break;
+          case "exWarehouseLocationId":
+            lookupTable = "exwarehouselocations";
+            lookupNameCol = "exWarehouseLocationName";
+            lookupIdCol = "exWarehouseLocationId";
+            break;
+          case "inboundWarehouseId":
+            lookupTable = "inboundwarehouses";
+            lookupNameCol = "inboundWarehouseName";
+            lookupIdCol = "inboundWarehouseId";
+            break;
         }
-
-        console.log('Set Clauses:', setClauses);
-
-        if (setClauses.length === 0) {
-            return { success: false, message: 'No valid fields to update.' };
+        const lookupQuery = `SELECT "${lookupIdCol}" FROM public."${lookupTable}" WHERE "${lookupNameCol}" = :value LIMIT 1;`;
+        const lookupResult = await db.sequelize.query(lookupQuery, {
+          type: db.sequelize.QueryTypes.SELECT,
+          replacements: { value: updateData[key] },
+        });
+        if (lookupResult.length > 0) {
+          setClauses.push(`"${dbColumnName}" = :${key}_id`);
+          replacements[`${key}_id`] = lookupResult[0][lookupIdCol];
+        } else {
+          console.warn(`Lookup failed for ${key}: ${updateData[key]}`);
+          continue;
         }
+      }
+      // Handle boolean fields
+      else if (
+        ["isRelabelled", "isRebundled", "isRepackProvided"].includes(
+          dbColumnName
+        )
+      ) {
+        setClauses.push(`"${dbColumnName}" = :${key}`);
+        replacements[key] = updateData[key] === "Yes";
+      }
+      // Direct mapping for simple fields
+      else {
+        setClauses.push(`"${dbColumnName}" = :${key}`);
+        replacements[key] = updateData[key];
+      }
+    }
 
-        const query = `
+    console.log("Set Clauses:", setClauses);
+
+    if (setClauses.length === 0) {
+      return { success: false, message: "No valid fields to update." };
+    }
+
+    const query = `
             UPDATE public.inbounds
-            SET ${setClauses.join(', ')}, "updatedAt" = NOW()
+            SET ${setClauses.join(", ")}, "updatedAt" = NOW()
             WHERE "inboundId" = :inboundId;
         `;
-        console.log('Update Query:', query);
-        const [results, metadata] = await db.sequelize.query(query, {
-            replacements,
-            type: db.sequelize.QueryTypes.UPDATE
-        });
+    console.log("Update Query:", query);
+    const [results, metadata] = await db.sequelize.query(query, {
+      replacements,
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
 
-        if (metadata.rowCount > 0) {
-            return { success: true, message: 'Lot information updated successfully.' };
-        } else {
-            return { success: false, message: 'No lot found with the given inboundId or no changes made.' };
-        }
-
-    } catch (error) {
-        console.error('Error in EditInformation:', error);
-        throw error;
+    if (metadata.rowCount > 0) {
+      return {
+        success: true,
+        message: "Lot information updated successfully.",
+      };
+    } else {
+      return {
+        success: false,
+        message: "No lot found with the given inboundId or no changes made.",
+      };
     }
+  } catch (error) {
+    console.error("Error in EditInformation:", error);
+    throw error;
+  }
 };
 
-const getLotsByJobNo = async (jobNo, brandName, shapeName, filters) => { // Accept brandName, shapeName, and filters
-    try {
-        const page = parseInt(filters.page, 10) || 1;
-        const pageSize = parseInt(filters.pageSize, 10) || 100; // Default to a higher page size for this bulk action
-        const offset = (page - 1) * pageSize;
+const getLotsByJobNo = async (jobNo, brandName, shapeName, filters) => {
+  // Accept brandName, shapeName, and filters
+  try {
+    const page = parseInt(filters.page, 10) || 1;
+    const pageSize = parseInt(filters.pageSize, 10) || 100; // Default to a higher page size for this bulk action
+    const offset = (page - 1) * pageSize;
 
-        const whereClause = `
+    const whereClause = `
             WHERE
                 i."jobNo" = :jobNo
                 AND b."brandName" = :brandName
@@ -624,7 +823,7 @@ const getLotsByJobNo = async (jobNo, brandName, shapeName, filters) => { // Acce
                 AND ot."inboundId" IS NULL
         `;
 
-        const baseQuery = `
+    const baseQuery = `
             FROM
                 public.inbounds i
             LEFT JOIN
@@ -647,9 +846,9 @@ const getLotsByJobNo = async (jobNo, brandName, shapeName, filters) => { // Acce
             ${whereClause}
         `;
 
-        const countQuery = `SELECT COUNT(i."inboundId")::int AS "totalItems" ${baseQuery}`;
+    const countQuery = `SELECT COUNT(i."inboundId")::int AS "totalItems" ${baseQuery}`;
 
-        const dataQuery = `
+    const dataQuery = `
             SELECT
                 i."inboundId" as id,
                 i."jobNo" AS "JobNo",
@@ -668,26 +867,31 @@ const getLotsByJobNo = async (jobNo, brandName, shapeName, filters) => { // Acce
             LIMIT :pageSize OFFSET :offset;
         `;
 
-        const replacements = { jobNo, brandName, shapeName, pageSize, offset };
+    const replacements = { jobNo, brandName, shapeName, pageSize, offset };
 
-        const [countResult, items] = await Promise.all([
-            db.sequelize.query(countQuery, { replacements: { jobNo, brandName, shapeName }, type: db.sequelize.QueryTypes.SELECT }),
-            db.sequelize.query(dataQuery, { replacements, type: db.sequelize.QueryTypes.SELECT })
-        ]);
+    const [countResult, items] = await Promise.all([
+      db.sequelize.query(countQuery, {
+        replacements: { jobNo, brandName, shapeName },
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+      db.sequelize.query(dataQuery, {
+        replacements,
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+    ]);
 
-        const totalItems = countResult.length > 0 ? countResult[0].totalItems : 0;
+    const totalItems = countResult.length > 0 ? countResult[0].totalItems : 0;
 
-        return { items, totalItems };
-    } catch (error) {
-        console.error('Error fetching lots by job number and brand:', error);
-        throw error;
-    }
+    return { items, totalItems };
+  } catch (error) {
+    console.error("Error fetching lots by job number and brand:", error);
+    throw error;
+  }
 };
 
-
 const getInventory1 = async () => {
-    try {
-        const query = `
+  try {
+    const query = `
             SELECT
                     i."jobNo" AS "Job No",
                     COUNT(i."lotNo") AS "Lot No",
@@ -716,25 +920,24 @@ const getInventory1 = async () => {
                 ORDER BY
                     i."jobNo"
         `;
-        const result = await db.sequelize.query(query, {
-            type: db.sequelize.QueryTypes.SELECT
-        });
-        return result;
-    } catch (error) {
-        console.error('Error fetching inventory records:', error);
-        throw error;
-    }
+    const result = await db.sequelize.query(query, {
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    return result;
+  } catch (error) {
+    console.error("Error fetching inventory records:", error);
+    throw error;
+  }
 };
 
-
 module.exports = {
-    getAllStock,
-    getLotDetails,
-    getInventory,
-    getFilterOptions,
-    getLotSummary,
-    createScheduleOutbound,
-    EditInformation,
-    getLotsByJobNo,
-    getInventory1
+  getAllStock,
+  getLotDetails,
+  getInventory,
+  getFilterOptions,
+  getLotSummary,
+  createScheduleOutbound,
+  EditInformation,
+  getLotsByJobNo,
+  getInventory1,
 };
