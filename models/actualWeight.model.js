@@ -1,8 +1,59 @@
 const db = require("../database");
 
 // Helper function to find related ID (inboundId if lotId is provided, or lotId if inboundId is provided)
-const findRelatedId = async (providedId, isLotId) => {
+const findRelatedId = async (providedId, isLotId = null, jobNo = null, lotNo = null) => {
   try {
+    // If we have jobNo and lotNo but no providedId, try to find the ID first
+    if ((providedId === null || providedId === undefined) && jobNo && lotNo) {
+      if (isLotId === false || isLotId === null) {
+        // Try to find inboundId by jobNo and lotNo
+        const inboundQuery = `
+          SELECT "inboundId" 
+          FROM public.inbounds 
+          WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+          LIMIT 1
+        `;
+        
+        const [inbound] = await db.sequelize.query(inboundQuery, {
+          replacements: { jobNo, lotNo },
+          type: db.sequelize.QueryTypes.SELECT,
+        });
+        
+        if (inbound) return inbound.inboundId;
+      }
+      
+      if (isLotId === true || isLotId === null) {
+        // Try to find lotId by jobNo and lotNo
+        const lotQuery = `
+          SELECT "lotId" 
+          FROM public.lot 
+          WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+          LIMIT 1
+        `;
+        
+        const [lot] = await db.sequelize.query(lotQuery, {
+          replacements: { jobNo, lotNo },
+          type: db.sequelize.QueryTypes.SELECT,
+        });
+        
+        if (lot) return lot.lotId;
+      }
+      
+      return null;
+    }
+
+    // Rest of your existing findRelatedId logic...
+    if (isLotId === null) {
+      // Try both directions
+      const asInboundResult = await findRelatedId(providedId, false, jobNo, lotNo);
+      if (asInboundResult) return { lotId: asInboundResult, providedIdType: 'inbound' };
+      
+      const asLotResult = await findRelatedId(providedId, true, jobNo, lotNo);
+      if (asLotResult) return { inboundId: asLotResult, providedIdType: 'lot' };
+      
+      return null;
+    }
+
     if (isLotId) {
       // If lotId is provided, find corresponding inboundId
       const lotQuery = `
@@ -68,20 +119,62 @@ const findRelatedId = async (providedId, isLotId) => {
   }
 };
 
-const upsertBundle = async (
-  idValue,
-  isInbound,
-  bundleNo,
-  weight,
-  meltNo,
-  relatedId = null,
-  transaction = null
-) => {
+const upsertBundle = async (idValue, isInbound, bundleNo, weight, meltNo, relatedId = null, jobNo = null, lotNo = null, transaction = null) => {
   const options = transaction ? { transaction } : {};
-  const idField = isInbound ? "inboundId" : "lotId";
-  const relatedIdField = isInbound ? "lotId" : "inboundId";
+  let idField = isInbound ? 'inboundId' : 'lotId';
+  let relatedIdField = isInbound ? 'lotId' : 'inboundId';
 
   try {
+    // If we don't have the primary ID but have jobNo and lotNo, try to find it
+    if (!idValue && jobNo && lotNo) {
+      const findQuery = `
+        SELECT ${isInbound ? '"inboundId"' : '"lotId"'} 
+        FROM ${isInbound ? 'public.inbounds' : 'public.lot'} 
+        WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+        LIMIT 1
+      `;
+      
+      const [result] = await db.sequelize.query(findQuery, {
+        replacements: { jobNo, lotNo },
+        type: db.sequelize.QueryTypes.SELECT,
+        ...options
+      });
+      
+      if (result) {
+        idValue = isInbound ? result.inboundId : result.lotId;
+      }
+    }
+
+    // If we don't have the related ID, try to find it
+    if (!relatedId) {
+      if (idValue) {
+        relatedId = await findRelatedId(idValue, !isInbound, jobNo, lotNo);
+      } else if (jobNo && lotNo) {
+        // Try to find the related ID directly using jobNo and lotNo
+        const findRelatedQuery = `
+          SELECT ${!isInbound ? '"inboundId"' : '"lotId"'} 
+          FROM ${!isInbound ? 'public.inbounds' : 'public.lot'} 
+          WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+          LIMIT 1
+        `;
+        
+        const [relatedResult] = await db.sequelize.query(findRelatedQuery, {
+          replacements: { jobNo, lotNo },
+          type: db.sequelize.QueryTypes.SELECT,
+          ...options
+        });
+        
+        if (relatedResult) {
+          relatedId = !isInbound ? relatedResult.inboundId : relatedResult.lotId;
+        }
+      }
+    }
+
+    // Validate we have at least one ID
+    if (!idValue && !relatedId) {
+      throw new Error('Cannot upsert bundle - neither primary ID nor related ID is available');
+    }
+
     // First try to update existing bundle
     const updateQuery = `
       UPDATE public.inboundbundles 
@@ -278,18 +371,13 @@ const updateLotActualWeight = async (
 };
 
 // Modified saveInboundWithBundles
-const saveInboundWithBundles = async (
-  inboundId,
-  actualWeight,
-  bundles,
-  strictValidation = false
-) => {
+const saveInboundWithBundles = async (inboundId, actualWeight, bundles, strictValidation = false, jobNo = null, lotNo = null) => {
   const transaction = await db.sequelize.transaction();
 
   try {
-    // Find related lotId
-    const relatedLotId = await findRelatedId(inboundId, false);
-
+    // Find related lotId, using jobNo and lotNo if inboundId is null
+    const relatedLotId = await findRelatedId(inboundId, false, jobNo, lotNo);
+    
     // Upsert all bundles first
     const savedBundles = [];
     for (const bundle of bundles) {
@@ -300,6 +388,8 @@ const saveInboundWithBundles = async (
         bundle.weight,
         bundle.meltNo,
         relatedLotId,
+        jobNo,
+        lotNo,
         transaction
       );
       if (savedBundle) savedBundles.push(savedBundle);
@@ -380,37 +470,13 @@ const saveInboundWithBundles = async (
 };
 
 // combination of the lotId and inboundId, has the related Id
-const saveLotWithBundles = async (
-  lotId,
-  actualWeight,
-  bundles,
-  strictValidation = false
-) => {
+const saveLotWithBundles = async (lotId, actualWeight, bundles, strictValidation = false, jobNo = null, lotNo = null) => {
   const transaction = await db.sequelize.transaction();
 
   try {
-    // Only validate all bundles are filled if strictValidation is true
-    if (strictValidation) {
-      const incompleteBundles = bundles.filter(
-        (b) => !b.weight || b.weight <= 0 || !b.meltNo || b.meltNo.trim() === ""
-      );
-
-      if (incompleteBundles.length > 0) {
-        throw new Error(
-          `Cannot set isWeighted=true - incomplete bundles: ${incompleteBundles
-            .map((b) => b.bundleNo)
-            .join(", ")}`
-        );
-      }
-
-      if (bundles.length === 0) {
-        throw new Error("Cannot set isWeighted=true - no bundles provided");
-      }
-    }
-
-    // Find related inboundId
-    const relatedInboundId = await findRelatedId(lotId, true);
-
+    // Find related inboundId, using jobNo and lotNo if lotId is null
+    const relatedInboundId = await findRelatedId(lotId, true, jobNo, lotNo);
+    
     // Upsert bundles first
     const savedBundles = [];
     for (const bundle of bundles) {
@@ -421,6 +487,8 @@ const saveLotWithBundles = async (
         bundle.weight,
         bundle.meltNo,
         relatedInboundId,
+        jobNo,
+        lotNo,
         transaction
       );
       if (savedBundle) {
@@ -488,69 +556,6 @@ const getBundlesIfWeighted = async (
     throw error;
   }
 };
-
-// by joblvl
-// const checkIncompleteBundles = async (inboundId, strictValidation = false) => {
-//   try {
-//     console.log(`[checkIncompleteBundles] Starting check for inboundId: ${inboundId}, strictValidation: ${strictValidation}`);
-
-//     // Step 1: Get all bundles
-//     const bundles = await getBundlesIfWeighted(inboundId, true, strictValidation);
-//     console.log(`[checkIncompleteBundles] Found ${bundles.length} bundles for inboundId: ${inboundId}`);
-
-//     // Step 2: Get ALL lotIds related to inboundId
-//     const lotResults = await db.sequelize.query(
-//       `SELECT "lotId", "lotNo" FROM public.lot WHERE "inboundId" = :inboundId`,
-//       { replacements: { inboundId }, type: db.sequelize.QueryTypes.SELECT }
-//     );
-//     console.log(`[checkIncompleteBundles] Found ${lotResults.length} lots for inboundId: ${inboundId}`);
-
-//     // Step 3: Group bundles by lotId and check incompleteness
-//     let incompleteLotNos = [];
-//     for (const lot of lotResults) {
-//       const lotBundles = bundles.filter(b => b.lotId === lot.lotId);
-
-//       let incompleteWeight = 0;
-//       let incompleteMeltNo = 0;
-//       const totalBundles = lotBundles.length;
-
-//       lotBundles.forEach(bundle => {
-//         const hasWeight = bundle.weight && bundle.weight > 0;
-//         const hasMeltNo = bundle.meltNo && bundle.meltNo.trim() !== '';
-//         if (!hasWeight) incompleteWeight++;
-//         if (!hasMeltNo) incompleteMeltNo++;
-//       });
-
-//       const isIncompleteLot = strictValidation
-//         ? incompleteWeight > 0 || incompleteMeltNo > 0
-//         : (incompleteWeight > 0 && incompleteWeight < totalBundles) ||
-//           (incompleteMeltNo > 0 && incompleteMeltNo < totalBundles);
-
-//       if (isIncompleteLot) {
-//         incompleteLotNos.push(lot.lotNo);
-//       }
-//     }
-
-//     // Step 4: Build final result
-//     const isInboundIncomplete = incompleteLotNos.length > 0;
-//     const result = {
-//       isIncomplete: isInboundIncomplete,
-//       details: {
-//         totalBundles: bundles.length,
-//         incompleteLotCount: incompleteLotNos.length,
-//       },
-//       inboundId,
-//       incompleteLotNos // NEW FIELD
-//     };
-
-//     console.log(`[checkIncompleteBundles] Final result for inboundId ${inboundId}:`, JSON.stringify(result, null, 2));
-//     return result;
-
-//   } catch (error) {
-//     console.error(`[checkIncompleteBundles] Error for inboundId ${inboundId}:`, error);
-//     throw error;
-//   }
-// };
 
 const checkIncompleteBundles = async (inboundId, strictValidation = false) => {
   try {
@@ -688,6 +693,7 @@ const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
     throw error;
   }
 };
+
 
 const duplicateActualWeightBundles = async (
   sourceExWLot,

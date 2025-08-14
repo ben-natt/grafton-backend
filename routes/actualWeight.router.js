@@ -2,17 +2,15 @@ const express = require('express');
 const router = express.Router();
 const actualWeightModel = require("../models/actualWeight.model");
 
-// saveInboundWithBundles (updateInboundActualWeight) (updateLotActualWeight), saveLotWithBundles, getBundlesIfWeighted
-
 // Save actual weight for inbound or lot
 router.post("/actual/save-weight", async (req, res) => {
-  const { inboundId, lotId, actualWeight, bundles, strictValidation } = req.body;
+  const { inboundId, lotId, jobNo, lotNo, actualWeight, bundles, strictValidation } = req.body;
   
   try {
-    // Validation
-    if (!inboundId && !lotId) {
+    // Validation - must have either IDs or jobNo/lotNo
+    if (!inboundId && !lotId && (!jobNo || !lotNo)) {
       return res.status(400).json({ 
-        error: "Either inboundId or lotId must be provided" 
+        error: "Either (inboundId or lotId) OR (jobNo and lotNo) must be provided" 
       });
     }
     
@@ -30,7 +28,7 @@ router.post("/actual/save-weight", async (req, res) => {
     
     if (!bundles || !Array.isArray(bundles) || bundles.length === 0) {
       return res.status(400).json({ 
-        error: "Bundles array is required" 
+        error: "Non-empty bundles array is required" 
       });
     }
 
@@ -41,15 +39,48 @@ router.post("/actual/save-weight", async (req, res) => {
         inboundId, 
         actualWeight, 
         bundles,
-        strictValidation // Pass the strictValidation flag
+        strictValidation
       );
     } else if (lotId) {
       result = await actualWeightModel.saveLotWithBundles(
         lotId, 
         actualWeight, 
         bundles,
-        strictValidation // Pass the strictValidation flag
+        strictValidation
       );
+    } else {
+      // Handle case where we only have jobNo and lotNo
+      // First try to find inboundId
+      const inboundResult = await actualWeightModel.findRelatedId(null, false, jobNo, lotNo);
+      
+      if (inboundResult) {
+        result = await actualWeightModel.saveInboundWithBundles(
+          inboundResult, 
+          actualWeight, 
+          bundles,
+          strictValidation,
+          jobNo,
+          lotNo
+        );
+      } else {
+        // If no inbound found, try to find lotId
+        const lotResult = await actualWeightModel.findRelatedId(null, true, jobNo, lotNo);
+        
+        if (lotResult) {
+          result = await actualWeightModel.saveLotWithBundles(
+            lotResult, 
+            actualWeight, 
+            bundles,
+            strictValidation,
+            jobNo,
+            lotNo
+          );
+        } else {
+          return res.status(404).json({ 
+            error: "No matching inbound or lot found for given jobNo and lotNo" 
+          });
+        }
+      }
     }
     
     res.status(200).json({
@@ -66,17 +97,48 @@ router.post("/actual/save-weight", async (req, res) => {
   }
 });
 
-// router
+// Get bundles (now supports jobNo/lotNo as alternative to IDs)
 router.post("/actual/get-bundles-if-weighted", async (req, res) => {
   try {
-    const { inboundId, lotId, strictValidation = false } = req.body;
+    const { inboundId, lotId, jobNo, lotNo, strictValidation = false } = req.body;
     
-    if (!inboundId && !lotId) {
-      return res.status(400).json({ error: "Either inboundId or lotId must be provided" });
+    // Validate we have either IDs or jobNo/lotNo
+    if (!inboundId && !lotId && (!jobNo || !lotNo)) {
+      return res.status(400).json({ 
+        error: "Either (inboundId or lotId) OR (jobNo and lotNo) must be provided" 
+      });
     }
 
-    const isInbound = inboundId !== undefined;
-    const idValue = isInbound ? inboundId : lotId;
+    let idValue, isInbound;
+    
+    if (inboundId) {
+      idValue = inboundId;
+      isInbound = true;
+    } else if (lotId) {
+      idValue = lotId;
+      isInbound = false;
+    } else {
+      // Try to find ID using jobNo and lotNo
+      // First try to find inboundId
+      const inboundResult = await actualWeightModel.findRelatedId(null, false, jobNo, lotNo);
+      
+      if (inboundResult) {
+        idValue = inboundResult;
+        isInbound = true;
+      } else {
+        // Try to find lotId
+        const lotResult = await actualWeightModel.findRelatedId(null, true, jobNo, lotNo);
+        
+        if (lotResult) {
+          idValue = lotResult;
+          isInbound = false;
+        } else {
+          return res.status(404).json({ 
+            error: "No matching inbound or lot found for given jobNo and lotNo" 
+          });
+        }
+      }
+    }
     
     const bundles = await actualWeightModel.getBundlesIfWeighted(
       idValue, 
@@ -84,8 +146,7 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
       strictValidation
     );
     
-    console.log(`Returning ${bundles.length} bundles`);
-    res.status(200).json(bundles); // Make sure bundles is an array
+    res.status(200).json(bundles);
   } catch (error) {
     console.error('Error in /get-bundles-if-weighted:', error);
     res.status(500).json({ error: error.message });
@@ -126,40 +187,45 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
         });
     }
 });
-
+// Check incomplete bundles (now supports jobNo/lotNo as alternative)
 router.post("/actual/check-incomplete", async (req, res) => {
   try {
-    console.log(`[POST /actual/check-incomplete] Request received`);
-    console.log(`[POST /actual/check-incomplete] Request body:`, JSON.stringify(req.body, null, 2));
+    const { inboundId, jobNo, lotNo, strictValidation = false } = req.body;
     
-    const { inboundId, strictValidation = false } = req.body;
-    
-    if (!inboundId) {
-      console.log(`[POST /actual/check-incomplete] ERROR - inboundId is missing`);
+    // Validate we have either inboundId or jobNo/lotNo
+    if (!inboundId && (!jobNo || !lotNo)) {
       return res.status(400).json({ 
-        error: "inboundId is required" 
+        error: "Either inboundId OR (jobNo and lotNo) must be provided" 
       });
     }
+
+    let actualInboundId = inboundId;
     
-    console.log(`[POST /actual/check-incomplete] Processing inboundId: ${inboundId}, strictValidation: ${strictValidation}`);
+    if (!actualInboundId) {
+      // Try to find inboundId using jobNo and lotNo
+      const inboundResult = await actualWeightModel.findRelatedId(null, false, jobNo, lotNo);
+      
+      if (!inboundResult) {
+        return res.status(404).json({ 
+          error: "No matching inbound found for given jobNo and lotNo" 
+        });
+      }
+      
+      actualInboundId = inboundResult;
+    }
     
     const result = await actualWeightModel.checkIncompleteBundles(
-      inboundId, 
+      actualInboundId, 
       strictValidation
     );
     
-    console.log(`[POST /actual/check-incomplete] Success - sending result:`, JSON.stringify(result, null, 2));
     res.status(200).json(result);
   } catch (error) {
-    console.error(`[POST /actual/check-incomplete] Error occurred:`, error);
-    console.error(`[POST /actual/check-incomplete] Error stack:`, error.stack);
+    console.error('Error in /check-incomplete:', error);
     res.status(500).json({ 
       error: error.message || "Internal server error" 
     });
   }
 });
-
-
-
 
 module.exports = router;
