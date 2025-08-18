@@ -1,11 +1,6 @@
 const db = require("../database");
 
 const confirmSelectedInbounds = async (selectedInboundIds, transaction) => {
-  console.log(
-    `MODEL (confirmSelectedInbounds): Updating selectedInboundIds: ${selectedInboundIds.join(
-      ", "
-    )}`
-  );
   try {
     const query = `
       UPDATE public.selectedinbounds
@@ -18,17 +13,12 @@ const confirmSelectedInbounds = async (selectedInboundIds, transaction) => {
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
     });
-    console.log("MODEL (confirmSelectedInbounds): Update successful.");
   } catch (error) {
-    console.error("MODEL ERROR in confirmSelectedInbounds:", error);
     throw error;
   }
 };
 
 const getConfirmationDetailsById = async (selectedInboundId) => {
-  console.log(
-    `MODEL (getConfirmationDetailsById): Fetching details for ID: ${selectedInboundId}`
-  );
   try {
     const query = `
   SELECT
@@ -66,12 +56,8 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
       plain: true,
     });
 
-    console.log("MODEL (getConfirmationDetailsById): Retrieved data:");
-    console.log(JSON.stringify(result, null, 2));
-
     return result;
   } catch (error) {
-    console.error("MODEL ERROR in getConfirmationDetailsById:", error);
     throw error;
   }
 };
@@ -80,9 +66,6 @@ const getGrnDetailsForSelection = async (
   scheduleOutboundId,
   selectedInboundIds
 ) => {
-  console.log(
-    `MODEL (getGrnDetailsForSelection): Fetching for scheduleOutboundId: ${scheduleOutboundId}`
-  );
   try {
     const outboundJobNo = `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
 
@@ -98,9 +81,6 @@ const getGrnDetailsForSelection = async (
     });
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
     const grnNo = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
-    console.log(
-      `MODEL (getGrnDetailsForSelection): Generated GRN No: ${grnNo}`
-    );
 
     const lotsQuery = `
   SELECT
@@ -131,9 +111,6 @@ const getGrnDetailsForSelection = async (
       console.log("MODEL (getGrnDetailsForSelection): No lots found.");
       return null;
     }
-    console.log(
-      `MODEL (getGrnDetailsForSelection): Found ${lots.length} lots.`
-    );
 
     const aggregateDetails = (key) =>
       [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
@@ -173,18 +150,13 @@ const getGrnDetailsForSelection = async (
         grossWeight: lot.grossWeight,
       })),
     };
-    console.log(
-      "MODEL (getGrnDetailsForSelection): Successfully aggregated details."
-    );
     return result;
   } catch (error) {
-    console.error("MODEL ERROR in getGrnDetailsForSelection:", error);
     throw error;
   }
 };
 
 const getOperators = async () => {
-  console.log("MODEL (getOperators): Fetching operators.");
   try {
     const query = `
       SELECT 
@@ -198,28 +170,18 @@ const getOperators = async () => {
     const users = await db.sequelize.query(query, {
       type: db.sequelize.QueryTypes.SELECT,
     });
-    console.log(`MODEL (getOperators): Found ${users.length} operators.`);
     return users;
   } catch (error) {
-    console.error("MODEL ERROR in getOperators:", error);
     throw error;
   }
 };
 
 const createGrnAndTransactions = async (formData) => {
-  console.log("MODEL (createGrnAndTransactions): Starting transaction.");
   const { selectedInboundIds } = formData;
   const t = await db.sequelize.transaction();
 
   try {
-    console.log(
-      "MODEL (createGrnAndTransactions): 1. Confirming selected inbounds..."
-    );
     await confirmSelectedInbounds(selectedInboundIds, t);
-
-    console.log(
-      "MODEL (createGrnAndTransactions): 2. Inserting into outbounds table..."
-    );
     const outboundInsertQuery = `
       INSERT INTO public.outbounds (
           "releaseDate", "driverName", "driverIdentityNo", "truckPlateNo",
@@ -240,14 +202,7 @@ const createGrnAndTransactions = async (formData) => {
     });
 
     const createdOutbound = outboundResult[0][0];
-    console.log(
-      "MODEL (createGrnAndTransactions): 2. Outbound record created with ID:",
-      createdOutbound.outboundId
-    );
 
-    console.log(
-      "MODEL (createGrnAndTransactions): 3. Fetching lot details for transactions..."
-    );
     const lotsDetailsQuery = `
       SELECT
           si."inboundId", si."scheduleOutboundId",
@@ -273,13 +228,7 @@ const createGrnAndTransactions = async (formData) => {
       type: db.sequelize.QueryTypes.SELECT,
       transaction: t,
     });
-    console.log(
-      `MODEL (createGrnAndTransactions): 3. Found ${lotsToProcess.length} lots to process for transactions.`
-    );
 
-    console.log(
-      "MODEL (createGrnAndTransactions): 4. Inserting outbound transactions..."
-    );
     for (const lot of lotsToProcess) {
       const transactionQuery = `
         INSERT INTO public.outboundtransactions (
@@ -308,14 +257,7 @@ const createGrnAndTransactions = async (formData) => {
         transaction: t,
       });
     }
-    console.log(
-      "MODEL (createGrnAndTransactions): 4. All transactions inserted."
-    );
-
     await t.commit();
-    console.log(
-      "MODEL (createGrnAndTransactions): Transaction committed successfully."
-    );
 
     return {
       createdOutbound: {
@@ -326,10 +268,6 @@ const createGrnAndTransactions = async (formData) => {
     };
   } catch (error) {
     await t.rollback();
-    console.error(
-      "MODEL ERROR in createGrnAndTransactions (Transaction rolled back):",
-      error
-    );
     throw error;
   }
 };
@@ -340,9 +278,6 @@ const updateOutboundWithPdfDetails = async (
   fileSize,
   grnPreviewImagePath
 ) => {
-  console.log(
-    `MODEL (updateOutboundWithPdfDetails): Updating outboundId ${outboundId} with PDF path: ${grnImagePath}, Preview path: ${grnPreviewImagePath}, size: ${fileSize}`
-  );
   try {
     const query = `
       UPDATE public.outbounds
@@ -361,11 +296,7 @@ const updateOutboundWithPdfDetails = async (
       },
       type: db.sequelize.QueryTypes.UPDATE,
     });
-    console.log(
-      `MODEL (updateOutboundWithPdfDetails): Successfully updated outboundId ${outboundId}.`
-    );
   } catch (error) {
-    console.error("MODEL ERROR in updateOutboundWithPdfDetails:", error);
     throw error;
   }
 };

@@ -9,11 +9,7 @@ async function generateGrnPdf(data) {
     try {
       await fs.access(templatePath);
     } catch (error) {
-      console.error(
-        "PDF SERVICE ERROR: Template file not found at path:",
-        templatePath
-      );
-      throw new Error("GRN Template.pdf not found.");
+      throw new Error("GRN Pdf not found.");
     }
 
     const pdfTemplateBytes = await fs.readFile(templatePath);
@@ -59,34 +55,17 @@ async function generateGrnPdf(data) {
       signatureName
     ) => {
       if (!base64 || typeof base64 !== "string" || base64.trim() === "") {
-        console.log(
-          `PDF SERVICE: Skipping ${signatureName} signature as it is empty.`
-        );
         return;
       }
-      console.log(
-        `PDF SERVICE: Embedding ${signatureName} signature. Base64 (first 30 chars): ${base64.substring(
-          0,
-          30
-        )}...`
-      );
+
       try {
         const pngImage = await pdfDoc.embedPng(Buffer.from(base64, "base64"));
         page.drawImage(pngImage, { x, y, width, height });
-        console.log(
-          `PDF SERVICE: Successfully embedded ${signatureName} signature.`
-        );
       } catch (e) {
-        console.error(
-          `--- PDF SERVICE ERROR: Failed to embed ${signatureName} signature. ---`
-        );
-        console.error(
-          `Error message: ${e.message}. The signature will be skipped.`
-        );
+        throw new Error(`Failed to embed Signature`);
       }
     };
 
-    console.log("PDF SERVICE: Drawing text fields...");
     drawText(data.ourReference, 115, 526, boldFont);
     drawText(data.grnNo, 300, 527, boldFont);
     drawText(formatDate(data.releaseDate), 300, 509, boldFont);
@@ -101,7 +80,6 @@ async function generateGrnPdf(data) {
     const rowHeight = 14;
     let totalBundles = 0;
 
-    console.log("PDF SERVICE: Drawing table rows...");
     for (const lot of data.lots) {
       if (startY < 270) break;
       drawText(lot.lotNo, 48, startY);
@@ -116,7 +94,6 @@ async function generateGrnPdf(data) {
       totalBundles += Number(lot.bundles || 0);
       startY -= rowHeight;
     }
-    console.log("PDF SERVICE: Finished drawing table rows.");
 
     drawText(totalBundles.toString(), 186, 254, boldFont);
     drawText(data.driverName, 32, 180, boldFont);
@@ -124,9 +101,7 @@ async function generateGrnPdf(data) {
     drawText(data.truckPlateNo, 217, 180, boldFont);
     drawText(data.warehouseStaff, 32, 112, boldFont);
     drawText(data.warehouseSupervisor, 217, 112, boldFont);
-    console.log("PDF SERVICE: Finished drawing text fields.");
 
-    console.log("PDF SERVICE: Embedding signatures...");
     await embedSignature(data.driverSignature, 310, 180, 60, 15, "Driver");
     await embedSignature(
       data.warehouseStaffSignature,
@@ -144,9 +119,7 @@ async function generateGrnPdf(data) {
       15,
       "Warehouse Supervisor"
     );
-    console.log("PDF SERVICE: Finished embedding signatures.");
 
-    console.log("PDF SERVICE: Saving PDF to bytes...");
     const pdfBytes = await pdfDoc.save();
     const grnDir = path.join(__dirname, "../grafton-backend/grn");
     const previewDir = path.join(grnDir, "preview");
@@ -162,12 +135,8 @@ async function generateGrnPdf(data) {
       `${previewImageFileName}.png`
     );
 
-    console.log(`PDF SERVICE: Writing PDF file to: ${outputPath}`);
     await fs.writeFile(outputPath, pdfBytes);
 
-    console.log("--- PDF SERVICE: PDF generation complete. ---");
-
-    console.log(`PDF SERVICE: Generating preview image for ${outputPath}`);
     let opts = {
       format: "png",
       out_dir: previewDir,
@@ -189,18 +158,11 @@ async function generateGrnPdf(data) {
         .catch(() => false)
     ) {
       await fs.rename(generatedImagePath, previewImagePath);
-      console.log(
-        `PDF SERVICE: Renamed ${generatedImagePath} to ${previewImagePath}`
-      );
     }
-
-    console.log(`PDF SERVICE: Preview image generated at ${previewImagePath}`);
-    console.log("--- PDF SERVICE: PDF and Image generation complete. ---");
 
     return { pdfBytes, outputPath, previewImagePath };
   } catch (error) {
-    console.error("--- PDF SERVICE FATAL ERROR during PDF generation: ---");
-    console.error(error);
+    console.error("ERROR during PDF generation");
     throw error;
   }
 }
