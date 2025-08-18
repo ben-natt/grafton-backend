@@ -76,7 +76,7 @@ const getInventory = async (filters) => {
                 JOIN
                     public.commodities c ON c."commodityId" = i."commodityId"
                 JOIN
-                    public.shapes s ON s."shapeId" = s."shapeId"
+                    public.shapes s ON s."shapeId" = i."shapeId"
                 LEFT JOIN public.exlmewarehouses elme ON elme."exLmeWarehouseId" = i."exLmeWarehouseId"
                 LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
                 LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"

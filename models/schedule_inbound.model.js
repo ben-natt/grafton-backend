@@ -189,6 +189,12 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: DataTypes.NOW,
       field: 'updatedAt',
     },
+      inbounddate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'inbounddate',
+  },
+
   }, {
     tableName: 'lot',
     timestamps: true,

@@ -88,6 +88,7 @@ exports.createScheduleInbound = async (req, res) => {
         await Lot.upsert({
           ...lot,
           scheduleInboundId: scheduleInboundId,
+          inbounddate: new Date(inboundDate),
         }, {
           transaction: transaction,
         });
