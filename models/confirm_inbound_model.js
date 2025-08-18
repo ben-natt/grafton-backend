@@ -218,7 +218,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           :exLmeWarehouseId, :exWarehouseWarrant, :inboundWarehouseId,
           :grossWeight, :netWeight, :actualWeight, false, false,
           false, 0, false, '', :userId, :processedId, 
-          (NOW() AT TIME ZONE 'Asia/Singapore'), (NOW() AT TIME ZONE 'Asia/Singapore'),
+          NOW(), NOW(),
           :brandId, (NOW() AT TIME ZONE 'Asia/Singapore'), :exWarehouseLot, 
           (NOW() AT TIME ZONE 'Asia/Singapore'), :exWarehouseLocationId
         )

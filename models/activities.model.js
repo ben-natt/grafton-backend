@@ -701,8 +701,11 @@ const getAllScheduleOutbound = async ({
       });
     }
     if (filters.startDate && filters.endDate) {
-      whereClauses.push(
-        `(o."releaseDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
+      whereClauses.push(`
+          (o."releaseDate" AT TIME ZONE 'Asia/Singapore')::date <= :endDate::date
+          AND
+          (o."releaseEndDate" AT TIME ZONE 'Asia/Singapore')::date >= :startDate::date
+        `
       );
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;

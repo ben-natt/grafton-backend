@@ -752,9 +752,6 @@ const duplicateActualWeightBundles = async (
     const sourceBundlesQuery = `
       SELECT * FROM public.inboundbundles
       WHERE "inboundId" = :sourceInboundId
-      AND "isRelabelled" = false 
-      AND "isRebundled" = false
-      AND "isRepackProvided" = false;
     `;
     const sourceBundles = await db.sequelize.query(sourceBundlesQuery, {
       replacements: { sourceInboundId },
