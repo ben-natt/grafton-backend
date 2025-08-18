@@ -97,59 +97,102 @@ router.post("/actual/save-weight", async (req, res) => {
   }
 });
 
-// Get bundles (now supports jobNo/lotNo as alternative to IDs)
+// Get bundles (with fallback logic: try inboundId first, then lotId if no bundles found)
 router.post("/actual/get-bundles-if-weighted", async (req, res) => {
   try {
     const { inboundId, lotId, jobNo, lotNo, strictValidation = false } = req.body;
     
-    // Validate we have either IDs or jobNo/lotNo
-    if (!inboundId && !lotId && (!jobNo || !lotNo)) {
-      return res.status(400).json({ 
-        error: "Either (inboundId or lotId) OR (jobNo and lotNo) must be provided" 
-      });
-    }
-
-    let idValue, isInbound;
+    let finalIdValue = null;
+    let isInbound = true;
+    let bundles = [];
+    let searchAttempts = [];
     
-    if (inboundId) {
-      idValue = inboundId;
+    // Priority 1: Check for inboundId
+    if (inboundId && inboundId !== 0) {
+      console.log(`Using provided inboundId: ${inboundId}`);
+      finalIdValue = inboundId;
       isInbound = true;
-    } else if (lotId) {
-      idValue = lotId;
+      
+      bundles = await actualWeightModel.getBundlesIfWeighted(finalIdValue, isInbound, strictValidation);
+      searchAttempts.push({ type: 'inboundId', id: finalIdValue, found: bundles.length });
+    }
+    // Priority 2: Check for lotId if inboundId not found/is 0 OR if no bundles found with inboundId
+    if ((!bundles || bundles.length === 0) && lotId && lotId !== 0) {
+      console.log(`${bundles.length === 0 ? 'No bundles found with inboundId, trying' : 'Using'} provided lotId: ${lotId}`);
+      finalIdValue = lotId;
       isInbound = false;
-    } else {
-      // Try to find ID using jobNo and lotNo
-      // First try to find inboundId
+      
+      bundles = await actualWeightModel.getBundlesIfWeighted(finalIdValue, isInbound, strictValidation);
+      searchAttempts.push({ type: 'lotId', id: finalIdValue, found: bundles.length });
+    }
+    
+    // Priority 3: Try to find using jobNo and lotNo if still no bundles found
+    if ((!bundles || bundles.length === 0) && jobNo && lotNo) {
+      console.log(`${bundles.length === 0 ? 'No bundles found with provided IDs, looking up' : 'Looking up'} using jobNo: ${jobNo}, lotNo: ${lotNo}`);
+      
+      // First try to find inboundId using jobNo and lotNo
       const inboundResult = await actualWeightModel.findRelatedId(null, false, jobNo, lotNo);
       
-      if (inboundResult) {
-        idValue = inboundResult;
+      if (inboundResult && inboundResult !== 0) {
+        console.log(`Found inboundId from jobNo/lotNo: ${inboundResult}`);
+        finalIdValue = inboundResult;
         isInbound = true;
+        
+        bundles = await actualWeightModel.getBundlesIfWeighted(finalIdValue, isInbound, strictValidation);
+        searchAttempts.push({ type: 'inboundId (from jobNo/lotNo)', id: finalIdValue, found: bundles.length });
+        
+        // If no bundles found with inboundId, try lotId
+        if (!bundles || bundles.length === 0) {
+          console.log(`No bundles found with inboundId ${finalIdValue}, trying to find lotId from jobNo/lotNo`);
+          const lotResult = await actualWeightModel.findRelatedId(null, true, jobNo, lotNo);
+          
+          if (lotResult && lotResult !== 0) {
+            console.log(`Found lotId from jobNo/lotNo: ${lotResult}`);
+            finalIdValue = lotResult;
+            isInbound = false;
+            
+            bundles = await actualWeightModel.getBundlesIfWeighted(finalIdValue, isInbound, strictValidation);
+            searchAttempts.push({ type: 'lotId (from jobNo/lotNo)', id: finalIdValue, found: bundles.length });
+          }
+        }
       } else {
-        // Try to find lotId
+        // If no inbound found, try to find lotId directly using jobNo and lotNo
+        console.log(`No inboundId found from jobNo/lotNo, trying to find lotId`);
         const lotResult = await actualWeightModel.findRelatedId(null, true, jobNo, lotNo);
         
-        if (lotResult) {
-          idValue = lotResult;
+        if (lotResult && lotResult !== 0) {
+          console.log(`Found lotId from jobNo/lotNo: ${lotResult}`);
+          finalIdValue = lotResult;
           isInbound = false;
-        } else {
-          return res.status(404).json({ 
-            error: "No matching inbound or lot found for given jobNo and lotNo" 
-          });
+          
+          bundles = await actualWeightModel.getBundlesIfWeighted(finalIdValue, isInbound, strictValidation);
+          searchAttempts.push({ type: 'lotId (from jobNo/lotNo)', id: finalIdValue, found: bundles.length });
         }
       }
     }
-    
-    const bundles = await actualWeightModel.getBundlesIfWeighted(
-      idValue, 
-      isInbound,
-      strictValidation
-    );
-    
-    res.status(200).json(bundles);
+
+    // Log all search attempts
+    // console.log('Search attempts:', searchAttempts);
+
+    if (!bundles || bundles.length === 0) {
+      console.log(`No bundles found after all attempts`);
+      return res.status(404).json({ 
+        error: "No bundles found after searching all possible IDs",
+        searchAttempts: searchAttempts,
+        finalSearchedId: finalIdValue,
+        finalSearchedType: isInbound ? 'inboundId' : 'lotId'
+      });
+    }
+
+    console.log(`Successfully found ${bundles.length} bundles with ${isInbound ? 'inboundId' : 'lotId'}: ${finalIdValue}`);
+    res.json(bundles);
+
   } catch (error) {
-    console.error('Error in /get-bundles-if-weighted:', error);
-    res.status(500).json({ error: error.message });
+    console.error("Error in get-bundles-if-weighted:", error);
+    res.status(500).json({ 
+      error: "Internal server error", 
+      details: error.message 
+    });
   }
 });
 

@@ -534,23 +534,49 @@ const getBundlesIfWeighted = async (
   isInbound,
   strictValidation = false
 ) => {
-  const idField = isInbound ? "inboundId" : "lotId";
-
   try {
-    // Remove the isWeighted check - fetch all bundles regardless
-    const query = `
-      SELECT * FROM inboundbundles
-      WHERE "${idField}" = ?
-      ORDER BY "bundleNo"
-    `;
+    let query;
+    let replacements;
+    
+    if (isInbound) {
+      // Direct inboundId lookup
+      console.log(`Searching bundles by inboundId: ${idValue}`);
+      query = `
+        SELECT * FROM inboundbundles
+        WHERE "inboundId" = ?
+        ORDER BY "bundleNo"
+      `;
+      replacements = [idValue];
+    } else {
+      // Direct lotId lookup
+      console.log(`Searching bundles by lotId: ${idValue}`);
+      query = `
+        SELECT * FROM inboundbundles
+        WHERE "lotId" = ?
+        ORDER BY "bundleNo"
+      `;
+      replacements = [idValue];
+    }
 
     const bundles = await db.sequelize.query(query, {
-      replacements: [idValue],
+      replacements: replacements,
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-    console.log(`Found ${bundles.length} bundles for ${idField}: ${idValue}`);
-    return bundles; // This should already be an array
+    console.log(`Found ${bundles.length} bundles for ${isInbound ? 'inboundId' : 'lotId'}: ${idValue}`);
+    
+    // Log some sample data if bundles found
+    if (bundles.length > 0) {
+      console.log(`Sample bundle data:`, {
+        bundleNo: bundles[0].bundleNo,
+        weight: bundles[0].weight,
+        meltNo: bundles[0].meltNo,
+        inboundId: bundles[0].inboundId,
+        lotId: bundles[0].lotId
+      });
+    }
+    
+    return bundles;
   } catch (error) {
     console.error("Error in getBundlesIfWeighted:", error);
     throw error;
