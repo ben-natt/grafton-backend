@@ -427,7 +427,8 @@ const findInboundTasksOffice = async (
     const replacements = {};
 
     if (filters.startDate && filters.endDate) {
-      whereClauses += ` AND (s."inboundDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`;
+      // Updated to use lot.inbounddate instead of scheduleinbounds.inboundDate
+      whereClauses += ` AND (l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`;
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
     }
@@ -462,12 +463,13 @@ const findInboundTasksOffice = async (
       replacements.hasWarning = filters.type === "Discrepancies";
     }
 
-    // Corrected JOIN condition: s."scheduleInboundId" = l."scheduleInboundId"
+    // Updated to use LEFT JOIN since inbounddate is now in lot table
+    // We still need users table for scheduledBy filter
     const countQuery = `
       SELECT COUNT(DISTINCT l."jobNo")::int
       FROM public.lot l
-      JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
-      JOIN public.users u ON s."userId" = u."userid"
+      LEFT JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
+      LEFT JOIN public.users u ON s."userId" = u."userid"
       WHERE ${whereClauses}
     `;
     const countResult = await db.sequelize.query(countQuery, {
@@ -477,15 +479,15 @@ const findInboundTasksOffice = async (
     });
     const totalCount = countResult.count;
 
-    // Corrected JOIN condition: s."scheduleInboundId" = l."scheduleInboundId"
+    // Updated to use lot.inbounddate for ordering
     const jobNoQuery = `
       SELECT l."jobNo"
       FROM public.lot l
-      JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
-      JOIN public.users u ON s."userId" = u."userid"
+      LEFT JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
+      LEFT JOIN public.users u ON s."userId" = u."userid"
       WHERE ${whereClauses}
       GROUP BY l."jobNo"
-      ORDER BY MIN(s."inboundDate") ASC
+      ORDER BY MIN(l."inbounddate") ASC
       LIMIT :pageSize OFFSET :offset
     `;
     const jobNosResult = await db.sequelize.query(jobNoQuery, {
@@ -498,11 +500,11 @@ const findInboundTasksOffice = async (
       return { totalCount, data: {} };
     }
 
-    // Corrected JOIN condition: s."scheduleInboundId" = l."scheduleInboundId"
+    // Updated to use lot.inbounddate instead of scheduleinbounds.inboundDate
     const tasksQuery = `
       SELECT
         l."jobNo",
-        TO_CHAR(s."inboundDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YYYY') AS "date",
+        TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YYYY') AS "date",
         l."lotId",
         LPAD(l."lotNo"::text, 2, '0') AS "lotNo",
         l."exWarehouseLot" AS "exWLot",
@@ -510,14 +512,14 @@ const findInboundTasksOffice = async (
         l.brand,
         l.shape,
         l."expectedBundleCount" AS quantity,
-        u.username AS "scheduledBy",
+        COALESCE(u.username, 'N/A') AS "scheduledBy",
         l.report AS "hasWarning",
         l."reportDuplicate" AS "isDuplicated"
       FROM public.lot l
-      JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
-      JOIN public.users u ON s."userId" = u."userid"
+      LEFT JOIN public.scheduleinbounds s ON s."scheduleInboundId" = l."scheduleInboundId"
+      LEFT JOIN public.users u ON s."userId" = u."userid"
       WHERE l."jobNo" IN (:jobNos) AND ${whereClauses}
-      ORDER BY s."inboundDate" ASC, LPAD(l."lotNo"::text, 2, '0') ASC, l.report DESC
+      ORDER BY l."inbounddate" ASC, LPAD(l."lotNo"::text, 2, '0') ASC, l.report DESC
     `;
 
     const tasksResult = await db.sequelize.query(tasksQuery, {
@@ -539,6 +541,53 @@ const findInboundTasksOffice = async (
     throw error;
   }
 };
+
+// Update lot inbounddate (updated to work with lot table) (edit functionality)
+const getLotInboundDate = async (jobNo, lotNo) => {
+  try {
+    const query = `
+      SELECT 
+        TO_CHAR("inbounddate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YYYY') AS "inboundDate"
+      FROM public.lot
+      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      ORDER BY "updatedAt" DESC
+      LIMIT 1;
+    `;
+    
+    const result = await db.sequelize.query(query, {
+      replacements: { jobNo, lotNo },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+
+    return result[0] || null;
+  } catch (error) {
+    console.error("Error fetching lot inbound date:", error);
+    throw error;
+  }
+};
+
+// Update lot inbounddate (specific to jobNo + lotNo) (edit functionality)
+const updateLotInboundDate = async (jobNo, lotNo, inboundDate) => {
+  try {
+    const query = `
+      UPDATE public.lot
+      SET "inbounddate" = :inboundDate, "updatedAt" = NOW()
+      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      RETURNING *;
+    `;
+    
+    const result = await db.sequelize.query(query, {
+      replacements: { jobNo, lotNo, inboundDate },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+
+    return result[0];
+  } catch (error) {
+    console.error("Error updating lot inbound date:", error);
+    throw error;
+  }
+};
+
 
 // ----- OUTBOUND ROUTES -------
 const findOutboundTasksOffice = async (
@@ -822,6 +871,9 @@ const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
   }
 };
 
+
+
+
 module.exports = {
   // Inbound
   getDetailsPendingTasks,
@@ -832,6 +884,8 @@ module.exports = {
   updateDuplicateStatus,
   pendingTasksUpdateQuantity,
   getReportSupervisorUsername,
+  updateLotInboundDate,
+  getLotInboundDate,
   // Outbound
   findScheduleIdPendingOutbound,
   getDetailsPendingOutbound,
