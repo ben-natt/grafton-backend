@@ -105,7 +105,6 @@ const createGrnAndTransactions = async (req, res) => {
         ? `${scheduleInfo.containerNo} / ${scheduleInfo.sealNo}`
         : "N/A";
 
-    // Helper to parse float and fix to decimal places, handling null/NaN
     const parseAndFix = (val, decimals = 2) => {
       const num = parseFloat(val);
       return !isNaN(num) ? num.toFixed(decimals) : (0).toFixed(decimals);
@@ -113,12 +112,12 @@ const createGrnAndTransactions = async (req, res) => {
 
     const pdfData = {
       ...grnDataFromRequest,
-      isWeightVisible: grnDataFromRequest.isWeightVisible, // Pass visibility flag
+      isWeightVisible: grnDataFromRequest.isWeightVisible,
       ourReference: grnDataFromRequest.outboundJobNo,
       grnNo: createdOutbound.grnNo,
       releaseDate: new Date().toLocaleDateString("en-GB", {
         day: "2-digit",
-        month: "short", // PDF date format remains 'MMM'
+        month: "short",
         year: "numeric",
       }),
       warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "N/A",
@@ -135,7 +134,6 @@ const createGrnAndTransactions = async (req, res) => {
       lots: lotsForPdf.map((lot) => ({
         lotNo: `${lot.jobNo}-${lot.lotNo}`,
         bundles: lot.noOfBundle,
-        // Use helper to prevent NaN values in PDF
         grossWeightMt: parseAndFix(lot.grossWeight, 2),
         netWeightMt: parseAndFix(lot.netWeight, 2),
         actualWeightMt: parseAndFix(lot.actualWeight, 2),
@@ -177,10 +175,20 @@ const createGrnAndTransactions = async (req, res) => {
   } catch (error) {
     console.error(error);
     if (!res.headersSent) {
-      res.status(500).json({
-        error: "Failed to create GRN.",
-        details: error.message,
-      });
+      // Check for our custom duplicate error
+      if (error.isDuplicate) {
+        return res.status(409).json({
+          // 409 Conflict is a good status code for this
+          error: "GRN Generation Failed",
+          details: error.message,
+        });
+      } else {
+        // Added else to prevent sending two responses
+        res.status(500).json({
+          error: "Failed to create GRN.",
+          details: error.message,
+        });
+      }
     }
   }
 };
