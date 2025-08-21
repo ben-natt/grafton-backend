@@ -247,7 +247,7 @@ const getLotSummary = async (jobNo, lotNo) => {
         s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
         i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
         exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse",
-        i."createdAt" AS "InboundDate", TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
+        i."createdAt" AS "InboundDate", TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
         si."createdAt" AS "CreatedAt",
         i."grossWeight" AS "GrossWeight", i."netWeight" AS "NetWeight", i."actualWeight" AS "ActualWeight",
         i."isRebundled" AS "IsRebundled", i."isRepackProvided" AS "IsRepackProvided",
@@ -508,7 +508,7 @@ const createScheduleOutbound = async (scheduleData, userId) => {
   try {
     const {
       releaseStartDate, // Used as releaseDate
-      releaseEndDate, // Used as releaseEndDate
+      releaseEndDate,
       lotReleaseWeight,
       exportDate,
       stuffingDate,
@@ -568,9 +568,13 @@ const createScheduleOutbound = async (scheduleData, userId) => {
     if (selectedLots?.length > 0) {
       const selectedInboundsQuery = `
         INSERT INTO public.selectedinbounds (
-          "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt"
+          "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt",
+          "releaseDate", "releaseEndDate", "exportDate", "deliveryDate"
         )
-        VALUES (:inboundId, :scheduleOutboundId, :lotNo, :jobNo, NOW(), NOW())
+        VALUES (
+          :inboundId, :scheduleOutboundId, :lotNo, :jobNo, NOW(), NOW(),
+          :releaseDate, :releaseEndDate, :exportDate, :deliveryDate
+        )
         ON CONFLICT ("jobNo", "lotNo") DO NOTHING;
       `;
 
@@ -599,12 +603,18 @@ const createScheduleOutbound = async (scheduleData, userId) => {
         }
 
         await db.sequelize.query(selectedInboundsQuery, {
+          // MODIFICATION START: Added new date properties to the replacements object
           replacements: {
             inboundId,
             scheduleOutboundId,
             lotNo,
             jobNo,
+            releaseDate: releaseStartDate,
+            releaseEndDate: releaseEndDate || null,
+            exportDate: exportDate || null,
+            deliveryDate: deliveryDate || null,
           },
+          // MODIFICATION END
           type: db.sequelize.QueryTypes.INSERT,
           transaction: t,
         });

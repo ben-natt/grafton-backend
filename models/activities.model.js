@@ -436,7 +436,7 @@ const getInboundRecordByInboundId = async (inboundId) => {
           s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
           i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
           exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse",
-          si."inboundDate" AS "InboundDate", si."createdAt" AS "ScheduleInboundDate", i."createdAt" AS "CreatedAt",
+          l."inbounddate" AS "InboundDate", si."createdAt" AS "ScheduleInboundDate", i."createdAt" AS "CreatedAt",
           i."grossWeight" AS "GrossWeight", i."netWeight" AS "NetWeight", i."actualWeight" AS "ActualWeight",
           i."isRebundled" AS "IsRebundled", i."isRepackProvided" AS "IsRepackProvided",
           u_scheduler."username" AS "ScheduledBy",
@@ -475,11 +475,12 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
           o."outboundTransactionId", o."commodity" AS "Commodity", o."brands" AS "Brand",
           o."shape" AS "Shape", o."exLmeWarehouse" AS "ExLMEWarehouse",
           o."exWarehouseLot" AS "ExWarehouseLot", o."releaseWarehouse" AS "ReleaseWarehouse",
-          o."releaseDate" AS "ReleaseDate", 
+          si."releaseDate" AS "ReleaseDate",
+          si."releaseEndDate" AS "ReleaseEndDate", 
           so."createdAt" AS "ScheduleOutboundDate",
           so."containerNo" AS "ContainerNo",
           so."sealNo" AS "SealNo",
-          o."exportDate" AS "ExportDate", so."deliveryDate" AS "DeliveryDate",
+          si."exportDate" AS "ExportDate", si."deliveryDate" AS "DeliveryDate",
           o."stuffingDate" AS "StuffingDate",
           o."createdAt" AS "CreatedAt",
           o."lotReleaseWeight" AS "TotalReleaseWeight",
@@ -548,7 +549,7 @@ const getAllScheduleInbound = async ({
     }
     if (filters.startDate && filters.endDate) {
       whereClauses.push(
-        `(si."inboundDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
+        `(l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
       );
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
@@ -596,7 +597,7 @@ const getAllScheduleInbound = async ({
 
     // --- SORTING LOGIC --- (remains the same)
     const sortableColumns = {
-      Date: 'si."inboundDate"',
+      Date: 'l."inbounddate"',
       "Lot No.": 'l."lotNo"',
       "Ex-Warehouse Lots": 'l."exWarehouseLot"',
       Metal: 'l."commodity"',
@@ -606,7 +607,7 @@ const getAllScheduleInbound = async ({
       "Scheduled By": 'u1."username"',
     };
 
-    let orderByClause = 'ORDER BY si."inboundDate" DESC NULLS LAST'; // Default sort
+    let orderByClause = 'ORDER BY l."inbounddate" DESC NULLS LAST'; // Default sort
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortColumn = sortableColumns[filters.sortBy];
       const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
@@ -637,7 +638,7 @@ const getAllScheduleInbound = async ({
     // MODIFIED: Data query with pagination
     const dataQuery = `SELECT
                       l."lotId" AS id,
-                      TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+                      TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
                       l."jobNo" AS "Job No",
                       l."lotNo" AS "Lot No",
                       l."exWarehouseLot" AS "Ex-W Lot",
@@ -704,9 +705,9 @@ const getAllScheduleOutbound = async ({
     }
     if (filters.startDate && filters.endDate) {
       whereClauses.push(`
-          (o."releaseDate" AT TIME ZONE 'Asia/Singapore')::date <= :endDate::date
+          (si."releaseDate" AT TIME ZONE 'Asia/Singapore')::date <= :endDate::date
           AND
-          (o."releaseEndDate" AT TIME ZONE 'Asia/Singapore')::date >= :startDate::date
+          (si."releaseEndDate" AT TIME ZONE 'Asia/Singapore')::date >= :startDate::date
         `
       );
       replacements.startDate = filters.startDate;
@@ -799,8 +800,8 @@ const getAllScheduleOutbound = async ({
     const total = parseInt(totalResult[0].count, 10);
 
     const dataQuery = `SELECT 
-        TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-        TO_CHAR(o."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseEndDate",
+        TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+        TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseEndDate",
         si."inboundId" AS id,
         i."jobNo" AS "Job No",
         i."lotNo" AS "Lot No",
@@ -852,7 +853,7 @@ const getScheduleInboundRecordByLotId = async (lotId) => {
           l."isRebundled",
           u1."username" AS "ScheduledBy",
           u2."username" AS "ProcessedBy",
-          TO_CHAR(si."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
+          TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
           TO_CHAR(i."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
           TO_CHAR(si."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2"
         FROM public.lot l
@@ -892,11 +893,11 @@ const getScheduleOutboundRecordById = async (id) => {
         i."exWarehouseWarrant" AS "ExWarehouseWarrant",
         so."releaseWarehouse" AS "ReleaseWarehouse",
         TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleOutboundDate",
-        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
-        TO_CHAR(so."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseEndDate",
-        TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
+        TO_CHAR(selin."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseDate",
+        TO_CHAR(selin."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ReleaseEndDate",
+        TO_CHAR(selin."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ExportDate",
         TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "StuffingDate",
-        TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
+        TO_CHAR(selin."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
         i."netWeight" AS "TotalReleaseWeight",
         so."storageReleaseLocation" AS "StorageReleaseLocation",
         so."transportVendor" AS "TransportVendor",
@@ -904,7 +905,7 @@ const getScheduleOutboundRecordById = async (id) => {
         so."sealNo" AS "SealNo",
         scheduler."username" AS "ScheduledBy",
         processor."username" AS "ProcessedBy",
-        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
+        TO_CHAR(selin."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
         TO_CHAR(ot."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
         TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2",
         
