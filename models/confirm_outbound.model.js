@@ -29,9 +29,9 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     so."transportVendor",
     so."exportDate",
     so."releaseDate",
-    so."deliveryDate",
-    so."stuffingDate",
-    so."containerNo",
+    TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "exportDate",
+    TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "deliveryDate",
+    TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "stuffingDate",
     so."sealNo",
     i."jobNo",
     i."lotNo",
@@ -90,7 +90,11 @@ const getGrnDetailsForSelection = async (
       w."exLmeWarehouseName" AS "exLmeWarehouse",
       s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
       so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
-      so."outboundType", so."deliveryDate", so."exportDate", so."stuffingDate", so."containerNo", so."sealNo",
+      so."outboundType",
+      TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "deliveryDate", 
+      TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "exportDate", 
+      TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "stuffingDate", 
+      so."containerNo", so."sealNo",
       so."lotReleaseWeight",
       so."userId" AS "scheduledBy"
   FROM public.selectedinbounds si
@@ -176,11 +180,80 @@ const getOperators = async () => {
   }
 };
 
+const checkForDuplicateLots = async (lots, transaction) => {
+  try {
+    if (!lots || lots.length === 0) {
+      return false;
+    }
+
+    // Dynamically construct the WHERE clause to check for multiple (jobNo, lotNo) pairs.
+    // This creates a series of OR conditions like:
+    // WHERE ("jobNo" = :jobNo0 AND "lotNo" = :lotNo0) OR ("jobNo" = :jobNo1 AND "lotNo" = :lotNo1) ...
+    const whereConditions = lots
+      .map(
+        (_, index) => `("jobNo" = :jobNo${index} AND "lotNo" = :lotNo${index})`
+      )
+      .join(" OR ");
+
+    // Create a flat replacements object for Sequelize from the lots array.
+    const replacements = lots.reduce((acc, lot, index) => {
+      acc[`jobNo${index}`] = lot.jobNo;
+      acc[`lotNo${index}`] = lot.lotNo;
+      return acc;
+    }, {});
+
+    const query = `
+      SELECT 1 FROM public.outboundtransactions
+      WHERE ${whereConditions}
+      LIMIT 1;
+    `;
+
+    const result = await db.sequelize.query(query, {
+      replacements,
+      type: db.sequelize.QueryTypes.SELECT,
+      transaction,
+      plain: true,
+    });
+
+    return !!result; // Returns true if a record is found, otherwise false
+  } catch (error) {
+    console.error("Error checking for duplicate lots:", error);
+    throw new Error("Database error during duplicate lot check.");
+  }
+};
+
 const createGrnAndTransactions = async (formData) => {
   const { selectedInboundIds } = formData;
   const t = await db.sequelize.transaction();
 
   try {
+    // Fetch both jobNo and lotNo for the duplicate check
+    const lotsDetailsQueryForDuplicateCheck = `
+      SELECT i."jobNo", i."lotNo"
+      FROM public.selectedinbounds si
+      JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+      WHERE si."selectedInboundId" IN (:selectedInboundIds);
+    `;
+    const lotsToCheck = await db.sequelize.query(
+      lotsDetailsQueryForDuplicateCheck,
+      {
+        replacements: { selectedInboundIds },
+        type: db.sequelize.QueryTypes.SELECT,
+        transaction: t,
+      }
+    );
+
+    // Check for duplicates before proceeding
+    const duplicateExists = await checkForDuplicateLots(lotsToCheck, t);
+    if (duplicateExists) {
+      // Throw a specific error for duplicate lots.
+      const error = new Error(
+        "Duplicate Lot found. One or more lots have already been processed for outbound."
+      );
+      error.isDuplicate = true;
+      throw error;
+    }
+
     await confirmSelectedInbounds(selectedInboundIds, t);
     const outboundInsertQuery = `
       INSERT INTO public.outbounds (
@@ -267,7 +340,9 @@ const createGrnAndTransactions = async (formData) => {
       lotsForPdf: lotsToProcess,
     };
   } catch (error) {
+    // This single catch block will handle rollback for ANY error inside the try block.
     await t.rollback();
+    // Re-throw the error to be caught by the controller
     throw error;
   }
 };
@@ -308,4 +383,5 @@ module.exports = {
   getOperators,
   confirmSelectedInbounds,
   updateOutboundWithPdfDetails,
+  checkForDuplicateLots,
 };

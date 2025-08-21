@@ -123,6 +123,26 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true, // Can be null
       field: 'jobNo',
     },
+     releaseDate: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'releaseDate',
+  },
+  releaseEndDate: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'releaseEndDate',
+  },
+  exportDate: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'exportDate',
+  },
+  deliveryDate: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'deliveryDate',
+  },
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,

@@ -1,4 +1,3 @@
-
 const XLSX = require('xlsx');
 const { v4: uuidv4 } = require('uuid');
 const { sequelize, DataTypes } = require('../database');
@@ -9,21 +8,38 @@ const auth = require('../middleware/auth')
 
 function excelDateToJSDate(excelDate) {
   if (excelDate === null || excelDate === undefined || excelDate === '') return null;
+  
   let parsedDate;
+
+  // Handle string dates first
   if (typeof excelDate === 'string') {
+    const shortDateParts = excelDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+    if (shortDateParts) {
+      const month = parseInt(shortDateParts[1], 10) - 1; 
+      const day = parseInt(shortDateParts[2], 10);
+      let year = parseInt(shortDateParts[3], 10);
+      
+      year += (year < 70) ? 2000 : 1900; 
+      
+      parsedDate = new Date(year, month, day);
+      if (!isNaN(parsedDate.getTime())) return parsedDate;
+    }
+
+    // Fallback for other string formats like YYYY-MM-DD
     parsedDate = new Date(excelDate);
     if (!isNaN(parsedDate.getTime())) return parsedDate;
   }
-  if (typeof excelDate === 'number' || (typeof excelDate === 'string' && !isNaN(parseFloat(excelDate)))) {
-    const numValue = parseFloat(excelDate);
-    if (numValue > 0) {
-      const date = new Date(Date.UTC(1899, 11, 30));
-      date.setDate(date.getDate() + numValue);
-      return date;
-    }
+  
+  // Handle numeric Excel dates
+  if (typeof excelDate === 'number') {
+    const date = new Date(Date.UTC(1899, 11, 30));
+    date.setUTCDate(date.getUTCDate() + excelDate);
+    return date;
   }
-  return null;
+  
+  return null; // Return null if parsing fails
 }
+
 
 function toLocalYYYYMMDD(date) {
   if (!date) return null;
@@ -58,7 +74,6 @@ exports.uploadExcel = async (req, res) => {
 
     const headers = jsonData[0];
     const dataRows = jsonData.slice(1);
-    console.log('Headers:', headers);
     const processedLots = [];
     let totalLotsFound = 0;
 
@@ -96,6 +111,7 @@ exports.uploadExcel = async (req, res) => {
 
       if (masterInbound) {
         const releaseDateExcel = excelDateToJSDate(getCellValue('Release Date'));
+        const releaseEndDateExcel = excelDateToJSDate(getCellValue('Release End Date'));
         const exportDateExcel = excelDateToJSDate(getCellValue('Export Date'));
         const stuffingDateExcel = excelDateToJSDate(getCellValue('Stuffing Date'));
         const deliveryDateExcel = excelDateToJSDate(getCellValue('Delivery Date'));
@@ -111,10 +127,11 @@ exports.uploadExcel = async (req, res) => {
           quantity: masterInbound.noOfBundle,
           weight: masterInbound.netWeight,
           releaseDate: toLocalYYYYMMDD(releaseDateExcel),
+          releaseEndDate: releaseEndDateExcel ? toLocalYYYYMMDD(releaseEndDateExcel) : null,
           storageReleaseLocation: getCellValue('Storage Release Location')?.toString().trim() ?? null,
           releaseWarehouse: getCellValue('Release To Warehouse')?.toString().trim() ?? null,
           transportVendor: getCellValue('Transport Vendor')?.toString().trim() ?? null,
-          lotReleaseWeight:getCellValue('Lot Release Weight'),
+          lotReleaseWeight: masterInbound.netWeight,
           exportDate: toLocalYYYYMMDD(exportDateExcel),
           stuffingDate: toLocalYYYYMMDD(stuffingDateExcel),
           containerNo: getCellValue('Container No')?.toString().trim() ?? null,
@@ -154,9 +171,9 @@ exports.createScheduleOutbound = async (req, res) => {
 
   const {
     releaseDate,
+    releaseEndDate,
     storageReleaseLocation,
     releaseWarehouse,
-    lotReleaseWeight,
     transportVendor,
     exportDate,
     stuffingDate,
@@ -166,12 +183,19 @@ exports.createScheduleOutbound = async (req, res) => {
     selectedLots
   } = req.body;
 
-  // Validate required fields
-  if (!releaseDate || !storageReleaseLocation || !releaseWarehouse || lotReleaseWeight == null || !transportVendor || !Array.isArray(selectedLots) || selectedLots.length === 0) {
+  if (!releaseDate || !storageReleaseLocation || !releaseWarehouse || !transportVendor || !Array.isArray(selectedLots) || selectedLots.length === 0) {
     return res.status(400).json({
       message: 'Missing required data for scheduling outbound. Ensure all required fields are provided.'
     });
   }
+
+  // Calculate the total lot release weight from the selected lots
+  const totalLotReleaseWeight = selectedLots.reduce((total, lot) => {
+    const weight = parseFloat(lot.weight); // Corrected from lot.actualWeight
+    return total + (isNaN(weight) ? 0 : weight);
+  }, 0);
+  console.log('Total Lot Release Weight:', totalLotReleaseWeight);
+  console.log('Selected Lots:', selectedLots);
 
   const outboundType = (containerNo?.trim()?.length > 0) ? 'container' : 'flatbed';
   const transaction = await sequelize.transaction();
@@ -197,7 +221,7 @@ exports.createScheduleOutbound = async (req, res) => {
         replacements: {
           releaseDate: parseLocalDate(releaseDate),
           userId,
-          lotReleaseWeight: parseFloat(lotReleaseWeight),
+          lotReleaseWeight: totalLotReleaseWeight,
           outboundType,
           exportDate: parseLocalDate(exportDate),
           stuffingDate: parseLocalDate(stuffingDate),
@@ -231,13 +255,17 @@ exports.createScheduleOutbound = async (req, res) => {
         throw new Error(`Inbound record not found: Job No "${lot.jobNo}", Lot No "${lot.lotNo}"`);
       }
 
-      await SelectedInbounds.create({
-        scheduleOutboundId,
-        inboundId: inboundRecord.inboundId,
-        lotNo: lot.lotNo,
-        jobNo: lot.jobNo,
-        isOutbounded: false
-      }, { transaction });
+     await SelectedInbounds.create({
+      scheduleOutboundId,
+      inboundId: inboundRecord.inboundId,
+      lotNo: lot.lotNo,
+      jobNo: lot.jobNo,
+      isOutbounded: false,
+      releaseDate: parseLocalDate(releaseDate),
+      releaseEndDate: releaseEndDate ? parseLocalDate(releaseEndDate) : null,
+      exportDate: parseLocalDate(exportDate),
+      deliveryDate: parseLocalDate(deliveryDate),
+    }, { transaction });
     }
 
     await transaction.commit();

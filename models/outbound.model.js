@@ -114,8 +114,8 @@ const getAllScheduleOutbounds = async () => {
     try {
         const query = `
          SELECT 
-         TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-         TO_CHAR(o."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
+         TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+         TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
 		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
@@ -126,16 +126,18 @@ const getAllScheduleOutbounds = async () => {
 		i."grossWeight" AS "Gross Weight",
 		i."actualWeight" AS "Actual Weight",
         exlme."exLmeWarehouseName" AS "Ex-LME Warehouse",
-        o."releaseDate" AS "Release Date",
-        o."releaseEndDate" AS "Release End Date",
+        TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Release Date",
+        TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Release End Date",
         o."releaseWarehouse" AS "Release Warehouse",
-        o."deliveryDate" AS "Delivery Date",
+        TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Delivery Date",
         o."transportVendor" AS "Transport Vendor",
         o."createdAt" AS "Scheduled Outbound Date",
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."storageReleaseLocation" AS "Storage Release Location",
-        o."exportDate" AS "Export Date",
+        si."exportDate" AS "Export Date",
         o."stuffingDate" AS "Stuffing Date",
+        o."containerNo" AS "Container No",
+         o."sealNo" AS "Seal No",
 		u1."username" AS "Scheduled By",
         u2."username" AS "Processed By",
           (
@@ -155,7 +157,7 @@ const getAllScheduleOutbounds = async () => {
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
           ORDER BY
-                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
+                TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT
@@ -172,8 +174,8 @@ const getScheduleOutboundByDate = async (date) => {
     try {
         const query = `
                 SELECT 
-                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-         TO_CHAR(o."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
+        TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+         TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
 		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
@@ -186,13 +188,15 @@ const getScheduleOutboundByDate = async (date) => {
         exlme."exLmeWarehouseName" AS "Ex-LME Warehouse",
         o."releaseWarehouse" AS "Release Warehouse",
         o."createdAt" AS "Scheduled Outbound Date",
-        o."releaseDate" AS "Release Date",
-        o."releaseEndDate" AS "Release End Date",
-        o."deliveryDate" AS "Delivery Date",
+        TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Release Date",
+        TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Release End Date",
+        TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Delivery Date",
         o."transportVendor" AS "Transport Vendor",
         o."lotReleaseWeight" AS "Lot Release Weight",
-        o."exportDate" AS "Export Date",
+        si."exportDate" AS "Export Date",
     o."stuffingDate" AS "Stuffing Date",
+    o."containerNo" AS "Container No",
+    o."sealNo" AS "Seal No",
         o."storageReleaseLocation" AS "Storage Release Location",
 		u1."username" AS "Scheduled By",
 		u2."username" AS "Processed By",
@@ -211,9 +215,9 @@ const getScheduleOutboundByDate = async (date) => {
         LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = si."inboundId"
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
-            WHERE TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
+            WHERE TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
         ORDER BY
-                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
+                TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
@@ -230,8 +234,8 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
     try {
         const query = `
              SELECT 
-             TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-         TO_CHAR(o."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
+             TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+         TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
 		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
@@ -242,15 +246,17 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
 		i."grossWeight" AS "Gross Weight",
 		i."actualWeight" AS "Actual Weight",
         exlme."exLmeWarehouseName" AS "Ex-LME Warehouse",
-        o."releaseDate" AS "Release Date",
-        o."releaseEndDate" AS "Release End Date",
+        TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Release Date",
+        TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Release End Date",
         o."releaseWarehouse" AS "Release Warehouse",
         o."createdAt" AS "Scheduled Outbound Date",
-        o."deliveryDate" AS "Delivery Date",
+        TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "Delivery Date",
         o."transportVendor" AS "Transport Vendor",
         o."lotReleaseWeight" AS "Lot Release Weight",
         o."storageReleaseLocation" AS "Storage Release Location",
-        o."exportDate" AS "Export Date",
+        si."exportDate" AS "Export Date",
+        o."containerNo" AS "Container No",
+        o."sealNo" AS "Seal No",
         o."stuffingDate" AS "Stuffing Date",
 		u1."username" AS "Scheduled By",
 		u2."username" AS "Processed By",
@@ -269,9 +275,9 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
         LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = si."inboundId"
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
-            WHERE TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
+            WHERE TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
         ORDER BY
-                TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
+                TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
         const result = await db.sequelize.query(query, {
             type: db.sequelize.QueryTypes.SELECT,
