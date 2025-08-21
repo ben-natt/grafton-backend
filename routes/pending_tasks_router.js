@@ -321,6 +321,69 @@ router.post("/tasks-outbound-office", async (req, res) => {
   }
 });
 
+// Get outbound dates for a specific lot
+router.post("/lot-outbound/get", async (req, res) => {
+  const { jobNo, lotNo } = req.body;
+
+  if (!jobNo || !lotNo) {
+    return res.status(400).json({ 
+      error: "jobNo and lotNo are required in the request body." 
+    });
+  }
+
+  try {
+    const result = await pendingTasksModel.getLotOutboundDates(jobNo, lotNo);
+
+    if (!result) {
+      return res.status(404).json({ error: "Lot not found" });
+    }
+
+    res.status(200).json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch outbound dates." });
+  }
+});
+
+
+// Update outbound dates for a specific lot
+router.post("/lot-outbound/update", async (req, res) => {
+  const { jobNo, lotNo, releaseDate, releaseEndDate, exportDate, deliveryDate } = req.body;
+
+  if (!jobNo || !lotNo || !releaseDate) {
+    return res.status(400).json({ 
+      error: "jobNo, lotNo, and releaseDate are required." 
+    });
+  }
+
+  try {
+    const existingLot = await pendingTasksModel.getLotOutboundDates(jobNo, lotNo);
+
+    if (!existingLot) {
+      return res.status(404).json({ error: "Lot not found" });
+    }
+
+    const result = await pendingTasksModel.updateLotOutboundDates(
+      jobNo,
+      lotNo,
+      releaseDate,
+      releaseEndDate,
+      exportDate,
+      deliveryDate
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Outbound dates updated successfully",
+      data: result
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to update outbound dates." });
+  }
+});
+
+
 // GET: Fetch outbound schedule dates by outbound jobNo
 router.get("/outbound-schedule/:outboundJobNo", async (req, res) => {
   try {
