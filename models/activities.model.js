@@ -766,7 +766,7 @@ const getAllScheduleOutbound = async ({
       "Scheduled By": 'u1."username"',
     };
 
-    let orderByClause = 'ORDER BY o."releaseDate" DESC NULLS LAST'; // Default sort
+    let orderByClause = 'ORDER BY si."releaseDate" DESC NULLS LAST'; // Default sort
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortColumn = sortableColumns[filters.sortBy];
       const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
