@@ -22,8 +22,18 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       `l."status" = 'Received'`,
       `l."report" = false`,
       `l."isConfirm" = true`,
-      // This join condition ensures we only get lots that haven't been weighed.
-      `i."isWeighted" IS NOT TRUE`,
+      // NEW LOGIC: A task is pending if it has never been weighed OR if it has been weighed
+      // but still has bundles with missing weight or melt numbers.
+      `(
+        i."isWeighted" IS NOT TRUE
+        OR
+        EXISTS (
+          SELECT 1
+          FROM public.inboundbundles ib
+          WHERE ib."inboundId" = i."inboundId"
+          AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
+        )
+      )`,
     ];
     const replacements = {};
 
@@ -101,7 +111,17 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
         AND l."status" = 'Received'
         AND l."report" = false
         AND l."isConfirm" = true
-        AND i."isWeighted" IS NOT TRUE
+        -- Ensure the details query uses the same pending logic
+        AND (
+          i."isWeighted" IS NOT TRUE
+          OR
+          EXISTS (
+            SELECT 1
+            FROM public.inboundbundles ib
+            WHERE ib."inboundId" = i."inboundId"
+            AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
+          )
+        )
       ORDER BY s."inboundDate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
@@ -110,7 +130,7 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-  // --- 5. Group the Flat Results into the Nested Structure for the Frontend ---
+    // --- 5. Group the Flat Results into the Nested Structure for the Frontend ---
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
