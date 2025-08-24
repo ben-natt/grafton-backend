@@ -894,7 +894,7 @@ const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
       UPDATE public.lot_reports
       SET "reportStatus" = :reportStatus,
           "resolvedBy" = :resolvedBy,
-          "resolvedOn" = (NOW() AT TIME ZONE 'Asia/Singapore'),
+          "resolvedOn" = NOW(),
           "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
       WHERE "lotId" = :lotId
         AND "reportStatus" = 'pending'
@@ -929,7 +929,7 @@ const updateDuplicateStatus = async ({ lotId, reportStatus, resolvedBy }) => {
       UPDATE public.lot_duplicate
       SET "reportStatus" = :reportStatus,
           "resolvedById" = :resolvedBy,
-          "resolvedOn" = (NOW() AT TIME ZONE 'Asia/Singapore'),
+          "resolvedOn" = NOW(),
           "isResolved" = true,
           "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
       WHERE "lotId" = :lotId

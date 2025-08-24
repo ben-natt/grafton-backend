@@ -14,7 +14,7 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
       const insertQuery = `
         INSERT INTO public.lot_reports 
         ("lotId", "reportedBy", "reportStatus", "reportedOn")
-        VALUES (:lotId, :reportedBy, 'pending', (NOW() AT TIME ZONE 'Asia/Singapore'))
+        VALUES (:lotId, :reportedBy, 'pending', NOW())
         RETURNING *;
       `;
 
@@ -62,7 +62,7 @@ const reportDuplication = async (lotIds, reportedBy = null) => {
       const insertQuery = `
         INSERT INTO public.lot_duplicate
         ("lotId", "reportedById", "reportedOn", "reportStatus")
-        VALUES (:lotId, :reportedBy, (NOW() AT TIME ZONE 'Asia/Singapore'), 'pending')
+        VALUES (:lotId, :reportedBy, NOW(), 'pending')
         RETURNING *;
       `;
 
@@ -194,6 +194,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       const inboundWarehouseId = await getIdByName("inboundwarehouses", "inboundWarehouseName", "inboundWarehouseId", lot.inboundWarehouse);
       const exWarehouseLocationId = await getIdByName("exwarehouselocations", "exWarehouseLocationName", "exWarehouseLocationId", lot.exWarehouseLocation);
 
+      // --- Update Lot status ---
       await db.sequelize.query(
         `UPDATE public.lot
          SET status = 'Received', "isConfirm" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
@@ -205,6 +206,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         }
       );
 
+      // --- Insert into inbounds ---
       const insertQuery = `
         INSERT INTO public.inbounds (
           "jobNo", "lotNo", "noOfBundle", "barcodeNo", "commodityId", "shapeId",
@@ -249,7 +251,45 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         transaction,
       });
 
-      insertedInbounds.push(result[0]);
+      const insertedInbound = result[0];
+      const bundleCheckQuery = `
+        SELECT 1 FROM public.inboundbundles WHERE "lotId" = :lotId LIMIT 1
+      `;
+      const bundleCheck = await db.sequelize.query(bundleCheckQuery, {
+        replacements: { lotId },
+        type: db.sequelize.QueryTypes.SELECT,
+        transaction,
+      });
+
+      if (bundleCheck.length > 0) {
+        // Update lot.isWeighted = true
+        await db.sequelize.query(
+          `UPDATE public.lot
+           SET "isWeighted" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
+           WHERE "lotId" = :lotId`,
+          {
+            replacements: { lotId },
+            type: db.sequelize.QueryTypes.UPDATE,
+            transaction,
+          }
+        );
+
+        // --- EXTRA STEP 2: Update inbounds.isWeighted = true if lot.isWeighted = true ---
+        await db.sequelize.query(
+          `UPDATE public.inbounds
+           SET "isWeighted" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
+           WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo`,
+          {
+            replacements: { jobNo: lot.jobNo, lotNo: lot.lotNo },
+            type: db.sequelize.QueryTypes.UPDATE,
+            transaction,
+          }
+        );
+
+        insertedInbound.isWeighted = true;
+      }
+
+      insertedInbounds.push(insertedInbound);
     }
 
     await transaction.commit();
@@ -260,6 +300,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
     throw error;
   }
 };
+
 
 module.exports = {
   reportConfirmation,
