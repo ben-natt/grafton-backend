@@ -1,7 +1,12 @@
 const db = require("../database");
 
 // Helper function to find related ID (inboundId if lotId is provided, or lotId if inboundId is provided)
-const findRelatedId = async (providedId, isLotId = null, jobNo = null, lotNo = null) => {
+const findRelatedId = async (
+  providedId,
+  isLotId = null,
+  jobNo = null,
+  lotNo = null
+) => {
   try {
     // If we have jobNo and lotNo but no providedId, try to find the ID first
     if ((providedId === null || providedId === undefined) && jobNo && lotNo) {
@@ -13,15 +18,15 @@ const findRelatedId = async (providedId, isLotId = null, jobNo = null, lotNo = n
           WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
           LIMIT 1
         `;
-        
+
         const [inbound] = await db.sequelize.query(inboundQuery, {
           replacements: { jobNo, lotNo },
           type: db.sequelize.QueryTypes.SELECT,
         });
-        
+
         if (inbound) return inbound.inboundId;
       }
-      
+
       if (isLotId === true || isLotId === null) {
         // Try to find lotId by jobNo and lotNo
         const lotQuery = `
@@ -30,27 +35,33 @@ const findRelatedId = async (providedId, isLotId = null, jobNo = null, lotNo = n
           WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
           LIMIT 1
         `;
-        
+
         const [lot] = await db.sequelize.query(lotQuery, {
           replacements: { jobNo, lotNo },
           type: db.sequelize.QueryTypes.SELECT,
         });
-        
+
         if (lot) return lot.lotId;
       }
-      
+
       return null;
     }
 
     // Rest of your existing findRelatedId logic...
     if (isLotId === null) {
       // Try both directions
-      const asInboundResult = await findRelatedId(providedId, false, jobNo, lotNo);
-      if (asInboundResult) return { lotId: asInboundResult, providedIdType: 'inbound' };
-      
+      const asInboundResult = await findRelatedId(
+        providedId,
+        false,
+        jobNo,
+        lotNo
+      );
+      if (asInboundResult)
+        return { lotId: asInboundResult, providedIdType: "inbound" };
+
       const asLotResult = await findRelatedId(providedId, true, jobNo, lotNo);
-      if (asLotResult) return { inboundId: asLotResult, providedIdType: 'lot' };
-      
+      if (asLotResult) return { inboundId: asLotResult, providedIdType: "lot" };
+
       return null;
     }
 
@@ -119,27 +130,37 @@ const findRelatedId = async (providedId, isLotId = null, jobNo = null, lotNo = n
   }
 };
 
-const upsertBundle = async (idValue, isInbound, bundleNo, weight, meltNo, relatedId = null, jobNo = null, lotNo = null, transaction = null) => {
+const upsertBundle = async (
+  idValue,
+  isInbound,
+  bundleNo,
+  weight,
+  meltNo,
+  relatedId = null,
+  jobNo = null,
+  lotNo = null,
+  transaction = null
+) => {
   const options = transaction ? { transaction } : {};
-  let idField = isInbound ? 'inboundId' : 'lotId';
-  let relatedIdField = isInbound ? 'lotId' : 'inboundId';
+  let idField = isInbound ? "inboundId" : "lotId";
+  let relatedIdField = isInbound ? "lotId" : "inboundId";
 
   try {
     // If we don't have the primary ID but have jobNo and lotNo, try to find it
     if (!idValue && jobNo && lotNo) {
       const findQuery = `
         SELECT ${isInbound ? '"inboundId"' : '"lotId"'} 
-        FROM ${isInbound ? 'public.inbounds' : 'public.lot'} 
+        FROM ${isInbound ? "public.inbounds" : "public.lot"} 
         WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
         LIMIT 1
       `;
-      
+
       const [result] = await db.sequelize.query(findQuery, {
         replacements: { jobNo, lotNo },
         type: db.sequelize.QueryTypes.SELECT,
-        ...options
+        ...options,
       });
-      
+
       if (result) {
         idValue = isInbound ? result.inboundId : result.lotId;
       }
@@ -153,26 +174,30 @@ const upsertBundle = async (idValue, isInbound, bundleNo, weight, meltNo, relate
         // Try to find the related ID directly using jobNo and lotNo
         const findRelatedQuery = `
           SELECT ${!isInbound ? '"inboundId"' : '"lotId"'} 
-          FROM ${!isInbound ? 'public.inbounds' : 'public.lot'} 
+          FROM ${!isInbound ? "public.inbounds" : "public.lot"} 
           WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
           LIMIT 1
         `;
-        
+
         const [relatedResult] = await db.sequelize.query(findRelatedQuery, {
           replacements: { jobNo, lotNo },
           type: db.sequelize.QueryTypes.SELECT,
-          ...options
+          ...options,
         });
-        
+
         if (relatedResult) {
-          relatedId = !isInbound ? relatedResult.inboundId : relatedResult.lotId;
+          relatedId = !isInbound
+            ? relatedResult.inboundId
+            : relatedResult.lotId;
         }
       }
     }
 
     // Validate we have at least one ID
     if (!idValue && !relatedId) {
-      throw new Error('Cannot upsert bundle - neither primary ID nor related ID is available');
+      throw new Error(
+        "Cannot upsert bundle - neither primary ID nor related ID is available"
+      );
     }
 
     // First try to update existing bundle
@@ -280,17 +305,21 @@ const updateInboundActualWeight = async (
     const updateQuery = `
       UPDATE public.inbounds 
       SET 
-        "actualWeight" = :actualWeight, 
+        "actualWeight" = :actualWeight,      
         "isWeighted" = :isWeighted,
         "updatedAt" = NOW()
       WHERE "inboundId" = :inboundId
       RETURNING *
     `;
 
+    // Convert actualWeight from kg to metric tons (divide by 1000)
+    // Frontend sends weight in kg, but database stores it in metric tons
+    const actualWeightInMetricTons = actualWeight / 1000;
+
     const result = await db.sequelize.query(updateQuery, {
       replacements: {
         inboundId,
-        actualWeight,
+        actualWeight: actualWeightInMetricTons,
         isWeighted,
       },
       type: db.sequelize.QueryTypes.UPDATE,
@@ -351,10 +380,14 @@ const updateLotActualWeight = async (
       RETURNING *
     `;
 
+    // Convert actualWeight from kg to metric tons (divide by 1000)
+    // Frontend sends weight in kg, but database stores it in metric tons
+    const actualWeightInMetricTons = actualWeight / 1000;
+
     const result = await db.sequelize.query(updateQuery, {
       replacements: {
         lotId,
-        actualWeight,
+        actualWeight: actualWeightInMetricTons,
         isWeighted,
       },
       type: db.sequelize.QueryTypes.UPDATE,
@@ -370,14 +403,21 @@ const updateLotActualWeight = async (
   }
 };
 
-// Modified saveInboundWithBundles
-const saveInboundWithBundles = async (inboundId, actualWeight, bundles, strictValidation = false, jobNo = null, lotNo = null) => {
+// combination of the lotId and inboundId, has the related Id
+const saveInboundWithBundles = async (
+  inboundId,
+  actualWeight,
+  bundles,
+  strictValidation = false,
+  jobNo = null,
+  lotNo = null
+) => {
   const transaction = await db.sequelize.transaction();
 
   try {
     // Find related lotId, using jobNo and lotNo if inboundId is null
     const relatedLotId = await findRelatedId(inboundId, false, jobNo, lotNo);
-    
+
     // Upsert all bundles first
     const savedBundles = [];
     for (const bundle of bundles) {
@@ -395,28 +435,9 @@ const saveInboundWithBundles = async (inboundId, actualWeight, bundles, strictVa
       if (savedBundle) savedBundles.push(savedBundle);
     }
 
-    // Check bundle completion status for isWeighted
-    const bundleCheckQuery = `
-      SELECT 
-        COUNT(*) as total_count,
-        SUM(CASE WHEN weight > 0 THEN 1 ELSE 0 END) as valid_weights,
-        SUM(CASE WHEN "meltNo" IS NOT NULL AND "meltNo" != '' THEN 1 ELSE 0 END) as valid_melt_nos
-      FROM public.inboundbundles 
-      WHERE "inboundId" = :inboundId
-    `;
-
-    const [bundleStatus] = await db.sequelize.query(bundleCheckQuery, {
-      replacements: { inboundId },
-      type: db.sequelize.QueryTypes.SELECT,
-      transaction,
-    });
-
-    // Determine isWeighted
-    const isWeighted = strictValidation
-      ? bundleStatus.total_count > 0 &&
-        bundleStatus.total_count === bundleStatus.valid_weights &&
-        bundleStatus.total_count === bundleStatus.valid_melt_nos
-      : true;
+    // NEW LOGIC: Always set isWeighted to true when updating actual weight.
+    // This marks the lot as having been started.
+    const isWeighted = true;
 
     // Update inbound
     const updateQuery = `
@@ -429,8 +450,16 @@ const saveInboundWithBundles = async (inboundId, actualWeight, bundles, strictVa
       RETURNING *
     `;
 
+    // Convert actualWeight from kg to metric tons (divide by 1000)
+    // Frontend sends weight in kg, but database stores it in metric tons
+    const actualWeightInMetricTons = actualWeight / 1000;
+
     const inboundResult = await db.sequelize.query(updateQuery, {
-      replacements: { inboundId, actualWeight, isWeighted },
+      replacements: {
+        inboundId,
+        actualWeight: actualWeightInMetricTons,
+        isWeighted,
+      },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
     });
@@ -447,7 +476,11 @@ const saveInboundWithBundles = async (inboundId, actualWeight, bundles, strictVa
         WHERE "lotId" = :lotId
       `,
         {
-          replacements: { lotId: relatedLotId, actualWeight, isWeighted },
+          replacements: {
+            lotId: relatedLotId,
+            actualWeight: actualWeightInMetricTons,
+            isWeighted,
+          },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
         }
@@ -470,13 +503,20 @@ const saveInboundWithBundles = async (inboundId, actualWeight, bundles, strictVa
 };
 
 // combination of the lotId and inboundId, has the related Id
-const saveLotWithBundles = async (lotId, actualWeight, bundles, strictValidation = false, jobNo = null, lotNo = null) => {
+const saveLotWithBundles = async (
+  lotId,
+  actualWeight,
+  bundles,
+  strictValidation = false,
+  jobNo = null,
+  lotNo = null
+) => {
   const transaction = await db.sequelize.transaction();
 
   try {
     // Find related inboundId, using jobNo and lotNo if lotId is null
     const relatedInboundId = await findRelatedId(lotId, true, jobNo, lotNo);
-    
+
     // Upsert bundles first
     const savedBundles = [];
     for (const bundle of bundles) {
@@ -537,7 +577,7 @@ const getBundlesIfWeighted = async (
   try {
     let query;
     let replacements;
-    
+
     if (isInbound) {
       // Direct inboundId lookup
       console.log(`Searching bundles by inboundId: ${idValue}`);
@@ -563,8 +603,12 @@ const getBundlesIfWeighted = async (
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-    console.log(`Found ${bundles.length} bundles for ${isInbound ? 'inboundId' : 'lotId'}: ${idValue}`);
-    
+    console.log(
+      `Found ${bundles.length} bundles for ${
+        isInbound ? "inboundId" : "lotId"
+      }: ${idValue}`
+    );
+
     // Log some sample data if bundles found
     if (bundles.length > 0) {
       console.log(`Sample bundle data:`, {
@@ -572,10 +616,10 @@ const getBundlesIfWeighted = async (
         weight: bundles[0].weight,
         meltNo: bundles[0].meltNo,
         inboundId: bundles[0].inboundId,
-        lotId: bundles[0].lotId
+        lotId: bundles[0].lotId,
       });
     }
-    
+
     return bundles;
   } catch (error) {
     console.error("Error in getBundlesIfWeighted:", error);
@@ -719,7 +763,6 @@ const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
     throw error;
   }
 };
-
 
 const duplicateActualWeightBundles = async (
   sourceExWLot,
