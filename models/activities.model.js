@@ -149,7 +149,7 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
-      Qty: 'i."noOfBundle"',
+      Bdl: 'i."noOfBundle"',
       "Scheduled By": 'u_scheduled."username"',
     };
 
@@ -297,7 +297,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       Metal: 'o."commodity"',
       Brand: 'o."brands"',
       Shape: 'o."shape"',
-      Qty: 'o."noOfBundle"',
+      Bdl: 'o."noOfBundle"',
       "Scheduled By": 'u_scheduled."username"',
     };
 
@@ -436,7 +436,7 @@ const getInboundRecordByInboundId = async (inboundId) => {
           s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
           i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
           exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse",
-          l."inbounddate" AS "InboundDate", si."createdAt" AS "ScheduleInboundDate", i."createdAt" AS "CreatedAt",
+          l."inbounddate" AS "InboundDate", si."createdAt" AS "ScheduleInboundDate", i."updatedAt" AS "CreatedAt",
           i."grossWeight" AS "GrossWeight", i."netWeight" AS "NetWeight", i."actualWeight" AS "ActualWeight",
           i."isRebundled" AS "IsRebundled", i."isRepackProvided" AS "IsRepackProvided",
           u_scheduler."username" AS "ScheduledBy",
@@ -603,7 +603,7 @@ const getAllScheduleInbound = async ({
       Metal: 'l."commodity"',
       Brand: 'l."brand"',
       Shape: 'l."shape"',
-      Quantity: 'l."expectedBundleCount"',
+      Bdl: 'l."expectedBundleCount"',
       "Scheduled By": 'u1."username"',
     };
 
@@ -762,7 +762,7 @@ const getAllScheduleOutbound = async ({
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
-      Quantity: 'i."noOfBundle"',
+      Bdl: 'i."noOfBundle"',
       "Scheduled By": 'u1."username"',
     };
 
