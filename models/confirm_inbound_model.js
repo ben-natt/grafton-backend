@@ -222,7 +222,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           false, 0, false, '', :userId, :processedId, 
           NOW(), NOW(),
           :brandId, (NOW() AT TIME ZONE 'Asia/Singapore'), :exWarehouseLot, 
-          (NOW() AT TIME ZONE 'Asia/Singapore'), :exWarehouseLocationId
+          :scheduledInboundDate, :exWarehouseLocationId
         )
         RETURNING *;
       `;
@@ -246,6 +246,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           brandId,
           exWarehouseLot: lot.exWarehouseLot,
           exWarehouseLocationId,
+          scheduledInboundDate: lot.inbounddate, // comes from lot table
         },
         type: db.sequelize.QueryTypes.INSERT,
         transaction,
