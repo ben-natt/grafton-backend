@@ -27,10 +27,8 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     so."releaseWarehouse",
     so."storageReleaseLocation",
     so."transportVendor",
-    so."exportDate",
-    so."releaseDate",
-    TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "exportDate",
-    TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "deliveryDate",
+    TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "exportDate",
+    TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "deliveryDate",
     TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "stuffingDate",
     so."sealNo",
     i."jobNo",
@@ -89,10 +87,11 @@ const getGrnDetailsForSelection = async (
       i."exWarehouseLot", i."exWarehouseWarrant",
       w."exLmeWarehouseName" AS "exLmeWarehouse",
       s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
-      so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
+      TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "scheduledReleaseDate", 
+      so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
       so."outboundType",
-      TO_CHAR(so."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "deliveryDate", 
-      TO_CHAR(so."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "exportDate", 
+      TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "deliveryDate", 
+      TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "exportDate", 
       TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "stuffingDate", 
       so."containerNo", so."sealNo",
       so."lotReleaseWeight",
@@ -119,14 +118,80 @@ const getGrnDetailsForSelection = async (
     const aggregateDetails = (key) =>
       [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
 
+
+const formatMultipleDates = (dates, dateField) => {
+  console.log(`DEBUG: formatMultipleDates called with dateField: ${dateField}`);
+  console.log(`DEBUG: Total lots received:`, dates.length);
+  
+  // Debug: Print all date values for the field
+  const rawDates = dates.map(lot => lot[dateField]);
+  console.log(`DEBUG: Raw ${dateField} values:`, rawDates);
+  
+  // Extract unique valid dates
+  const filteredDates = rawDates.filter(dateString => dateString && dateString !== 'Invalid Date');
+  console.log(`DEBUG: Filtered ${dateField} values:`, filteredDates);
+  
+  const parsedDates = filteredDates.map(dateString => {
+    // Fix the timezone format: +00 -> +00:00
+    const fixedDateString = dateString.replace(/\+00$/, '+00:00');
+    console.log(`DEBUG: Fixed date string: "${dateString}" -> "${fixedDateString}"`);
+    
+    const date = new Date(fixedDateString);
+    console.log(`DEBUG: Parsing "${fixedDateString}" -> ${date} (valid: ${!isNaN(date.getTime())})`);
+    return isNaN(date.getTime()) ? null : date;
+  }).filter(date => date !== null);
+  
+  console.log(`DEBUG: Successfully parsed dates:`, parsedDates);
+  
+  if (parsedDates.length === 0) {
+    console.log(`DEBUG: No valid dates found, returning N/A`);
+    return "N/A";
+  }
+  
+  // Create unique dates by comparing date strings instead of Date objects
+  const uniqueDateStrings = [...new Set(parsedDates.map(date => 
+    date.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    })
+  ))];
+  
+  console.log(`DEBUG: Unique formatted date strings:`, uniqueDateStrings);
+  
+  if (uniqueDateStrings.length === 1) {
+    console.log(`DEBUG: Single unique date: ${uniqueDateStrings[0]}`);
+    return uniqueDateStrings[0];
+  }
+  
+  // Sort the formatted date strings by converting back to dates for sorting
+  const sortedFormattedDates = uniqueDateStrings.sort((a, b) => {
+    const dateA = new Date(a.replace(/(\d{1,2}) (\w+) (\d{4})/, '$2 $1, $3'));
+    const dateB = new Date(b.replace(/(\d{1,2}) (\w+) (\d{4})/, '$2 $1, $3'));
+    return dateA - dateB;
+  });
+  
+  const result = sortedFormattedDates.join(', ');
+  console.log(`DEBUG: Multiple unique dates formatted as: ${result}`);
+  return result;
+};
+
     const firstLot = lots[0];
+    
+    // DEBUG: Print lots data
+    console.log("DEBUG: First few lots data:", lots.slice(0, 2));
+    console.log("DEBUG: All delivery dates:", lots.map(lot => ({ 
+      lotNo: lot.lotNo, 
+      deliveryDate: lot.deliveryDate 
+    })));
+    
     const result = {
       releaseDate: new Date().toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "long",
         year: "numeric",
-      }), // dd MMMM YYYY
-      deliveryDate: firstLot.deliveryDate,
+      }), // Current date as "12 August 2025"
+      deliveryDate: formatMultipleDates(lots, 'deliveryDate'),
       exportDate: firstLot.exportDate,
       stuffingDate: firstLot.stuffingDate,
       containerNo: firstLot.containerNo,
@@ -284,9 +349,11 @@ const createGrnAndTransactions = async (formData) => {
           w."exLmeWarehouseName" AS "exLmeWarehouse",
           s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
           so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
-          so."outboundType", so."exportDate", so."stuffingDate", so."containerNo", so."sealNo",
+          so."outboundType", so."stuffingDate", so."containerNo", so."sealNo",
           so."lotReleaseWeight",
-          so."userId" AS "scheduledBy"
+          so."userId" AS "scheduledBy",
+          TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "exportDate",
+          TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "deliveryDate"
       FROM public.selectedinbounds si
       JOIN public.inbounds i ON si."inboundId" = i."inboundId"
       JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
@@ -310,14 +377,16 @@ const createGrnAndTransactions = async (formData) => {
             "noOfBundle", "scheduleOutboundId", "releaseWarehouse", "lotReleaseWeight",
             "transportVendor", "outboundType", "exportDate", "stuffingDate", "containerNo", "sealNo",
             "driverName", "driverIdentityNo", "truckPlateNo", "warehouseStaff", "warehouseSupervisor",
-            "outboundedBy", "scheduledBy", "exWarehouseLot", "exWarehouseWarrant", "createdAt", "updatedAt"
+            "outboundedBy", "scheduledBy", "exWarehouseLot", "exWarehouseWarrant", "createdAt", "updatedAt",
+            "deliveryDate"
         ) VALUES (
             :outboundId, :inboundId, :jobNo, :lotNo, :shape, :commodity, :brand,
             :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, NOW(), :storageReleaseLocation,
             :noOfBundle, :scheduleOutboundId, :releaseWarehouse, :lotReleaseWeight,
             :transportVendor, :outboundType, :exportDate, :stuffingDate, :containerNo, :sealNo,
             :driverName, :driverIdentityNo, :truckPlateNo, :warehouseStaff, :warehouseSupervisor,
-            :userId, :scheduledBy, :exWarehouseLot, :exWarehouseWarrant, NOW(), NOW()
+            :userId, :scheduledBy, :exWarehouseLot, :exWarehouseWarrant, NOW(), NOW(),
+            :deliveryDate
         );
       `;
       await db.sequelize.query(transactionQuery, {

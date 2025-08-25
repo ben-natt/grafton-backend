@@ -7,7 +7,7 @@ const formatDate = (date) => {
   const d = new Date(date);
   const day = d.getDate();
   // Using 'short' month format (e.g., 'Jul') to match Dart's 'MMM' format.
-  const month = d.toLocaleString("en-US", { month: "short" });
+  const month = d.toLocaleString("en-US", { month: "long" });
   const year = d.getFullYear();
   return `${day} ${month} ${year}`;
 };
@@ -17,8 +17,8 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
-    // --- 1. Build Filter Conditions for Raw Query ---
-    let whereClauses = [
+    // --- 1. Build Base Filter Conditions ---
+    const baseWhere = [
       `l."status" = 'Received'`,
       `l."report" = false`,
       `l."isConfirm" = true`,
@@ -39,51 +39,72 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
 
     if (exWarehouseLot) {
       // Use ILIKE for case-insensitive partial matching.
-      whereClauses.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
+      baseWhere.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
       replacements.exWarehouseLot = `%${exWarehouseLot}%`;
     }
+
+    const baseWhereString = baseWhere.join(" AND ");
+
+    // --- 2. Compute min/max inbound dates PER JOB (in SG date) in a CTE, then filter/paginate on that ---
+    const dateOverlapWhere =
+      startDate && endDate
+        ? `WHERE jr.max_date >= :startDate::date AND jr.min_date <= :endDate::date`
+        : "";
+
     if (startDate && endDate) {
-      // Inclusive date range for the filter.
-      // Explicitly set timezone to prevent off-by-one errors due to server/client differences.
-      whereClauses.push(
-        `(s."inboundDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`
-      );
       replacements.startDate = startDate;
       replacements.endDate = endDate;
     }
 
-    const whereString = whereClauses.join(" AND ");
-
-    // --- 2. Get Total Count of Matching JobNos for Pagination ---
+    // --- 3. Get Total Count of Matching JobNos for Pagination ---
     const countQuery = `
-      SELECT COUNT(DISTINCT l."jobNo")::int
-      FROM public.lot l
-      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
-      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
-      WHERE ${whereString};
+      WITH jr AS (
+        SELECT
+          l."jobNo",
+          MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
+          MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
+        FROM public.lot l
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+        WHERE ${baseWhereString}
+        GROUP BY l."jobNo"
+      )
+      SELECT COUNT(*)::int AS count
+      FROM jr
+      ${dateOverlapWhere};
     `;
+
     const countResult = await db.sequelize.query(countQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
-    const totalCount = countResult.count || 0;
+
+    const totalCount = countResult?.count || 0;
     const totalPages = Math.ceil(totalCount / pageSize);
 
     if (totalCount === 0) {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // --- 3. Get Paginated List of Distinct JobNos that Match Filters ---
+    // --- 4. Get Paginated List of Distinct JobNos that Match Filters ---
     const jobNoQuery = `
-      SELECT DISTINCT l."jobNo"
-      FROM public.lot l
-      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
-      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
-      WHERE ${whereString}
-      ORDER BY l."jobNo"
+      WITH jr AS (
+        SELECT
+          l."jobNo",
+          MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
+          MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
+        FROM public.lot l
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+        WHERE ${baseWhereString}
+        GROUP BY l."jobNo"
+      )
+      SELECT jr."jobNo"
+      FROM jr
+      ${dateOverlapWhere}
+      ORDER BY jr."jobNo"
       LIMIT :limit OFFSET :offset;
     `;
+
     const jobNoResults = await db.sequelize.query(jobNoQuery, {
       replacements: { ...replacements, limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
@@ -95,13 +116,13 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // --- 4. Fetch All Details for Only the JobNos on the Current Page ---
+    // --- 5. Fetch All Details for Only the JobNos on the Current Page ---
     const detailsQuery = `
       SELECT
           l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
           l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
+          l."inbounddate",
           i."inboundId", i."netWeight",
-          s."inboundDate",
           u.username
       FROM public.lot l
       JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
@@ -122,7 +143,7 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
             AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
           )
         )
-      ORDER BY s."inboundDate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
+      ORDER BY l."inbounddate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
@@ -130,7 +151,7 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-    // --- 5. Group the Flat Results into the Nested Structure for the Frontend ---
+    // --- 6. Group the Flat Results into the Nested Structure for the Frontend ---
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
@@ -138,15 +159,18 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
           jobNo: jobNo,
           userInfo: {
             username: lot.username || "N/A",
-            inboundDate: formatDate(lot.inboundDate),
+            inboundDate: null,
           },
           lotDetails: [],
           inboundId: lot.inboundId,
           // Initialize incomplete status - will be calculated on frontend
           isIncomplete: false,
           incompleteLotNos: [], // Initialize empty array
+          inboundDates: [],
         };
       }
+
+      if (lot.inbounddate) acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
 
       acc[jobNo].lotDetails.push({
         lotId: lot.lotId,
@@ -164,6 +188,26 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       });
       return acc;
     }, {});
+
+    // --- 7. Compute display date (single vs range) for each job ---
+Object.values(groupedByJobNo).forEach((group) => {
+  if (group.inboundDates.length > 0) {
+    const minDate = new Date(Math.min(...group.inboundDates.map((d) => d.getTime())));
+    const maxDate = new Date(Math.max(...group.inboundDates.map((d) => d.getTime())));
+    
+    // Check if dates are the same (compare date strings to avoid time differences)
+    const minDateString = minDate.toDateString();
+    const maxDateString = maxDate.toDateString();
+    
+    group.userInfo.inboundDate =
+      minDateString === maxDateString
+        ? formatDate(minDate)
+        : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
+  } else {
+    group.userInfo.inboundDate = "N/A";
+  }
+  delete group.inboundDates;
+});
 
     const finalData = Object.values(groupedByJobNo);
     return { data: finalData, page, pageSize, totalPages, totalCount };
