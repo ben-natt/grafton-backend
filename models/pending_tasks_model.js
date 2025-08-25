@@ -22,54 +22,78 @@ const getPendingInboundTasks = async (
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
-    // WHERE conditions
-    let whereClauses = [
+    // base filters for "visible + pending" lots
+    const baseWhere = [
       `l.status = 'Pending'`,
       `l.report = False`,
-      `(l."reportDuplicate" = False OR l."isDuplicated" = True)` // Show only visible rows
+      `(l."reportDuplicate" = False OR l."isDuplicated" = True)`,
     ];
     const replacements = {};
 
     if (exWarehouseLot) {
-      whereClauses.push(`l."exWarehouseLot" iLIKE :exWarehouseLot`);
+      baseWhere.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
       replacements.exWarehouseLot = `%${exWarehouseLot}%`;
     }
+
+    const baseWhereString = baseWhere.join(" AND ");
+
+    // compute min/max inbound dates PER JOB (in SG date) in a CTE, then filter/paginate on that.
+    const dateOverlapWhere =
+      startDate && endDate
+        ? `WHERE jr.max_date >= :startDate::date AND jr.min_date <= :endDate::date`
+        : "";
+
     if (startDate && endDate) {
-      whereClauses.push(
-        `(s."inboundDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`
-      );
       replacements.startDate = startDate;
       replacements.endDate = endDate;
     }
 
-    const whereString = whereClauses.join(" AND ");
-
+    // count jobs
     const countQuery = `
-      SELECT COUNT(DISTINCT l."jobNo")::int
-      FROM public.lot l
-      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
-      WHERE ${whereString};
+      WITH jr AS (
+        SELECT
+          l."jobNo",
+          MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
+          MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
+        FROM public.lot l
+        WHERE ${baseWhereString}
+        GROUP BY l."jobNo"
+      )
+      SELECT COUNT(*)::int AS count
+      FROM jr
+      ${dateOverlapWhere};
     `;
+
     const countResult = await db.sequelize.query(countQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
-    const totalCount = countResult.count || 0;
-    const totalPages = Math.ceil(totalCount / pageSize);
 
+    const totalCount = countResult?.count || 0;
+    const totalPages = Math.ceil(totalCount / pageSize);
     if (totalCount === 0) {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
+    // paginated jobNos (from aggregated ranges)
     const jobNoQuery = `
-      SELECT DISTINCT l."jobNo"
-      FROM public.lot l
-      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
-      WHERE ${whereString}
-      ORDER BY l."jobNo"
+      WITH jr AS (
+        SELECT
+          l."jobNo",
+          MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
+          MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
+        FROM public.lot l
+        WHERE ${baseWhereString}
+        GROUP BY l."jobNo"
+      )
+      SELECT jr."jobNo"
+      FROM jr
+      ${dateOverlapWhere}
+      ORDER BY jr."jobNo"
       LIMIT :limit OFFSET :offset;
     `;
+
     const jobNoResults = await db.sequelize.query(jobNoQuery, {
       replacements: { ...replacements, limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
@@ -80,14 +104,13 @@ const getPendingInboundTasks = async (
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // Get details
+    // fetch lot details for those jobs (keep your existing visibility filters)
     const detailsQuery = `
       SELECT
-          l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
-          l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
-          l."isDuplicated",
-          s."inboundDate",
-          u.username
+        l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
+        l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
+        l."isDuplicated", l."inbounddate",
+        u.username
       FROM public.lot l
       JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
       JOIN public.users u ON s."userId" = u.userid
@@ -95,7 +118,7 @@ const getPendingInboundTasks = async (
         AND l.status = 'Pending'
         AND l.report = False
         AND (l."reportDuplicate" = False OR l."isDuplicated" = True)
-      ORDER BY s."inboundDate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
+      ORDER BY l."inbounddate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
@@ -103,18 +126,18 @@ const getPendingInboundTasks = async (
       type: db.sequelize.QueryTypes.SELECT,
     });
 
+    // group and compute display date (single vs range) 
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
         acc[jobNo] = {
-          jobNo: jobNo,
-          userInfo: {
-            username: lot.username || "N/A",
-            inboundDate: formatDate(lot.inboundDate),
-          },
+          jobNo,
+          userInfo: { username: lot.username || "N/A", inboundDate: null },
           lotDetails: [],
+          inboundDates: [],
         };
       }
+      if (lot.inbounddate) acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
       acc[jobNo].lotDetails.push({
         lotId: lot.lotId,
         lotNo: lot.lotNo,
@@ -130,6 +153,26 @@ const getPendingInboundTasks = async (
       });
       return acc;
     }, {});
+
+
+Object.values(groupedByJobNo).forEach((group) => {
+  if (group.inboundDates.length > 0) {
+    const minDate = new Date(Math.min(...group.inboundDates.map((d) => d.getTime())));
+    const maxDate = new Date(Math.max(...group.inboundDates.map((d) => d.getTime())));
+    
+    // Check if dates are the same (compare date strings to avoid time differences)
+    const minDateString = minDate.toDateString();
+    const maxDateString = maxDate.toDateString();
+    
+    group.userInfo.inboundDate =
+      minDateString === maxDateString
+        ? formatDate(minDate)
+        : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
+  } else {
+    group.userInfo.inboundDate = "N/A";
+  }
+  delete group.inboundDates;
+});
 
     const finalData = Object.values(groupedByJobNo);
     return { data: finalData, page, pageSize, totalPages, totalCount };
@@ -149,59 +192,78 @@ const getPendingOutboundTasks = async (
     const { startDate, endDate, jobNo } = filters;
     const offset = (page - 1) * pageSize;
 
-    let whereClauses = [`si."isOutbounded" = false`];
+    let baseWhere = [`si."isOutbounded" = false`];
     const replacements = {};
 
     if (jobNo) {
-      // Search in both inbound job number and outbound job number
-      whereClauses.push(
+      baseWhere.push(
         `(i."jobNo" iLIKE :jobNo OR CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) iLIKE :jobNo)`
       );
       replacements.jobNo = `%${jobNo}%`;
     }
+
+    const baseWhereString = baseWhere.join(" AND ");
+
+    // Use CTE approach similar to inbound logic
+    const dateOverlapWhere = startDate && endDate 
+      ? `WHERE sr.max_release_date >= :startDate::date AND sr.min_release_date <= :endDate::date`
+      : "";
+
     if (startDate && endDate) {
-      // UPDATED: Check for date range overlap, handling cases where releaseEndDate might be null.
-      // This ensures that any job whose date range [releaseDate, releaseEndDate] intersects with the
-      // filter's date range [startDate, endDate] is included.
-      whereClauses.push(
-        `(so."releaseDate" <= :endDate AND COALESCE(so."releaseEndDate", so."releaseDate") >= :startDate)`
-      );
       replacements.startDate = startDate;
       replacements.endDate = endDate;
     }
 
-    const whereString = whereClauses.join(" AND ");
-
-    const baseQuery = `
-      FROM public.scheduleoutbounds so
-      JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
-      JOIN public.inbounds i ON si."inboundId" = i."inboundId"
-      JOIN public.users u ON so."userId" = u."userid"
+    // Count query using CTE for date ranges
+    const countQuery = `
+      WITH schedule_ranges AS (
+        SELECT
+          so."scheduleOutboundId",
+          MIN(si."releaseDate") AS min_release_date,
+          MAX(COALESCE(si."releaseEndDate", si."releaseDate")) AS max_release_date
+        FROM public.scheduleoutbounds so
+        JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
+        JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+        WHERE ${baseWhereString}
+        GROUP BY so."scheduleOutboundId"
+      )
+      SELECT COUNT(*)::int AS count
+      FROM schedule_ranges sr
+      ${dateOverlapWhere};
     `;
 
-    const countQuery = `SELECT COUNT(DISTINCT so."scheduleOutboundId")::int ${baseQuery} WHERE ${whereString};`;
     const countResult = await db.sequelize.query(countQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
-    const totalCount = countResult.count || 0;
+    const totalCount = countResult?.count || 0;
     const totalPages = Math.ceil(totalCount / pageSize);
 
     if (totalCount === 0) {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // UPDATED: Changed the query to group by schedule ID and order by the earliest releaseDate.
-    // This ensures jobs are sorted correctly by date before being paginated.
+    // Get paginated schedule IDs using CTE
     const scheduleIdQuery = `
-      SELECT so."scheduleOutboundId"
-      ${baseQuery}
-      WHERE ${whereString}
-      GROUP BY so."scheduleOutboundId"
-      ORDER BY MIN(so."releaseDate") ASC, so."scheduleOutboundId" ASC
+      WITH schedule_ranges AS (
+        SELECT
+          so."scheduleOutboundId",
+          MIN(si."releaseDate") AS min_release_date,
+          MAX(COALESCE(si."releaseEndDate", si."releaseDate")) AS max_release_date
+        FROM public.scheduleoutbounds so
+        JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
+        JOIN public.inbounds i ON si."inboundId" = i."inboundId"
+        WHERE ${baseWhereString}
+        GROUP BY so."scheduleOutboundId"
+      )
+      SELECT sr."scheduleOutboundId"
+      FROM schedule_ranges sr
+      ${dateOverlapWhere}
+      ORDER BY sr.min_release_date ASC, sr."scheduleOutboundId" ASC
       LIMIT :limit OFFSET :offset;
     `;
+
     const scheduleIdResults = await db.sequelize.query(scheduleIdQuery, {
       replacements: { ...replacements, limit: pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
@@ -215,18 +277,26 @@ const getPendingOutboundTasks = async (
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
+    // Fetch details for the paginated schedule IDs
     const detailsQuery = `
       SELECT
-          so."scheduleOutboundId",
-          si."selectedInboundId",
-          CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo",
-          so."releaseDate" as "scheduleReleaseDate",
-          so."releaseEndDate" as "scheduleReleaseEndDate",
-          so."stuffingDate", so."containerNo", so."sealNo",
-          u.username,
-          i."jobNo", i."lotNo", i."noOfBundle" as "expectedBundleCount",
-          i."exWarehouseLot", w."exLmeWarehouseName" as "exLmeWarehouse",
-          b."brandName" as brand, c."commodityName" as commodity, s."shapeName" as shape
+        so."scheduleOutboundId",
+        si."selectedInboundId",
+        CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0')) AS "outboundJobNo",
+        si."releaseDate",
+        si."releaseEndDate",
+        so."stuffingDate", 
+        so."containerNo", 
+        so."sealNo",
+        u.username,
+        i."jobNo", 
+        i."lotNo", 
+        i."noOfBundle" as "expectedBundleCount",
+        i."exWarehouseLot", 
+        w."exLmeWarehouseName" as "exLmeWarehouse",
+        b."brandName" as brand, 
+        c."commodityName" as commodity, 
+        s."shapeName" as shape
       FROM public.scheduleoutbounds so
       JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
       JOIN public.inbounds i ON si."inboundId" = i."inboundId"
@@ -235,8 +305,9 @@ const getPendingOutboundTasks = async (
       LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
       LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
       LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
-      WHERE so."scheduleOutboundId" IN (:paginatedScheduleIds) AND si."isOutbounded" = false
-      ORDER BY so."releaseDate" ASC, i."jobNo" ASC, i."lotNo" ASC;
+      WHERE so."scheduleOutboundId" IN (:paginatedScheduleIds) 
+        AND si."isOutbounded" = false
+      ORDER BY si."releaseDate" ASC, i."jobNo" ASC, i."lotNo" ASC;
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
@@ -244,6 +315,7 @@ const getPendingOutboundTasks = async (
       type: db.sequelize.QueryTypes.SELECT,
     });
 
+    // Group by schedule ID and calculate date ranges
     const groupedByScheduleId = detailsForPage.reduce((acc, item) => {
       const scheduleId = item.scheduleOutboundId;
       if (!acc[scheduleId]) {
@@ -254,22 +326,19 @@ const getPendingOutboundTasks = async (
           },
           userInfo: {
             username: item.username,
-            // UPDATED: Both dates now check for null before formatting
-            releaseDate: item.scheduleReleaseDate
-              ? formatDate(item.scheduleReleaseDate)
-              : null,
-            releaseEndDate: item.scheduleReleaseEndDate
-              ? formatDate(item.scheduleReleaseEndDate)
-              : null,
-            stuffingDate: item.stuffingDate
-              ? formatDate(item.stuffingDate)
-              : null,
+            stuffingDate: item.stuffingDate ? formatDate(item.stuffingDate) : null,
             containerNo: item.containerNo,
             sealNo: item.sealNo,
           },
           lotDetails: [],
+          releaseDates: [],
         };
       }
+
+      // Collect all release dates for this schedule to calculate range later
+      if (item.releaseDate) acc[scheduleId].releaseDates.push(new Date(item.releaseDate));
+      if (item.releaseEndDate) acc[scheduleId].releaseDates.push(new Date(item.releaseEndDate));
+
       acc[scheduleId].lotDetails.push({
         selectedInboundId: item.selectedInboundId,
         jobNo: item.jobNo,
@@ -284,6 +353,28 @@ const getPendingOutboundTasks = async (
       return acc;
     }, {});
 
+    // Calculate date ranges for each schedule (similar to inbound logic)
+Object.values(groupedByScheduleId).forEach((group) => {
+  if (group.releaseDates.length > 0) {
+    const minDate = new Date(Math.min(...group.releaseDates.map(d => d.getTime())));
+    const maxDate = new Date(Math.max(...group.releaseDates.map(d => d.getTime())));
+    
+    // Check if dates are the same (compare date strings to avoid time differences)
+    const minDateString = minDate.toDateString();
+    const maxDateString = maxDate.toDateString();
+    
+    group.userInfo.releaseDate = formatDate(minDate);
+    group.userInfo.releaseEndDate = 
+      minDateString === maxDateString 
+        ? null 
+        : formatDate(maxDate);
+  } else {
+    group.userInfo.releaseDate = null;
+    group.userInfo.releaseEndDate = null;
+  }
+  delete group.releaseDates;
+});
+
     const finalData = Object.values(groupedByScheduleId);
     return { data: finalData, page, pageSize, totalPages, totalCount };
   } catch (error) {
@@ -291,7 +382,6 @@ const getPendingOutboundTasks = async (
     throw error;
   }
 };
-
 // --- Legacy functions below for compatibility ---
 const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
   try {
@@ -458,24 +548,14 @@ const findInboundTasksOffice = async (
       whereClauses += ` AND u.username = :scheduledBy`;
       replacements.scheduledBy = filters.scheduledBy;
     }
-  // if (filters.type) 
-  // { whereClauses += 'AND l.report = :hasWarning'; 
-  //   replacements.hasWarning = filters.type === "Discrepancies";
-  // }
 
-if (filters.type) {
-  if (filters.type === "Discrepancies") {
-    whereClauses += ` AND l.report = true`;
-  } else if (filters.type === "Duplicated") {
-    whereClauses += ` AND l."reportDuplicate" = true`;
-  }
-}
-
-
-  // else if (filters.type === "Duplicated") {
-  //   whereClauses += ` AND l."isDuplicated" = false`;
-  // }
-
+    if (filters.type) {
+      if (filters.type === "Discrepancies") {
+        whereClauses += ` AND l.report = true`;
+      } else if (filters.type === "Duplicated") {
+        whereClauses += ` AND l."reportDuplicate" = true`;
+      }
+    }
 
 
     // Updated to use LEFT JOIN since inbounddate is now in lot table
@@ -568,7 +648,7 @@ const getLotInboundDate = async (jobNo, lotNo) => {
       ORDER BY "updatedAt" DESC
       LIMIT 1;
     `;
-    
+
     const result = await db.sequelize.query(query, {
       replacements: { jobNo, lotNo },
       type: db.sequelize.QueryTypes.SELECT,
@@ -590,7 +670,7 @@ const updateLotInboundDate = async (jobNo, lotNo, inboundDate) => {
       WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
       RETURNING *;
     `;
-    
+
     const result = await db.sequelize.query(query, {
       replacements: { jobNo, lotNo, inboundDate },
       type: db.sequelize.QueryTypes.UPDATE,
@@ -716,41 +796,41 @@ SELECT
     });
 
     const tasksMap = {};
-for (const task of tasksResult) {
-  const scheduleId = task.scheduleOutboundId.toString();
-  if (!tasksMap[scheduleId]) {
-    tasksMap[scheduleId] = [];
-  }
+    for (const task of tasksResult) {
+      const scheduleId = task.scheduleOutboundId.toString();
+      if (!tasksMap[scheduleId]) {
+        tasksMap[scheduleId] = [];
+      }
 
-  // Create release date range string
-  let releaseDateRange = task.releaseDate || '';
-  if (task.releaseDate && task.releaseEndDate && task.releaseDate !== task.releaseEndDate) {
-    releaseDateRange = `${task.releaseDate} - ${task.releaseEndDate}`;
-  }
+      // Create release date range string
+      let releaseDateRange = task.releaseDate || '';
+      if (task.releaseDate && task.releaseEndDate && task.releaseDate !== task.releaseEndDate) {
+        releaseDateRange = `${task.releaseDate} - ${task.releaseEndDate}`;
+      }
 
-  tasksMap[scheduleId].push({
-    selectedInboundId: task.selectedInboundId.toString(),
-    jobNo: task.jobNo.toString(),
-    date: releaseDateRange,
-    dateRange: releaseDateRange,
-    lotId: task.selectedInboundId.toString(),
-    lotNo: task.lotNo.toString(),
-    exWLot: task.exWLot,
-    commodity: task.commodity,
-    brand: task.brand,
-    shape: task.shape,
-    expectedBundleCount: task.expectedBundleCount,
-    scheduledBy: task.scheduledBy,
-    releaseDate: task.releaseDate,
-    releaseEndDate: task.releaseEndDate,
-    exportDate: task.exportDate,
-    deliveryDate: task.deliveryDate,
-    outboundType: task.outboundType,
-  });
-}
+      tasksMap[scheduleId].push({
+        selectedInboundId: task.selectedInboundId.toString(),
+        jobNo: task.jobNo.toString(),
+        date: releaseDateRange,
+        dateRange: releaseDateRange,
+        lotId: task.selectedInboundId.toString(),
+        lotNo: task.lotNo.toString(),
+        exWLot: task.exWLot || "N/A",
+        commodity: task.commodity,
+        brand: task.brand,
+        shape: task.shape,
+        expectedBundleCount: task.expectedBundleCount,
+        scheduledBy: task.scheduledBy,
+        releaseDate: task.releaseDate,
+        releaseEndDate: task.releaseEndDate,
+        exportDate: task.exportDate,
+        deliveryDate: task.deliveryDate,
+        outboundType: task.outboundType,
+      });
+    }
 
     return { totalCount, data: tasksMap };
-  } 
+  }
   catch (error) {
     console.error("Error fetching filtered outbound tasks:", error);
     throw error;
@@ -788,18 +868,18 @@ const getLotOutboundDates = async (jobNo, lotNo) => {
 // Helper function to convert DD/MM/YYYY to YYYY-MM-DD
 const convertDateFormat = (dateString) => {
   if (!dateString) return null;
-  
+
   // Check if it's already in YYYY-MM-DD format
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
     return dateString;
   }
-  
+
   // Convert DD/MM/YYYY to YYYY-MM-DD
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
     const [day, month, year] = dateString.split('/');
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
   }
-  
+
   return null;
 };
 
@@ -825,9 +905,9 @@ const updateLotOutboundDates = async (jobNo, lotNo, releaseDate, releaseEndDate,
     `;
 
     const result = await db.sequelize.query(query, {
-      replacements: { 
-        jobNo, 
-        lotNo, 
+      replacements: {
+        jobNo,
+        lotNo,
         releaseDate: convertedReleaseDate,
         releaseEndDate: convertedReleaseEndDate,
         exportDate: convertedExportDate,
@@ -842,7 +922,6 @@ const updateLotOutboundDates = async (jobNo, lotNo, releaseDate, releaseEndDate,
     throw error;
   }
 }
-
 
 
 const getOfficeFilterOptions = async (isOutbound) => {
