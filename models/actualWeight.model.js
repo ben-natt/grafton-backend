@@ -435,9 +435,15 @@ const saveInboundWithBundles = async (
       if (savedBundle) savedBundles.push(savedBundle);
     }
 
-    // NEW LOGIC: Always set isWeighted to true when updating actual weight.
-    // This marks the lot as having been started.
-    const isWeighted = true;
+    // --- MODIFIED LOGIC ---
+    // A lot is considered "weighted" (i.e., started) if any bundle has
+    // either a weight greater than 0 or a non-empty melt number.
+    const hasAnyData = bundles.some(
+      (b) =>
+        (b.weight != null && b.weight > 0) ||
+        (b.meltNo != null && b.meltNo.trim() !== "")
+    );
+    const isWeighted = hasAnyData;
 
     // Update inbound
     const updateQuery = `
@@ -451,14 +457,13 @@ const saveInboundWithBundles = async (
     `;
 
     // Convert actualWeight from kg to metric tons (divide by 1000)
-    // Frontend sends weight in kg, but database stores it in metric tons
     const actualWeightInMetricTons = actualWeight / 1000;
 
     const inboundResult = await db.sequelize.query(updateQuery, {
       replacements: {
         inboundId,
         actualWeight: actualWeightInMetricTons,
-        isWeighted,
+        isWeighted, // Use the new conditional flag here
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -479,7 +484,7 @@ const saveInboundWithBundles = async (
           replacements: {
             lotId: relatedLotId,
             actualWeight: actualWeightInMetricTons,
-            isWeighted,
+            isWeighted, // And also use it here
           },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
@@ -629,80 +634,84 @@ const getBundlesIfWeighted = async (
 
 const checkIncompleteBundles = async (inboundId, strictValidation = false) => {
   try {
-    console.log(
-      `[checkIncompleteBundles] Starting check for inboundId: ${inboundId}, strictValidation: ${strictValidation}`
-    );
-
-    // Step 1: Get all bundles
+    // Step 1: Get all bundles associated with the inbound record.
     const bundles = await getBundlesIfWeighted(
       inboundId,
       true,
       strictValidation
     );
-    console.log(
-      `[checkIncompleteBundles] Found ${bundles.length} bundles for inboundId: ${inboundId}`
-    );
 
-    // Step 2: Get the jobNo and lotNo from the specific inbound record
-    const inboundResult = await db.sequelize.query(
-      `SELECT "jobNo", "lotNo" FROM public.inbounds WHERE "inboundId" = :inboundId`,
-      { replacements: { inboundId }, type: db.sequelize.QueryTypes.SELECT }
-    );
-
-    if (inboundResult.length === 0) {
-      console.log(
-        `[checkIncompleteBundles] No inbound record found for inboundId: ${inboundId}`
-      );
+    // If there are no bundles, the lot cannot be incomplete.
+    if (!bundles || bundles.length === 0) {
       return {
         isIncomplete: false,
-        details: { totalBundles: 0, incompleteLotCount: 0 },
+        details: {},
         inboundId,
         incompleteLotNos: [],
       };
     }
 
-    const { jobNo, lotNo } = inboundResult[0];
-    console.log(
-      `[checkIncompleteBundles] Found jobNo: ${jobNo}, lotNo: ${lotNo} for inboundId: ${inboundId}`
+    // Step 2: Determine if any work has been started.
+    // "hasAnyData" is true if at least one bundle has a weight or a melt number.
+    const hasAnyData = bundles.some(
+      (b) =>
+        (b.weight != null && b.weight > 0) ||
+        (b.meltNo != null && b.meltNo.trim() !== "")
     );
 
-    // Step 3: Get the corresponding lot record
-    const lotResults = await db.sequelize.query(
-      `SELECT "lotId", "lotNo" FROM public.lot WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo`,
-      { replacements: { jobNo, lotNo }, type: db.sequelize.QueryTypes.SELECT }
-    );
-    console.log(
-      `[checkIncompleteBundles] Found ${lotResults.length} lot records for jobNo: ${jobNo}, lotNo: ${lotNo}`
+    // If no data has been entered at all, the lot is not "incomplete"; it's "not started".
+    // The icon should not be shown.
+    if (!hasAnyData) {
+      return {
+        isIncomplete: false,
+        details: {},
+        inboundId,
+        incompleteLotNos: [],
+      };
+    }
+
+    // Step 3: Determine if the lot is fully complete.
+    // "isFullyComplete" is true only if EVERY bundle has both a weight and a melt number.
+    const isFullyComplete = bundles.every(
+      (b) =>
+        b.weight != null &&
+        b.weight > 0 &&
+        b.meltNo != null &&
+        b.meltNo.trim() !== ""
     );
 
-    // Step 4: Group bundles by lotId and check incompleteness
+    // A lot is "incomplete" if work has started (`hasAnyData`) but it is not yet
+    // fully complete (`!isFullyComplete`). This is the state where the icon should be visible.
+    const isInboundIncomplete = hasAnyData && !isFullyComplete;
+
     let incompleteLotNos = [];
-    for (const lot of lotResults) {
-      const lotBundles = bundles.filter((b) => b.lotId === lot.lotId);
+    if (isInboundIncomplete) {
+      // If the overall status is incomplete, we can assume the associated lot numbers are affected.
+      // This part finds the lot numbers to pass back to the UI.
+      const inboundRecord = await db.sequelize.query(
+        `SELECT "jobNo", "lotNo" FROM public.inbounds WHERE "inboundId" = :inboundId`,
+        {
+          replacements: { inboundId },
+          type: db.sequelize.QueryTypes.SELECT,
+          plain: true,
+        }
+      );
 
-      let incompleteWeight = 0;
-      let incompleteMeltNo = 0;
-      const totalBundles = lotBundles.length;
-
-      lotBundles.forEach((bundle) => {
-        const hasWeight = bundle.weight && bundle.weight > 0;
-        const hasMeltNo = bundle.meltNo && bundle.meltNo.trim() !== "";
-        if (!hasWeight) incompleteWeight++;
-        if (!hasMeltNo) incompleteMeltNo++;
-      });
-
-      const isIncompleteLot = strictValidation
-        ? incompleteWeight > 0 || incompleteMeltNo > 0
-        : (incompleteWeight > 0 && incompleteWeight < totalBundles) ||
-          (incompleteMeltNo > 0 && incompleteMeltNo < totalBundles);
-
-      if (isIncompleteLot) {
-        incompleteLotNos.push(lot.lotNo);
+      if (inboundRecord) {
+        const lotResults = await db.sequelize.query(
+          `SELECT "lotId", "lotNo" FROM public.lot WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo`,
+          {
+            replacements: {
+              jobNo: inboundRecord.jobNo,
+              lotNo: inboundRecord.lotNo,
+            },
+            type: db.sequelize.QueryTypes.SELECT,
+          }
+        );
+        incompleteLotNos = lotResults.map((lot) => lot.lotNo);
       }
     }
 
-    // Step 5: Build final result
-    const isInboundIncomplete = incompleteLotNos.length > 0;
     const result = {
       isIncomplete: isInboundIncomplete,
       details: {
@@ -710,7 +719,7 @@ const checkIncompleteBundles = async (inboundId, strictValidation = false) => {
         incompleteLotCount: incompleteLotNos.length,
       },
       inboundId,
-      incompleteLotNos, // This will contain the lotNo(s) that are incomplete
+      incompleteLotNos: [...new Set(incompleteLotNos)],
     };
 
     console.log(

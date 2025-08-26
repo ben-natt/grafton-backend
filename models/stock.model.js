@@ -119,7 +119,7 @@ const getInventory = async (filters) => {
       Metal: '"Metal"',
       Brand: '"Brand"',
       Shape: '"Shape"',
-      Qty: '"Qty"',
+      Bdl: '"Qty"',
       Weight: '"Weight"',
     };
     let orderByClause = 'ORDER BY "Job No" ASC'; // Default sort
@@ -342,12 +342,12 @@ const getLotDetails = async (filters) => {
     let whereClauses = ['o."inboundId" IS NULL', 'ot."inboundId" IS NULL'];
 
     if (filters.selectedMetal) {
-      whereClauses.push('c."commodityName" = :selectedMetal');
-      replacements.selectedMetal = filters.selectedMetal;
+      whereClauses.push('c."commodityName" ILIKE :selectedMetal');
+      replacements.selectedMetal = `%${filters.selectedMetal}%`;
     }
     if (filters.selectedShape) {
-      whereClauses.push('s."shapeName" = :selectedShape');
-      replacements.selectedShape = filters.selectedShape;
+      whereClauses.push('s."shapeName" ILIKE :selectedShape');
+      replacements.selectedShape = `%${filters.selectedShape}%`;
     }
     if (filters.jobNo) {
       whereClauses.push('i."jobNo" ILIKE :jobNo');
@@ -420,7 +420,7 @@ const getLotDetails = async (filters) => {
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
-      Qty: 'i."noOfBundle"',
+      Bdl: 'i."noOfBundle"',
       Weight: '"Weight"',
     };
     let orderByClause = 'ORDER BY i."inboundId" ASC'; // Default sort
