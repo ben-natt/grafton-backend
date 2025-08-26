@@ -599,7 +599,7 @@ const getAllScheduleInbound = async ({
     const sortableColumns = {
       Date: 'l."inbounddate"',
       "Lot No.": 'l."lotNo"',
-      "Ex-Warehouse Lots": 'l."exWarehouseLot"',
+      "Ex-Whse Lot": 'l."exWarehouseLot"',
       Metal: 'l."commodity"',
       Brand: 'l."brand"',
       Shape: 'l."shape"',
@@ -708,8 +708,7 @@ const getAllScheduleOutbound = async ({
           (si."releaseDate" AT TIME ZONE 'Asia/Singapore')::date <= :endDate::date
           AND
           (si."releaseEndDate" AT TIME ZONE 'Asia/Singapore')::date >= :startDate::date
-        `
-      );
+        `);
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
     }
