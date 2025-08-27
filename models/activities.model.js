@@ -513,7 +513,9 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
   }
 };
 
-// model.js
+////////////////////////////////////////////////////////////////////////////////
+////////////      Scheduled Inbound Activities Details Page    ////////////////
+////////////////////////////////////////////////////////////////////////////////
 const getAllScheduleInbound = async ({
   filters = {},
   page = 1,
@@ -598,6 +600,7 @@ const getAllScheduleInbound = async ({
     // --- SORTING LOGIC --- (remains the same)
     const sortableColumns = {
       Date: 'l."inbounddate"',
+      "Job No.": 'l."jobNo"',
       "Lot No.": 'l."lotNo"',
       "Ex-Whse Lot": 'l."exWarehouseLot"',
       Metal: 'l."commodity"',
@@ -642,6 +645,7 @@ const getAllScheduleInbound = async ({
                       l."jobNo" AS "Job No",
                       l."lotNo" AS "Lot No",
                       l."exWarehouseLot" AS "Ex-W Lot",
+                      l."exLmeWarehouse" AS "exLmeWarehouse",
                       l."commodity" AS "Metal",
                       l."brand" AS "Brand",
                       l."shape" AS "Shape",
@@ -672,6 +676,9 @@ const getAllScheduleInbound = async ({
   }
 };
 
+////////////////////////////////////////////////////////////////////////////////
+////////////      Scheduled Outbound Activities Page    ////////////////
+////////////////////////////////////////////////////////////////////////////////
 const getAllScheduleOutbound = async ({
   filters = {},
   page = 1,
@@ -755,9 +762,10 @@ const getAllScheduleOutbound = async ({
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
     const sortableColumns = {
-      Date: 'o."releaseDate"',
+      Date: 'si."releaseDate"',
+      "Job No.": 'i."jobNo"', // FIX: Added sort key for Job No.
       "Lot No.": 'i."lotNo"',
-      "Ex-Warehouse Lots": 'i."exWarehouseLot"',
+      "Ex-Whse Lot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
@@ -805,6 +813,7 @@ const getAllScheduleOutbound = async ({
         i."jobNo" AS "Job No",
         i."lotNo" AS "Lot No",
         i."exWarehouseLot" AS "Ex-W Lot",
+        exlme."exLmeWarehouseName" AS "exLmeWarehouse",
         c."commodityName" AS "Metal",
         b."brandName" AS "Brand",
         s."shapeName" AS "Shape",
@@ -828,6 +837,9 @@ const getAllScheduleOutbound = async ({
   }
 };
 
+////////////////////////////////////////////////////////////////////////////////
+////////////      Scheduled Inbound Activities Details Page    ////////////////
+////////////////////////////////////////////////////////////////////////////////
 const getScheduleInboundRecordByLotId = async (lotId) => {
   try {
     const query = `SELECT
@@ -875,6 +887,9 @@ const getScheduleInboundRecordByLotId = async (lotId) => {
   }
 };
 
+////////////////////////////////////////////////////////////////////////////////
+////////////      Scheduled Outbound Activities Details Page    ////////////////
+////////////////////////////////////////////////////////////////////////////////
 const getScheduleOutboundRecordById = async (id) => {
   try {
     const query = `SELECT
