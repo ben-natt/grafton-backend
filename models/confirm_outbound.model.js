@@ -111,7 +111,6 @@ const getGrnDetailsForSelection = async (
     });
 
     if (lots.length === 0) {
-      console.log("MODEL (getGrnDetailsForSelection): No lots found.");
       return null;
     }
 
@@ -120,31 +119,23 @@ const getGrnDetailsForSelection = async (
 
 
 const formatMultipleDates = (dates, dateField) => {
-  console.log(`DEBUG: formatMultipleDates called with dateField: ${dateField}`);
-  console.log(`DEBUG: Total lots received:`, dates.length);
   
   // Debug: Print all date values for the field
   const rawDates = dates.map(lot => lot[dateField]);
-  console.log(`DEBUG: Raw ${dateField} values:`, rawDates);
   
   // Extract unique valid dates
   const filteredDates = rawDates.filter(dateString => dateString && dateString !== 'Invalid Date');
-  console.log(`DEBUG: Filtered ${dateField} values:`, filteredDates);
   
   const parsedDates = filteredDates.map(dateString => {
     // Fix the timezone format: +00 -> +00:00
     const fixedDateString = dateString.replace(/\+00$/, '+00:00');
-    console.log(`DEBUG: Fixed date string: "${dateString}" -> "${fixedDateString}"`);
     
     const date = new Date(fixedDateString);
-    console.log(`DEBUG: Parsing "${fixedDateString}" -> ${date} (valid: ${!isNaN(date.getTime())})`);
     return isNaN(date.getTime()) ? null : date;
   }).filter(date => date !== null);
   
-  console.log(`DEBUG: Successfully parsed dates:`, parsedDates);
   
   if (parsedDates.length === 0) {
-    console.log(`DEBUG: No valid dates found, returning N/A`);
     return "N/A";
   }
   
@@ -156,11 +147,8 @@ const formatMultipleDates = (dates, dateField) => {
       year: 'numeric'
     })
   ))];
-  
-  console.log(`DEBUG: Unique formatted date strings:`, uniqueDateStrings);
-  
+    
   if (uniqueDateStrings.length === 1) {
-    console.log(`DEBUG: Single unique date: ${uniqueDateStrings[0]}`);
     return uniqueDateStrings[0];
   }
   
@@ -172,18 +160,10 @@ const formatMultipleDates = (dates, dateField) => {
   });
   
   const result = sortedFormattedDates.join(', ');
-  console.log(`DEBUG: Multiple unique dates formatted as: ${result}`);
   return result;
 };
 
     const firstLot = lots[0];
-    
-    // DEBUG: Print lots data
-    console.log("DEBUG: First few lots data:", lots.slice(0, 2));
-    console.log("DEBUG: All delivery dates:", lots.map(lot => ({ 
-      lotNo: lot.lotNo, 
-      deliveryDate: lot.deliveryDate 
-    })));
     
     const result = {
       releaseDate: new Date().toLocaleDateString("en-GB", {
