@@ -1,7 +1,6 @@
 const db = require("../database");
 
 const grnModel = {
-  // MODIFIED: To support pagination, robust filtering, and new search functionality
   async getAllGrns(filters = {}) {
     console.log("MODEL (getAllGrns): Fetching GRNs with filters:", filters);
     try {
@@ -31,7 +30,7 @@ const grnModel = {
 
       if (filters.startDate && filters.endDate) {
         whereClauses.push(
-          `o."createdAt"::date BETWEEN :startDate::date AND :endDate::date`
+          `(o."createdAt" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
         );
         replacements.startDate = filters.startDate;
         replacements.endDate = filters.endDate;
