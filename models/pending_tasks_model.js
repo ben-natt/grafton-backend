@@ -1033,6 +1033,7 @@ const updateDuplicateStatus = async ({ lotId, reportStatus, resolvedBy }) => {
   }
 };
 
+// for report 
 const getReportSupervisorUsername = async (lotId) => {
   try {
     const query = `
@@ -1055,6 +1056,31 @@ const getReportSupervisorUsername = async (lotId) => {
     throw error;
   }
 };
+
+// for duplication 
+const getDuplicateReportUsername = async (lotId) => {
+  try {
+    const query = `
+      SELECT u.username
+      FROM public.lot_duplicate ld
+      JOIN public.users u ON ld."reportedById" = u.userid
+      WHERE ld."lotId" = :lotId
+      ORDER BY ld."reportedOn" DESC
+      LIMIT 1;
+    `;
+
+    const result = await db.sequelize.query(query, {
+      replacements: { lotId },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+
+    return result[0];
+  } catch (error) {
+    console.error("Error fetching duplicate report username:", error);
+    throw error;
+  }
+};
+
 
 const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
   try {
@@ -1089,6 +1115,7 @@ module.exports = {
   updateDuplicateStatus,
   pendingTasksUpdateQuantity,
   getReportSupervisorUsername,
+  getDuplicateReportUsername,
   updateLotInboundDate,
   getLotInboundDate,
   // Outbound

@@ -214,6 +214,35 @@ router.get("/report-supervisor/:lotId", async (req, res) => {
   }
 });
 
+
+router.get("/duplicate-report/:lotId", async (req, res) => {
+  try {
+    const lotId = parseInt(req.params.lotId);
+
+    if (!lotId || isNaN(lotId)) {
+      return res.status(400).json({ error: "Valid lotId is required" });
+    }
+
+    const result = await pendingTasksModel.getDuplicateReportUsername(lotId);
+
+    if (!result) {
+      return res.status(404).json({ 
+        error: "No duplicate report found for this lotId",
+        message: "No user has reported this lot as a duplicate"
+      });
+    }
+
+    res.status(200).json({ 
+      username: result.username,
+      message: "Username retrieved successfully"
+    });
+  } catch (error) {
+    console.error("Error fetching duplicate report username:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 router.post("/quantity/update", async (req, res) => {
   const { lotId, expectedBundleCount } = req.body; // changed from jobNo to lotId
   try {
