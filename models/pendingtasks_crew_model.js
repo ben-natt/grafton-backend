@@ -33,6 +33,13 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
           AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
         )
       )`,
+      // NEW: Exclude lots that are already scheduled for outbound
+      `NOT EXISTS (
+        SELECT 1
+        FROM public.selectedinbounds si
+        WHERE si."jobNo" = l."jobNo" 
+        AND si."lotNo" = l."lotNo"
+      )`,
     ];
     const replacements = {};
 
@@ -221,7 +228,6 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
   }
 };
 
-// These functions are no longer used by the main screen but are kept for compatibility.
 const getDetailsPendingTasksCrew = async (jobNo) => {
   try {
     const query = `
