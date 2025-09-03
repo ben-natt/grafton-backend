@@ -1,3 +1,4 @@
+
 const XLSX = require('xlsx');
 const { v4: uuidv4 } = require('uuid');
 const { sequelize, DataTypes } = require('../database');
@@ -116,6 +117,9 @@ exports.uploadExcel = async (req, res) => {
         const stuffingDateExcel = excelDateToJSDate(getCellValue('Stuffing Date'));
         const deliveryDateExcel = excelDateToJSDate(getCellValue('Delivery Date'));
 
+        // **MODIFIED LOGIC**: Determine which weight to use based on the isWeighted flag
+        const weightToUse = masterInbound.isWeighted ? masterInbound.actualWeight : masterInbound.netWeight;
+
         const lotDataForFrontend = {
           inboundId: masterInbound.inboundId,
           jobNo: masterInbound.jobNo,
@@ -125,13 +129,13 @@ exports.uploadExcel = async (req, res) => {
           brand: masterInbound.brandDetails?.name ?? null,
           shape: masterInbound.shapeDetails?.name ?? null,
           quantity: masterInbound.noOfBundle,
-          weight: masterInbound.netWeight,
+          weight: weightToUse, // Use the determined weight
           releaseDate: toLocalYYYYMMDD(releaseDateExcel),
           releaseEndDate: releaseEndDateExcel ? toLocalYYYYMMDD(releaseEndDateExcel) : null,
           storageReleaseLocation: getCellValue('Storage Release Location')?.toString().trim() ?? null,
           releaseWarehouse: getCellValue('Release To Warehouse')?.toString().trim() ?? null,
           transportVendor: getCellValue('Transport Vendor')?.toString().trim() ?? null,
-          lotReleaseWeight: masterInbound.netWeight,
+          lotReleaseWeight: weightToUse, // Use the determined weight
           exportDate: toLocalYYYYMMDD(exportDateExcel),
           stuffingDate: toLocalYYYYMMDD(stuffingDateExcel),
           containerNo: getCellValue('Container No')?.toString().trim() ?? null,
