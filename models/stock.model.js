@@ -49,67 +49,48 @@ const getInventory = async (filters) => {
     const replacements = { pageSize, offset };
 
     const cteQuery = `
-            WITH grouped_inventory AS (
-                SELECT
-                    i."jobNo" AS "Job No",
-                    COUNT(i."lotNo") AS "Lot No",
-                    c."commodityName" AS "Metal",
-                    b."brandName" AS "Brand",
-                    s."shapeName" AS "Shape",
-                    SUM(i."noOfBundle") AS "Qty",
-                    SUM(i."netWeight") AS "Weight",
-                    SUM(i."grossWeight") AS "GrossWeight",
-                    SUM(i."actualWeight") AS "ActualWeight",
-                    elme."exLmeWarehouseName" AS "ExLMEWarehouse",
-                    exwhl."exWarehouseLocationName" AS "ExWarehouseLocation",
-                    iw."inboundWarehouseName" AS "InboundWarehouse",
-                    u1."username" AS "ScheduledBy",
-                    u2."username" AS "ProcessedBy"
-                FROM
-                    public.inbounds i
-                LEFT JOIN
-                    public.selectedInbounds o ON o."inboundId" = i."inboundId"
-                LEFT JOIN
-                    public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
-                JOIN
-                    public.brands b ON b."brandId" = i."brandId"
-                JOIN
-                    public.commodities c ON c."commodityId" = i."commodityId"
-                JOIN
-                    public.shapes s ON s."shapeId" = i."shapeId"
-                LEFT JOIN public.exlmewarehouses elme ON elme."exLmeWarehouseId" = i."exLmeWarehouseId"
-                LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
-                LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
-                LEFT JOIN public.users u1 ON u1.userid = i."userId"
-                LEFT JOIN public.users u2 ON u2.userid = i."processedId"
-                WHERE
-                    o."inboundId" IS NULL
-                    AND ot."inboundId" IS NULL
-                GROUP BY
-                    i."jobNo", c."commodityName", b."brandName", s."shapeName", elme."exLmeWarehouseName", exwhl."exWarehouseLocationName", iw."inboundWarehouseName", u1."username", u2."username"
-            )
-        `;
+      WITH grouped_inventory AS (
+          SELECT
+              i."jobNo" AS "Job No",
+              COUNT(DISTINCT i."lotNo") AS "Lot No",
+              c."commodityName" AS "Metal",
+              b."brandName" AS "Brand",
+              s."shapeName" AS "Shape",
+              SUM(i."noOfBundle") AS "Qty",
+              SUM(CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END) AS "Weight",
+              SUM(i."grossWeight") AS "GrossWeight",
+              SUM(i."actualWeight") AS "ActualWeight"
+          FROM public.inbounds i
+          JOIN public.brands b ON b."brandId" = i."brandId"
+          JOIN public.commodities c ON c."commodityId" = i."commodityId"
+          JOIN public.shapes s ON s."shapeId" = i."shapeId"
+          WHERE NOT EXISTS (
+              SELECT 1 FROM public.selectedInbounds o 
+              WHERE o."inboundId" = i."inboundId"
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM public.outboundtransactions ot 
+              WHERE ot."inboundId" = i."inboundId"
+          )
+          GROUP BY i."jobNo", c."commodityName", b."brandName", s."shapeName"
+      )
+    `;
 
     let finalWhereClause = "";
     if (filters.search) {
       replacements.search = `%${filters.search}%`;
       finalWhereClause = `
-                WHERE
-                    "Job No" ILIKE :search OR
-                    "Metal" ILIKE :search OR
-                    "Brand" ILIKE :search OR
-                    "Shape" ILIKE :search OR
-                    CAST("Lot No" AS TEXT) ILIKE :search OR
-                    CAST("Qty" AS TEXT) ILIKE :search OR
-                    CAST("Weight" AS TEXT) ILIKE :search OR
-                    CAST("GrossWeight" AS TEXT) ILIKE :search OR
-                    CAST("ActualWeight" AS TEXT) ILIKE :search OR
-                    "ExLMEWarehouse" ILIKE :search OR
-                    "ExWarehouseLocation" ILIKE :search OR
-                    "InboundWarehouse" ILIKE :search OR
-                    "ScheduledBy" ILIKE :search OR
-                    "ProcessedBy" ILIKE :search
-            `;
+        WHERE
+            "Job No" ILIKE :search OR
+            "Metal" ILIKE :search OR
+            "Brand" ILIKE :search OR
+            "Shape" ILIKE :search OR
+            CAST("Lot No" AS TEXT) ILIKE :search OR
+            CAST("Qty" AS TEXT) ILIKE :search OR
+            CAST("Weight" AS TEXT) ILIKE :search OR
+            CAST("GrossWeight" AS TEXT) ILIKE :search OR
+            CAST("ActualWeight" AS TEXT) ILIKE :search
+      `;
     }
 
     // --- START: Sorting Logic for getInventory ---
@@ -133,13 +114,13 @@ const getInventory = async (filters) => {
     const countQuery = `${cteQuery} SELECT COUNT(*)::int AS "totalItems" FROM grouped_inventory ${finalWhereClause};`;
 
     const dataQuery = `
-            ${cteQuery}
-            SELECT *
-            FROM grouped_inventory
-            ${finalWhereClause}
-            ${orderByClause}
-            LIMIT :pageSize OFFSET :offset;
-        `;
+      ${cteQuery}
+      SELECT *
+      FROM grouped_inventory
+      ${finalWhereClause}
+      ${orderByClause}
+      LIMIT :pageSize OFFSET :offset;
+    `;
 
     const countReplacements = { ...replacements };
     delete countReplacements.pageSize;
@@ -163,6 +144,7 @@ const getInventory = async (filters) => {
     throw error;
   }
 };
+
 
 const getFilterOptions = async () => {
   try {
@@ -594,8 +576,15 @@ const createScheduleOutbound = async (scheduleData, userId) => {
         }
 
         const lotNoString = lot["Lot No"]?.toString() ?? "";
-        const [jobNo, lotNoStr] = lotNoString.split("-");
-        const lotNo = parseInt(lotNoStr, 10);
+        const parts = lotNoString.split("-");
+
+        if (parts.length < 2) {
+          console.warn(`Skipping invalid lot format: "${lotNoString}"`);
+          continue;
+        }
+
+        const jobNo = parts.slice(0, -1).join("-");
+        const lotNo = parseInt(parts[parts.length - 1], 10);
 
         if (!jobNo || !Number.isInteger(lotNo)) {
           console.warn(`Skipping invalid lot format: "${lotNoString}"`);
@@ -603,7 +592,6 @@ const createScheduleOutbound = async (scheduleData, userId) => {
         }
 
         await db.sequelize.query(selectedInboundsQuery, {
-          // MODIFICATION START: Added new date properties to the replacements object
           replacements: {
             inboundId,
             scheduleOutboundId,
@@ -614,7 +602,6 @@ const createScheduleOutbound = async (scheduleData, userId) => {
             exportDate: exportDate || null,
             deliveryDate: deliveryDate || null,
           },
-          // MODIFICATION END
           type: db.sequelize.QueryTypes.INSERT,
           transaction: t,
         });
@@ -646,6 +633,7 @@ const createScheduleOutbound = async (scheduleData, userId) => {
     );
   }
 };
+
 
 const EditInformation = async (inboundId, updateData) => {
   try {
