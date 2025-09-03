@@ -297,20 +297,21 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
   console.log("[DEBUG] Request Body:", req.body);
 
   // Get resolvedBy from the request body
-  const { sourceExWLot, targetExWLot, resolvedBy } = req.body;
+  const { sourceExWLot, targetExWLot, resolvedBy, lotId } = req.body;
   // console.log("resolvedBy:", resolvedBy);
 
   try {
     // Add validation for the new parameter
-    if (!sourceExWLot || !targetExWLot || !resolvedBy) {
+    if (!sourceExWLot || !targetExWLot || !resolvedBy || !lotId) {
       return res.status(400).json({
-        error: "sourceExWLot, targetExWLot, and resolvedBy must be provided",
+        error: "sourceExWLot, targetExWLot, resolvedBy, and lotId must be provided",
       });
     }
 
     const result = await actualWeightModel.duplicateActualWeightBundles(
       sourceExWLot,
       targetExWLot,
+      lotId,
       resolvedBy // Pass resolvedBy to the model function
     );
 

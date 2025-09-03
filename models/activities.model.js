@@ -353,24 +353,98 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
 
 const getFilterOptions = async () => {
   try {
-    const brandsQuery =
-      'SELECT DISTINCT "brandName" FROM public.brands WHERE "brandName" IS NOT NULL ORDER BY "brandName";';
-    const shapesQuery =
-      'SELECT DISTINCT "shapeName" FROM public.shapes WHERE "shapeName" IS NOT NULL ORDER BY "shapeName";';
-    const commoditiesQuery =
-      'SELECT DISTINCT "commodityName" FROM public.commodities WHERE "commodityName" IS NOT NULL ORDER BY "commodityName";';
-    const jobNosQuery = `SELECT "jobNo" FROM (
-        SELECT "jobNo" FROM public.inbounds WHERE "jobNo" IS NOT NULL
-        UNION
-        SELECT "jobNo" FROM public.outboundtransactions WHERE "jobNo" IS NOT NULL
+    const brandsQuery = `
+      SELECT "brandName" FROM (
+          SELECT DISTINCT b."brandName"
+          FROM public.inbounds i
+          JOIN public.brands b ON i."brandId" = b."brandId"
+          WHERE i."inboundDate" IS NOT NULL AND b."brandName" IS NOT NULL
+          UNION
+          SELECT DISTINCT trim(unnest(string_to_array(o.brands, ','))) AS "brandName"
+          FROM public.outboundtransactions o
+          WHERE o."releaseDate" IS NOT NULL AND o.brands IS NOT NULL AND o.brands != ''
+      ) AS all_brands
+      WHERE "brandName" IS NOT NULL AND "brandName" != ''
+      ORDER BY "brandName";
+    `;
+
+    const shapesQuery = `
+      SELECT "shapeName" FROM (
+          SELECT DISTINCT s."shapeName"
+          FROM public.inbounds i
+          JOIN public.shapes s ON i."shapeId" = s."shapeId"
+          WHERE i."inboundDate" IS NOT NULL AND s."shapeName" IS NOT NULL
+          UNION
+          SELECT DISTINCT o."shape" AS "shapeName"
+          FROM public.outboundtransactions o
+          WHERE o."releaseDate" IS NOT NULL AND o."shape" IS NOT NULL
+      ) AS all_shapes
+      WHERE "shapeName" IS NOT NULL
+      ORDER BY "shapeName";
+    `;
+
+    const commoditiesQuery = `
+      SELECT "commodityName" FROM (
+          SELECT DISTINCT c."commodityName"
+          FROM public.inbounds i
+          JOIN public.commodities c ON i."commodityId" = c."commodityId"
+          WHERE i."inboundDate" IS NOT NULL AND c."commodityName" IS NOT NULL
+          UNION
+          SELECT DISTINCT o."commodity" AS "commodityName"
+          FROM public.outboundtransactions o
+          WHERE o."releaseDate" IS NOT NULL AND o."commodity" IS NOT NULL
+      ) AS all_commodities
+      WHERE "commodityName" IS NOT NULL
+      ORDER BY "commodityName";
+    `;
+
+    const jobNosQuery = `
+      SELECT "jobNo" FROM (
+          SELECT "jobNo" FROM public.inbounds WHERE "jobNo" IS NOT NULL AND "inboundDate" IS NOT NULL
+          UNION
+          SELECT "jobNo" FROM public.outboundtransactions WHERE "jobNo" IS NOT NULL AND "releaseDate" IS NOT NULL
       ) AS all_jobs
-      ORDER BY "jobNo";`;
-    const inboundWarehousesQuery =
-      'SELECT DISTINCT "inboundWarehouseName" FROM public.inboundwarehouses WHERE "inboundWarehouseName" IS NOT NULL ORDER BY "inboundWarehouseName";';
-    const exWarehouseLocationsQuery =
-      'SELECT DISTINCT "exWarehouseLocationName" FROM public.exwarehouselocations WHERE "exWarehouseLocationName" IS NOT NULL ORDER BY "exWarehouseLocationName";';
-    const exLmeWarehousesQuery =
-      'SELECT DISTINCT "exLmeWarehouseName" FROM public.exlmewarehouses WHERE "exLmeWarehouseName" IS NOT NULL ORDER BY "exLmeWarehouseName";';
+      WHERE "jobNo" IS NOT NULL
+      ORDER BY "jobNo";
+    `;
+
+    const inboundWarehousesQuery = `
+      SELECT DISTINCT iw."inboundWarehouseName"
+      FROM public.inbounds i
+      JOIN public.inboundwarehouses iw ON i."inboundWarehouseId" = iw."inboundWarehouseId"
+      WHERE i."inboundDate" IS NOT NULL AND iw."inboundWarehouseName" IS NOT NULL
+      ORDER BY iw."inboundWarehouseName";
+    `;
+
+    const exWarehouseLocationsQuery = `
+      SELECT "exWarehouseLocationName" FROM (
+          SELECT DISTINCT exwhl."exWarehouseLocationName"
+          FROM public.inbounds i
+          JOIN public.exwarehouselocations exwhl ON i."exWarehouseLocationId" = exwhl."exWarehouseLocationId"
+          WHERE i."inboundDate" IS NOT NULL AND exwhl."exWarehouseLocationName" IS NOT NULL
+          UNION
+          SELECT DISTINCT o."exWarehouseLocation" AS "exWarehouseLocationName"
+          FROM public.outboundtransactions o
+          WHERE o."releaseDate" IS NOT NULL AND o."exWarehouseLocation" IS NOT NULL AND o."exWarehouseLocation" != ''
+      ) AS all_locations
+      WHERE "exWarehouseLocationName" IS NOT NULL
+      ORDER BY "exWarehouseLocationName";
+    `;
+
+    const exLmeWarehousesQuery = `
+      SELECT "exLmeWarehouseName" FROM (
+          SELECT DISTINCT exlme."exLmeWarehouseName"
+          FROM public.inbounds i
+          JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
+          WHERE i."inboundDate" IS NOT NULL AND exlme."exLmeWarehouseName" IS NOT NULL
+          UNION
+          SELECT DISTINCT o."exLmeWarehouse" AS "exLmeWarehouseName"
+          FROM public.outboundtransactions o
+          WHERE o."releaseDate" IS NOT NULL AND o."exLmeWarehouse" IS NOT NULL AND o."exLmeWarehouse" != ''
+      ) AS all_lme
+      WHERE "exLmeWarehouseName" IS NOT NULL
+      ORDER BY "exLmeWarehouseName";
+    `;
 
     const [
       brands,
@@ -525,8 +599,6 @@ const getAllScheduleInbound = async ({
     let whereClauses = [];
     const replacements = {};
 
-    // ... (All existing filter logic for whereClauses and replacements remains the same)
-
     if (filters.commodity) {
       whereClauses.push(`l."commodity" ILIKE :commodity`);
       replacements.commodity = `%${filters.commodity}%`;
@@ -606,7 +678,7 @@ const getAllScheduleInbound = async ({
       Metal: 'l."commodity"',
       Brand: 'l."brand"',
       Shape: 'l."shape"',
-      Bdl: 'l."expectedBundleCount"',
+      BDL: 'l."expectedBundleCount"',
       "Scheduled By": 'u1."username"',
     };
 
@@ -769,7 +841,7 @@ const getAllScheduleOutbound = async ({
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
-      Bdl: 'i."noOfBundle"',
+      BDL: 'i."noOfBundle"',
       "Scheduled By": 'u1."username"',
     };
 
