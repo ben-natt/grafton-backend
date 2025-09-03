@@ -133,7 +133,6 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
 
     // Priority 1: Check for inboundId
     if (inboundId && inboundId !== 0) {
-      console.log(`Using provided inboundId: ${inboundId}`);
       finalIdValue = inboundId;
       isInbound = true;
 
@@ -330,6 +329,7 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
     });
   }
 });
+
 // Check incomplete bundles (now supports jobNo/lotNo as alternative)
 router.post("/actual/check-incomplete", async (req, res) => {
   try {
@@ -372,6 +372,212 @@ router.post("/actual/check-incomplete", async (req, res) => {
     console.error("Error in /check-incomplete:", error);
     res.status(500).json({
       error: error.message || "Internal server error",
+    });
+  }
+});
+
+// checks if the jobNo/lotNo is already scheduled outbound also used in repack page to check if it is outbounded
+router.post("/actual/check-outbound-status", async (req, res) => {
+  try {
+    const {
+      inboundId,
+      lotId,
+      jobNo,
+      lotNo,
+    } = req.body;
+
+    let finalIdValue = null;
+    let isInbound = true;
+    let outboundStatus = null;
+    let searchAttempts = [];
+    let resolvedJobNo = jobNo;
+    let resolvedLotNo = lotNo;
+
+    // Priority 1: Check for inboundId
+    if (inboundId && inboundId !== 0) {
+      finalIdValue = inboundId;
+      isInbound = true;
+
+      outboundStatus = await actualWeightModel.checkOutboundScheduleStatus(
+        finalIdValue,
+        isInbound,
+        resolvedJobNo,
+        resolvedLotNo
+      );
+      
+      searchAttempts.push({
+        type: "inboundId",
+        id: finalIdValue,
+        found: outboundStatus ? 1 : 0,
+      });
+    }
+    
+    // Priority 2: Check for lotId if inboundId not found/is 0 OR if no status found with inboundId
+    if (!outboundStatus && lotId && lotId !== 0) {
+      finalIdValue = lotId;
+      isInbound = false;
+
+      outboundStatus = await actualWeightModel.checkOutboundScheduleStatus(
+        finalIdValue,
+        isInbound,
+        resolvedJobNo,
+        resolvedLotNo
+      );
+      
+      searchAttempts.push({
+        type: "lotId",
+        id: finalIdValue,
+        found: outboundStatus ? 1 : 0,
+      });
+    }
+
+    // Priority 3: Try to find using jobNo and lotNo if still no status found
+    if (!outboundStatus && jobNo && lotNo) {
+      // console.log(`Checking outbound status using jobNo: ${jobNo}, lotNo: ${lotNo}`);
+
+      // First try to find inboundId using jobNo and lotNo
+      const inboundResult = await actualWeightModel.findRelatedId(
+        null,
+        false,
+        jobNo,
+        lotNo
+      );
+
+      if (inboundResult && inboundResult !== 0) {
+        // console.log(`Found inboundId from jobNo/lotNo: ${inboundResult}`);
+        finalIdValue = inboundResult;
+        isInbound = true;
+
+        outboundStatus = await actualWeightModel.checkOutboundScheduleStatus(
+          finalIdValue,
+          isInbound,
+          jobNo,
+          lotNo
+        );
+        
+        searchAttempts.push({
+          type: "inboundId (from jobNo/lotNo)",
+          id: finalIdValue,
+          found: outboundStatus ? 1 : 0,
+        });
+
+        // If no status found with inboundId, try lotId
+        if (!outboundStatus) {
+          const lotResult = await actualWeightModel.findRelatedId(
+            null,
+            true,
+            jobNo,
+            lotNo
+          );
+
+          if (lotResult && lotResult !== 0) {
+            finalIdValue = lotResult;
+            isInbound = false;
+
+            outboundStatus = await actualWeightModel.checkOutboundScheduleStatus(
+              finalIdValue,
+              isInbound,
+              jobNo,
+              lotNo
+            );
+            
+            searchAttempts.push({
+              type: "lotId (from jobNo/lotNo)",
+              id: finalIdValue,
+              found: outboundStatus ? 1 : 0,
+            });
+          }
+        }
+      } else {
+        // If no inbound found, try to find lotId directly using jobNo and lotNo
+        const lotResult = await actualWeightModel.findRelatedId(
+          null,
+          true,
+          jobNo,
+          lotNo
+        );
+
+        if (lotResult && lotResult !== 0) {
+          finalIdValue = lotResult;
+          isInbound = false;
+
+          outboundStatus = await actualWeightModel.checkOutboundScheduleStatus(
+            finalIdValue,
+            isInbound,
+            jobNo,
+            lotNo
+          );
+          
+          searchAttempts.push({
+            type: "lotId (from jobNo/lotNo)",
+            id: finalIdValue,
+            found: outboundStatus ? 1 : 0,
+          });
+        }
+      }
+    }
+
+
+    // Prepare response
+    const isScheduledForOutbound = !!outboundStatus;
+    let message = '';
+    let scheduledDate = null;
+    let outboundReference = null;
+
+    if (isScheduledForOutbound) {
+      const status = outboundStatus;
+      
+      // Format the scheduled date
+      if (status.scheduledAt) {
+        scheduledDate = new Date(status.scheduledAt).toISOString().split('T')[0];
+      }
+      
+      // Create outbound reference
+      outboundReference = `OUT-${status.scheduleOutboundId}`;
+      
+      // Create appropriate message based on outbound status
+      if (status.isOutbounded) {
+        message = `This lot has already been outbounded (${outboundReference}). Weight editing is disabled.`;
+      } else if (status.releaseDate || status.exportDate || status.deliveryDate) {
+        const releaseInfo = status.releaseDate ? `Release: ${new Date(status.releaseDate).toLocaleDateString()}` : '';
+        const exportInfo = status.exportDate ? `Export: ${new Date(status.exportDate).toLocaleDateString()}` : '';
+        const deliveryInfo = status.deliveryDate ? `Delivery: ${new Date(status.deliveryDate).toLocaleDateString()}` : '';
+        
+        const dates = [releaseInfo, exportInfo, deliveryInfo].filter(Boolean).join(', ');
+        message = `This lot is scheduled for outbound (${outboundReference}). ${dates}. Weight editing is disabled.`;
+      } else {
+        message = `This lot is scheduled for outbound (${outboundReference}) on ${scheduledDate}. Weight editing is disabled.`;
+      }
+    } else {
+      message = 'Lot is not scheduled for outbound. Weight editing is allowed.';
+    }
+
+    // Return response
+    res.json({
+      isScheduledForOutbound,
+      scheduledDate,
+      outboundReference,
+      message,
+      searchAttempts,
+      finalSearchedId: finalIdValue,
+      finalSearchedType: isInbound ? "inboundId" : "lotId",
+      outboundDetails: outboundStatus ? {
+        selectedInboundId: outboundStatus.selectedInboundId,
+        scheduleOutboundId: outboundStatus.scheduleOutboundId,
+        isOutbounded: outboundStatus.isOutbounded,
+        releaseDate: outboundStatus.releaseDate,
+        exportDate: outboundStatus.exportDate,
+        deliveryDate: outboundStatus.deliveryDate,
+      } : null
+    });
+
+  } catch (error) {
+    console.error("Error in check-outbound-status:", error);
+    res.status(500).json({
+      error: "Internal server error",
+      details: error.message,
+      isScheduledForOutbound: false,
+      message: "Error checking outbound status. Weight editing is temporarily disabled.",
     });
   }
 });

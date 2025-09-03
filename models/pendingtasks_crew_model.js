@@ -5,9 +5,8 @@ const { Op } = require("sequelize");
 const formatDate = (date) => {
   if (!date) return "N/A";
   const d = new Date(date);
-  const day = d.getDate();
-  // Using 'short' month format (e.g., 'Jul') to match Dart's 'MMM' format.
-  const month = d.toLocaleString("en-US", { month: "long" });
+  const day = String(d.getDate()).padStart(2, "0"); // Ensures two-digit day
+  const month = d.toLocaleString("en-US", { month: "short" }); // Use 'short' for 'Sep'
   const year = d.getFullYear();
   return `${day} ${month} ${year}`;
 };
@@ -33,6 +32,13 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
           WHERE ib."inboundId" = i."inboundId"
           AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
         )
+      )`,
+      // NEW: Exclude lots that are already scheduled for outbound
+      `NOT EXISTS (
+        SELECT 1
+        FROM public.selectedinbounds si
+        WHERE si."jobNo" = l."jobNo" 
+        AND si."lotNo" = l."lotNo"
       )`,
     ];
     const replacements = {};
@@ -170,7 +176,8 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
         };
       }
 
-      if (lot.inbounddate) acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
+      if (lot.inbounddate)
+        acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
 
       acc[jobNo].lotDetails.push({
         lotId: lot.lotId,
@@ -190,24 +197,28 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
     }, {});
 
     // --- 7. Compute display date (single vs range) for each job ---
-Object.values(groupedByJobNo).forEach((group) => {
-  if (group.inboundDates.length > 0) {
-    const minDate = new Date(Math.min(...group.inboundDates.map((d) => d.getTime())));
-    const maxDate = new Date(Math.max(...group.inboundDates.map((d) => d.getTime())));
-    
-    // Check if dates are the same (compare date strings to avoid time differences)
-    const minDateString = minDate.toDateString();
-    const maxDateString = maxDate.toDateString();
-    
-    group.userInfo.inboundDate =
-      minDateString === maxDateString
-        ? formatDate(minDate)
-        : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
-  } else {
-    group.userInfo.inboundDate = "N/A";
-  }
-  delete group.inboundDates;
-});
+    Object.values(groupedByJobNo).forEach((group) => {
+      if (group.inboundDates.length > 0) {
+        const minDate = new Date(
+          Math.min(...group.inboundDates.map((d) => d.getTime()))
+        );
+        const maxDate = new Date(
+          Math.max(...group.inboundDates.map((d) => d.getTime()))
+        );
+
+        // Check if dates are the same (compare date strings to avoid time differences)
+        const minDateString = minDate.toDateString();
+        const maxDateString = maxDate.toDateString();
+
+        group.userInfo.inboundDate =
+          minDateString === maxDateString
+            ? formatDate(minDate)
+            : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
+      } else {
+        group.userInfo.inboundDate = "N/A";
+      }
+      delete group.inboundDates;
+    });
 
     const finalData = Object.values(groupedByJobNo);
     return { data: finalData, page, pageSize, totalPages, totalCount };
@@ -217,7 +228,6 @@ Object.values(groupedByJobNo).forEach((group) => {
   }
 };
 
-// These functions are no longer used by the main screen but are kept for compatibility.
 const getDetailsPendingTasksCrew = async (jobNo) => {
   try {
     const query = `

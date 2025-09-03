@@ -634,107 +634,81 @@ const getBundlesIfWeighted = async (
 
 const checkIncompleteBundles = async (inboundId, strictValidation = false) => {
   try {
-    // Step 1: Get all bundles associated with the inbound record.
-    const bundles = await getBundlesIfWeighted(
-      inboundId,
-      true,
-      strictValidation
-    );
+    const statsSql = `
+      SELECT
+        COUNT(*)::int AS total_count,
+        COUNT(*) FILTER (
+          WHERE (ib.weight IS NULL OR ib.weight <= 0)
+             OR (ib."meltNo" IS NULL OR TRIM(ib."meltNo") = '')
+        )::int AS incomplete_count,
+        COUNT(*) FILTER (
+          WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
+            AND (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
+        )::int AS complete_count,
+        COUNT(*) FILTER (
+          WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
+             OR (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
+        )::int AS any_data_count
+      FROM public.inboundbundles ib
+      WHERE ib."inboundId" = :inboundId;
+    `;
 
-    // If there are no bundles, the lot cannot be incomplete.
-    if (!bundles || bundles.length === 0) {
+    const stats = await db.sequelize.query(statsSql, {
+      replacements: { inboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+
+    const totalBundles = stats?.total_count ?? 0;
+
+    if (totalBundles === 0) {
       return {
         isIncomplete: false,
-        details: {},
+        details: { totalBundles: 0, incompleteLotCount: 0 },
         inboundId,
         incompleteLotNos: [],
       };
     }
 
-    // Step 2: Determine if any work has been started.
-    // "hasAnyData" is true if at least one bundle has a weight or a melt number.
-    const hasAnyData = bundles.some(
-      (b) =>
-        (b.weight != null && b.weight > 0) ||
-        (b.meltNo != null && b.meltNo.trim() !== "")
-    );
+    const hasAnyData = (stats.any_data_count ?? 0) > 0;
 
-    // If no data has been entered at all, the lot is not "incomplete"; it's "not started".
-    // The icon should not be shown.
-    if (!hasAnyData) {
-      return {
-        isIncomplete: false,
-        details: {},
-        inboundId,
-        incompleteLotNos: [],
-      };
-    }
-
-    // Step 3: Determine if the lot is fully complete.
-    // "isFullyComplete" is true only if EVERY bundle has both a weight and a melt number.
-    const isFullyComplete = bundles.every(
-      (b) =>
-        b.weight != null &&
-        b.weight > 0 &&
-        b.meltNo != null &&
-        b.meltNo.trim() !== ""
-    );
-
-    // A lot is "incomplete" if work has started (`hasAnyData`) but it is not yet
-    // fully complete (`!isFullyComplete`). This is the state where the icon should be visible.
+    // strictValidation toggle (kept for compatibility):
+    const isFullyComplete = (stats.incomplete_count ?? 0) === 0;
     const isInboundIncomplete = hasAnyData && !isFullyComplete;
 
     let incompleteLotNos = [];
     if (isInboundIncomplete) {
-      // If the overall status is incomplete, we can assume the associated lot numbers are affected.
-      // This part finds the lot numbers to pass back to the UI.
-      const inboundRecord = await db.sequelize.query(
-        `SELECT "jobNo", "lotNo" FROM public.inbounds WHERE "inboundId" = :inboundId`,
+      const lotRows = await db.sequelize.query(
+        `
+        SELECT l."lotId", l."lotNo"
+        FROM public.inbounds i
+        JOIN public.lot l
+          ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+        WHERE i."inboundId" = :inboundId;
+        `,
         {
           replacements: { inboundId },
           type: db.sequelize.QueryTypes.SELECT,
-          plain: true,
         }
       );
-
-      if (inboundRecord) {
-        const lotResults = await db.sequelize.query(
-          `SELECT "lotId", "lotNo" FROM public.lot WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo`,
-          {
-            replacements: {
-              jobNo: inboundRecord.jobNo,
-              lotNo: inboundRecord.lotNo,
-            },
-            type: db.sequelize.QueryTypes.SELECT,
-          }
-        );
-        incompleteLotNos = lotResults.map((lot) => lot.lotNo);
-      }
+      incompleteLotNos = Array.from(new Set(lotRows.map(r => r.lotNo)));
     }
 
-    const result = {
+    return {
       isIncomplete: isInboundIncomplete,
       details: {
-        totalBundles: bundles.length,
+        totalBundles,
         incompleteLotCount: incompleteLotNos.length,
       },
       inboundId,
-      incompleteLotNos: [...new Set(incompleteLotNos)],
+      incompleteLotNos,
     };
-
-    console.log(
-      `[checkIncompleteBundles] Final result for inboundId ${inboundId}:`,
-      JSON.stringify(result, null, 2)
-    );
-    return result;
   } catch (error) {
-    console.error(
-      `[checkIncompleteBundles] Error for inboundId ${inboundId}:`,
-      error
-    );
+    console.error(`[checkIncompleteBundles] Error for inboundId ${inboundId}:`, error);
     throw error;
   }
 };
+
 
 // User-provided function to update the report status
 const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
@@ -904,6 +878,116 @@ const duplicateActualWeightBundles = async (
   }
 };
 
+// checks if the jobNo/lotNo is already scheduled outbound
+const checkOutboundScheduleStatus = async (
+  idValue,
+  isInbound,
+  jobNo = null,
+  lotNo = null
+) => {
+  try {
+    let query;
+    let replacements;
+
+    if (isInbound) {
+      // Check by inboundId
+      query = `
+        SELECT 
+          si."selectedInboundId",
+          si."inboundId",
+          si."scheduleOutboundId",
+          si."isOutbounded",
+          si."jobNo",
+          si."lotNo",
+          si."releaseDate",
+          si."exportDate",
+          si."deliveryDate",
+          si."createdAt" as "scheduledAt"
+        FROM selectedinbounds si
+        WHERE si."inboundId" = ?
+        ORDER BY si."createdAt" DESC
+        LIMIT 1
+      `;
+      replacements = [idValue];
+    } else {
+      // Check by jobNo and lotNo (since selectedinbounds uses these fields)
+      if (jobNo && lotNo) {
+        query = `
+          SELECT 
+            si."selectedInboundId",
+            si."inboundId",
+            si."scheduleOutboundId",
+            si."isOutbounded",
+            si."jobNo",
+            si."lotNo",
+            si."releaseDate",
+            si."exportDate",
+            si."deliveryDate",
+            si."createdAt" as "scheduledAt"
+          FROM selectedinbounds si
+          WHERE si."jobNo" = ? AND si."lotNo" = ?
+          ORDER BY si."createdAt" DESC
+          LIMIT 1
+        `;
+        replacements = [jobNo, lotNo];
+      } else {
+        // If we only have lotId, we need to find the corresponding jobNo/lotNo first
+        // This requires looking up the lot details from your lots table
+        
+        // First, find the jobNo and lotNo from the lotId
+        const lotQuery = `
+          SELECT "jobNo", "lotNo" 
+          FROM lots 
+          WHERE "lotId" = ?
+        `;
+        
+        const lotResult = await db.sequelize.query(lotQuery, {
+          replacements: [idValue],
+          type: db.sequelize.QueryTypes.SELECT,
+        });
+        
+        if (!lotResult || lotResult.length === 0) {
+          return null;
+        }
+        
+        const { jobNo: foundJobNo, lotNo: foundLotNo } = lotResult[0];
+        
+        // Now check selectedinbounds with the found jobNo and lotNo
+        query = `
+          SELECT 
+            si."selectedInboundId",
+            si."inboundId",
+            si."scheduleOutboundId",
+            si."isOutbounded",
+            si."jobNo",
+            si."lotNo",
+            si."releaseDate",
+            si."exportDate",
+            si."deliveryDate",
+            si."createdAt" as "scheduledAt"
+          FROM selectedinbounds si
+          WHERE si."jobNo" = ? AND si."lotNo" = ?
+          ORDER BY si."createdAt" DESC
+          LIMIT 1
+        `;
+        replacements = [foundJobNo, foundLotNo];
+      }
+    }
+
+    const result = await db.sequelize.query(query, {
+      replacements: replacements,
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    
+    return result.length > 0 ? result[0] : null;
+    
+  } catch (error) {
+    console.error("Error in checkOutboundScheduleStatus:", error);
+    throw error;
+  }
+};
+
+
 module.exports = {
   // Helper function
   findRelatedId,
@@ -916,4 +1000,5 @@ module.exports = {
   duplicateActualWeightBundles,
   updateReportStatus,
   checkIncompleteBundles,
+  checkOutboundScheduleStatus,
 };
