@@ -33,9 +33,8 @@ const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
   }
 };
 
-
 exports.createScheduleInbound = async (req, res) => {
-  const userId = req.user.userId; 
+  const userId = req.user.userId;
   const { inboundDate, jobDataMap } = req.body;
 
   if (!jobDataMap || Object.keys(jobDataMap).length === 0) {
@@ -58,6 +57,14 @@ exports.createScheduleInbound = async (req, res) => {
             lot.shape = 'Ingot';
           } else if (shapeLower === 'tbar') {
             lot.shape = 'T-bar';
+          }
+        }
+
+        if (lot.commodity && typeof lot.commodity === 'string') {
+          if (lot.commodity.toUpperCase() === 'LEAD') {
+            lot.commodity = 'Lead';
+          } else if (lot.commodity.toUpperCase() === 'ZINC') {
+            lot.commodity = 'Zinc';
           }
         }
       }
@@ -107,7 +114,6 @@ exports.createScheduleInbound = async (req, res) => {
     });
   }
 };
-
 
 // The uploadExcel function does not need changes. It is included for completeness.
 exports.uploadExcel = async (req, res) => {

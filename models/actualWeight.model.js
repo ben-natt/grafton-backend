@@ -776,6 +776,7 @@ const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
 const duplicateActualWeightBundles = async (
   sourceExWLot,
   targetExWLot,
+  lotId,
   resolvedBy
 ) => {
   console.log(`[DEBUG] Model: Starting duplicateActualWeightBundles.`);
@@ -785,12 +786,12 @@ const duplicateActualWeightBundles = async (
     const targetLotQuery = `
       SELECT "lotId" 
       FROM public.lot 
-      WHERE "exWarehouseLot" = :targetExWLot
+      WHERE "exWarehouseLot" = :targetExWLot and "lotId" = :lotId
       ORDER BY "createdAt" DESC
       LIMIT 1;
     `;
     const [targetLot] = await db.sequelize.query(targetLotQuery, {
-      replacements: { targetExWLot },
+      replacements: { targetExWLot, lotId },
       type: db.sequelize.QueryTypes.SELECT,
       transaction,
     });
