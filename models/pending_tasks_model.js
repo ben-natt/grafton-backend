@@ -6,8 +6,8 @@ const db = require("../database");
 const formatDate = (date) => {
   if (!date) return "N/A";
   const d = new Date(date);
-  const day = d.getDate();
-  const month = d.toLocaleString("en-US", { month: "long" });
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-US", { month: "short" });
   const year = d.getFullYear();
   return `${day} ${month} ${year}`;
 };
@@ -126,7 +126,7 @@ const getPendingInboundTasks = async (
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-    // group and compute display date (single vs range) 
+    // group and compute display date (single vs range)
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
@@ -137,7 +137,8 @@ const getPendingInboundTasks = async (
           inboundDates: [],
         };
       }
-      if (lot.inbounddate) acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
+      if (lot.inbounddate)
+        acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
       acc[jobNo].lotDetails.push({
         lotId: lot.lotId,
         lotNo: lot.lotNo,
@@ -154,25 +155,28 @@ const getPendingInboundTasks = async (
       return acc;
     }, {});
 
+    Object.values(groupedByJobNo).forEach((group) => {
+      if (group.inboundDates.length > 0) {
+        const minDate = new Date(
+          Math.min(...group.inboundDates.map((d) => d.getTime()))
+        );
+        const maxDate = new Date(
+          Math.max(...group.inboundDates.map((d) => d.getTime()))
+        );
 
-Object.values(groupedByJobNo).forEach((group) => {
-  if (group.inboundDates.length > 0) {
-    const minDate = new Date(Math.min(...group.inboundDates.map((d) => d.getTime())));
-    const maxDate = new Date(Math.max(...group.inboundDates.map((d) => d.getTime())));
-    
-    // Check if dates are the same (compare date strings to avoid time differences)
-    const minDateString = minDate.toDateString();
-    const maxDateString = maxDate.toDateString();
-    
-    group.userInfo.inboundDate =
-      minDateString === maxDateString
-        ? formatDate(minDate)
-        : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
-  } else {
-    group.userInfo.inboundDate = "N/A";
-  }
-  delete group.inboundDates;
-});
+        // Check if dates are the same (compare date strings to avoid time differences)
+        const minDateString = minDate.toDateString();
+        const maxDateString = maxDate.toDateString();
+
+        group.userInfo.inboundDate =
+          minDateString === maxDateString
+            ? formatDate(minDate)
+            : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
+      } else {
+        group.userInfo.inboundDate = "N/A";
+      }
+      delete group.inboundDates;
+    });
 
     const finalData = Object.values(groupedByJobNo);
     return { data: finalData, page, pageSize, totalPages, totalCount };
@@ -205,9 +209,10 @@ const getPendingOutboundTasks = async (
     const baseWhereString = baseWhere.join(" AND ");
 
     // Use CTE approach similar to inbound logic
-    const dateOverlapWhere = startDate && endDate 
-      ? `WHERE sr.max_release_date >= :startDate::date AND sr.min_release_date <= :endDate::date`
-      : "";
+    const dateOverlapWhere =
+      startDate && endDate
+        ? `WHERE sr.max_release_date >= :startDate::date AND sr.min_release_date <= :endDate::date`
+        : "";
 
     if (startDate && endDate) {
       replacements.startDate = startDate;
@@ -326,7 +331,9 @@ const getPendingOutboundTasks = async (
           },
           userInfo: {
             username: item.username,
-            stuffingDate: item.stuffingDate ? formatDate(item.stuffingDate) : null,
+            stuffingDate: item.stuffingDate
+              ? formatDate(item.stuffingDate)
+              : null,
             containerNo: item.containerNo,
             sealNo: item.sealNo,
           },
@@ -336,8 +343,10 @@ const getPendingOutboundTasks = async (
       }
 
       // Collect all release dates for this schedule to calculate range later
-      if (item.releaseDate) acc[scheduleId].releaseDates.push(new Date(item.releaseDate));
-      if (item.releaseEndDate) acc[scheduleId].releaseDates.push(new Date(item.releaseEndDate));
+      if (item.releaseDate)
+        acc[scheduleId].releaseDates.push(new Date(item.releaseDate));
+      if (item.releaseEndDate)
+        acc[scheduleId].releaseDates.push(new Date(item.releaseEndDate));
 
       acc[scheduleId].lotDetails.push({
         selectedInboundId: item.selectedInboundId,
@@ -354,26 +363,28 @@ const getPendingOutboundTasks = async (
     }, {});
 
     // Calculate date ranges for each schedule (similar to inbound logic)
-Object.values(groupedByScheduleId).forEach((group) => {
-  if (group.releaseDates.length > 0) {
-    const minDate = new Date(Math.min(...group.releaseDates.map(d => d.getTime())));
-    const maxDate = new Date(Math.max(...group.releaseDates.map(d => d.getTime())));
-    
-    // Check if dates are the same (compare date strings to avoid time differences)
-    const minDateString = minDate.toDateString();
-    const maxDateString = maxDate.toDateString();
-    
-    group.userInfo.releaseDate = formatDate(minDate);
-    group.userInfo.releaseEndDate = 
-      minDateString === maxDateString 
-        ? null 
-        : formatDate(maxDate);
-  } else {
-    group.userInfo.releaseDate = null;
-    group.userInfo.releaseEndDate = null;
-  }
-  delete group.releaseDates;
-});
+    Object.values(groupedByScheduleId).forEach((group) => {
+      if (group.releaseDates.length > 0) {
+        const minDate = new Date(
+          Math.min(...group.releaseDates.map((d) => d.getTime()))
+        );
+        const maxDate = new Date(
+          Math.max(...group.releaseDates.map((d) => d.getTime()))
+        );
+
+        // Check if dates are the same (compare date strings to avoid time differences)
+        const minDateString = minDate.toDateString();
+        const maxDateString = maxDate.toDateString();
+
+        group.userInfo.releaseDate = formatDate(minDate);
+        group.userInfo.releaseEndDate =
+          minDateString === maxDateString ? null : formatDate(maxDate);
+      } else {
+        group.userInfo.releaseDate = null;
+        group.userInfo.releaseEndDate = null;
+      }
+      delete group.releaseDates;
+    });
 
     const finalData = Object.values(groupedByScheduleId);
     return { data: finalData, page, pageSize, totalPages, totalCount };
@@ -428,18 +439,21 @@ const pendingTasksUserId = async (jobNo) => {
     const minDate = new Date(Math.min(...dates));
     const maxDate = new Date(Math.max(...dates));
     const inboundDates = result.map((r) => r.inboundDate);
+    // Helper to format date in 'dd mmm yyyy'
+    const formatDateLegacy = (d) => {
+      const day = String(d.getDate()).padStart(2, "0");
+      const month = d.toLocaleString("en-SG", { month: "short" });
+      const year = d.getFullYear();
+      return `${day} ${month} ${year}`;
+    };
+
     let formattedRange;
     if (minDate.getTime() === maxDate.getTime()) {
-      formattedRange = `${minDate.getDate()} ${minDate.toLocaleString("en-SG", {
-        month: "long",
-      })} ${minDate.getFullYear()}`;
+      formattedRange = formatDateLegacy(minDate);
     } else {
-      formattedRange = `${minDate.getDate()} ${minDate.toLocaleString("en-SG", {
-        month: "long",
-      })} ${minDate.getFullYear()} - ${maxDate.getDate()} ${maxDate.toLocaleString(
-        "en-SG",
-        { month: "long" }
-      )} ${maxDate.getFullYear()}`;
+      formattedRange = `${formatDateLegacy(minDate)} - ${formatDateLegacy(
+        maxDate
+      )}`;
     }
     return {
       username: result[0].username || "",
@@ -569,7 +583,7 @@ const findInboundTasksOffice = async (
       plain: true,
     });
     const totalCount = countResult.count;
-    
+
     const jobNoQuery = `
       SELECT l."jobNo"
       FROM public.lot l
@@ -581,13 +595,11 @@ const findInboundTasksOffice = async (
       LIMIT :pageSize OFFSET :offset
     `;
 
-    
     const jobNosResult = await db.sequelize.query(jobNoQuery, {
       replacements: { ...replacements, pageSize, offset },
       type: db.sequelize.QueryTypes.SELECT,
     });
     const jobNos = jobNosResult.map((j) => j.jobNo);
-
 
     if (jobNos.length === 0) {
       return { totalCount, data: {} };
@@ -614,12 +626,10 @@ const findInboundTasksOffice = async (
       ORDER BY l."inbounddate" ASC, l."lotNo"::integer ASC, l.report DESC
     `;
 
-
     const tasksResult = await db.sequelize.query(tasksQuery, {
       replacements: { ...replacements, jobNos },
       type: db.sequelize.QueryTypes.SELECT,
     });
-
 
     const tasksMap = {};
     for (const task of tasksResult) {
@@ -629,13 +639,12 @@ const findInboundTasksOffice = async (
       tasksMap[task.jobNo].push({ ...task, canEdit: false, isEditing: false });
     }
 
-    Object.keys(tasksMap).forEach(jobNo => {
+    Object.keys(tasksMap).forEach((jobNo) => {
       console.log(`  JobNo ${jobNo}: ${tasksMap[jobNo].length} lots`);
       tasksMap[jobNo].forEach((lot, index) => {
         console.log(`    Lot ${index + 1}: ${lot.lotNo} (ID: ${lot.lotId})`);
       });
     });
-
 
     return { totalCount, data: tasksMap };
   } catch (error) {
@@ -809,8 +818,12 @@ SELECT
       }
 
       // Create release date range string
-      let releaseDateRange = task.releaseDate || '';
-      if (task.releaseDate && task.releaseEndDate && task.releaseDate !== task.releaseEndDate) {
+      let releaseDateRange = task.releaseDate || "";
+      if (
+        task.releaseDate &&
+        task.releaseEndDate &&
+        task.releaseDate !== task.releaseEndDate
+      ) {
         releaseDateRange = `${task.releaseDate} - ${task.releaseEndDate}`;
       }
 
@@ -836,8 +849,7 @@ SELECT
     }
 
     return { totalCount, data: tasksMap };
-  }
-  catch (error) {
+  } catch (error) {
     console.error("Error fetching filtered outbound tasks:", error);
     throw error;
   }
@@ -881,15 +893,22 @@ const convertDateFormat = (dateString) => {
 
   // Convert DD/MM/YYYY to YYYY-MM-DD
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
-    const [day, month, year] = dateString.split('/');
-    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    const [day, month, year] = dateString.split("/");
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   }
 
   return null;
 };
 
 // Updated updateLotOutboundDates with date conversion
-const updateLotOutboundDates = async (jobNo, lotNo, releaseDate, releaseEndDate, exportDate, deliveryDate) => {
+const updateLotOutboundDates = async (
+  jobNo,
+  lotNo,
+  releaseDate,
+  releaseEndDate,
+  exportDate,
+  deliveryDate
+) => {
   try {
     // Convert dates from DD/MM/YYYY to YYYY-MM-DD format
     const convertedReleaseDate = convertDateFormat(releaseDate);
@@ -916,7 +935,7 @@ const updateLotOutboundDates = async (jobNo, lotNo, releaseDate, releaseEndDate,
         releaseDate: convertedReleaseDate,
         releaseEndDate: convertedReleaseEndDate,
         exportDate: convertedExportDate,
-        deliveryDate: convertedDeliveryDate
+        deliveryDate: convertedDeliveryDate,
       },
       type: db.sequelize.QueryTypes.UPDATE,
     });
@@ -926,8 +945,7 @@ const updateLotOutboundDates = async (jobNo, lotNo, releaseDate, releaseEndDate,
     console.error("Error updating lot outbound dates:", error);
     throw error;
   }
-}
-
+};
 
 const getOfficeFilterOptions = async (isOutbound) => {
   try {
@@ -1033,7 +1051,7 @@ const updateDuplicateStatus = async ({ lotId, reportStatus, resolvedBy }) => {
   }
 };
 
-// for report 
+// for report
 const getReportSupervisorUsername = async (lotId) => {
   try {
     const query = `
@@ -1057,7 +1075,7 @@ const getReportSupervisorUsername = async (lotId) => {
   }
 };
 
-// for duplication 
+// for duplication
 const getDuplicateReportUsername = async (lotId) => {
   try {
     const query = `
@@ -1081,7 +1099,6 @@ const getDuplicateReportUsername = async (lotId) => {
   }
 };
 
-
 const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
   try {
     const query = `
@@ -1101,9 +1118,6 @@ const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
     throw error;
   }
 };
-
-
-
 
 module.exports = {
   // Inbound
@@ -1128,6 +1142,5 @@ module.exports = {
   getOfficeFilterOptions,
   getPendingInboundTasks, // Export the new function
   updateLotOutboundDates,
-  getLotOutboundDates
-
+  getLotOutboundDates,
 };
