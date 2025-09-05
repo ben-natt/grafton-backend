@@ -262,7 +262,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       replacements.exWarehouseLocation = `%${filters.exWarehouseLocation}%`;
     }
     if (filters.exLmeWarehouse) {
-      whereClauses.push(`w."exLmeWarehouseName" ILIKE :exLmeWarehouse`);
+      whereClauses.push(`o."exLmeWarehouse" ILIKE :exLmeWarehouse`);
       replacements.exLmeWarehouse = `%${filters.exLmeWarehouse}%`;
     }
 
