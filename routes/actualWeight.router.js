@@ -331,52 +331,6 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
   }
 });
 
-// Check incomplete bundles (now supports jobNo/lotNo as alternative)
-router.post("/actual/check-incomplete", async (req, res) => {
-  try {
-    const { inboundId, jobNo, lotNo, strictValidation = false } = req.body;
-
-    // Validate we have either inboundId or jobNo/lotNo
-    if (!inboundId && (!jobNo || !lotNo)) {
-      return res.status(400).json({
-        error: "Either inboundId OR (jobNo and lotNo) must be provided",
-      });
-    }
-
-    let actualInboundId = inboundId;
-
-    if (!actualInboundId) {
-      // Try to find inboundId using jobNo and lotNo
-      const inboundResult = await actualWeightModel.findRelatedId(
-        null,
-        false,
-        jobNo,
-        lotNo
-      );
-
-      if (!inboundResult) {
-        return res.status(404).json({
-          error: "No matching inbound found for given jobNo and lotNo",
-        });
-      }
-
-      actualInboundId = inboundResult;
-    }
-
-    const result = await actualWeightModel.checkIncompleteBundles(
-      actualInboundId,
-      strictValidation
-    );
-
-    res.status(200).json(result);
-  } catch (error) {
-    console.error("Error in /check-incomplete:", error);
-    res.status(500).json({
-      error: error.message || "Internal server error",
-    });
-  }
-});
-
 // checks if the jobNo/lotNo is already scheduled outbound also used in repack page to check if it is outbounded
 router.post("/actual/check-outbound-status", async (req, res) => {
   try {
@@ -434,8 +388,6 @@ router.post("/actual/check-outbound-status", async (req, res) => {
 
     // Priority 3: Try to find using jobNo and lotNo if still no status found
     if (!outboundStatus && jobNo && lotNo) {
-      // console.log(`Checking outbound status using jobNo: ${jobNo}, lotNo: ${lotNo}`);
-
       // First try to find inboundId using jobNo and lotNo
       const inboundResult = await actualWeightModel.findRelatedId(
         null,
@@ -445,7 +397,6 @@ router.post("/actual/check-outbound-status", async (req, res) => {
       );
 
       if (inboundResult && inboundResult !== 0) {
-        // console.log(`Found inboundId from jobNo/lotNo: ${inboundResult}`);
         finalIdValue = inboundResult;
         isInbound = true;
 
