@@ -8,14 +8,13 @@ router.get("/tasks-jobNo", async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 10;
 
-    // Extract filters from query parameters to pass to the model
     const filters = {
       startDate: req.query.startDate,
       endDate: req.query.endDate,
       exWarehouseLot: req.query.exWarehouseLot,
     };
 
-    const result = await pendingTasksCrewModal.getPendingTasks(
+    const result = await pendingTasksCrewModal.getPendingTasksWithIncompleteStatus(
       page,
       pageSize,
       filters
@@ -23,10 +22,11 @@ router.get("/tasks-jobNo", async (req, res) => {
 
     res.status(200).json(result);
   } catch (error) {
-    console.error("Error fetching pending tasks:", error);
+    console.error("Error fetching pending tasks with incomplete status:", error);
     res.status(500).json({ error: "Failed to fetch pending tasks." });
   }
 });
+
 
 // The following endpoints are no longer called by the frontend
 router.post("/tasks-inbound", async (req, res) => {

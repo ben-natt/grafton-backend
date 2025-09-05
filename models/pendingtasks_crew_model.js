@@ -11,18 +11,16 @@ const formatDate = (date) => {
   return `${day} ${month} ${year}`;
 };
 
-const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
+const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filters = {}) => {
   try {
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
-    // --- 1. Build Base Filter Conditions ---
+    // Build base filter conditions (same as original)
     const baseWhere = [
       `l."status" = 'Received'`,
       `l."report" = false`,
       `l."isConfirm" = true`,
-      // NEW LOGIC: A task is pending if it has never been weighed OR if it has been weighed
-      // but still has bundles with missing weight or melt numbers.
       `(
         i."isWeighted" IS NOT TRUE
         OR
@@ -33,7 +31,6 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
           AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
         )
       )`,
-      // NEW: Exclude lots that are already scheduled for outbound
       `NOT EXISTS (
         SELECT 1
         FROM public.selectedinbounds si
@@ -41,17 +38,17 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
         AND si."lotNo" = l."lotNo"
       )`,
     ];
+    
     const replacements = {};
 
     if (exWarehouseLot) {
-      // Use ILIKE for case-insensitive partial matching.
       baseWhere.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
       replacements.exWarehouseLot = `%${exWarehouseLot}%`;
     }
 
     const baseWhereString = baseWhere.join(" AND ");
 
-    // --- 2. Compute min/max inbound dates PER JOB (in SG date) in a CTE, then filter/paginate on that ---
+    // Date overlap logic (same as original)
     const dateOverlapWhere =
       startDate && endDate
         ? `WHERE jr.max_date >= :startDate::date AND jr.min_date <= :endDate::date`
@@ -62,7 +59,7 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       replacements.endDate = endDate;
     }
 
-    // --- 3. Get Total Count of Matching JobNos for Pagination ---
+    // Count query (same as original)
     const countQuery = `
       WITH jr AS (
         SELECT
@@ -92,7 +89,7 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // --- 4. Get Paginated List of Distinct JobNos that Match Filters ---
+    // Get paginated job numbers (same as original)
     const jobNoQuery = `
       WITH jr AS (
         SELECT
@@ -122,23 +119,54 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // --- 5. Fetch All Details for Only the JobNos on the Current Page ---
+    // ENHANCED: Fetch details WITH incomplete status in one query
     const detailsQuery = `
       SELECT
           l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
           l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
           l."inbounddate",
           i."inboundId", i."netWeight",
-          u.username
+          u.username,
+          -- Bundle statistics
+          COALESCE(bundle_stats.total_bundles, 0) as total_bundles,
+          COALESCE(bundle_stats.incomplete_bundles, 0) as incomplete_bundles,
+          COALESCE(bundle_stats.complete_bundles, 0) as complete_bundles,
+          COALESCE(bundle_stats.any_data_bundles, 0) as any_data_bundles,
+          -- Incomplete status
+          CASE 
+            WHEN COALESCE(bundle_stats.any_data_bundles, 0) > 0 
+                 AND COALESCE(bundle_stats.incomplete_bundles, 0) > 0 
+            THEN true 
+            ELSE false 
+          END as is_incomplete
       FROM public.lot l
       JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
       JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
       JOIN public.users u ON s."userId" = u.userid
+      -- LEFT JOIN to get bundle statistics
+      LEFT JOIN (
+        SELECT 
+          ib."inboundId",
+          COUNT(*)::int AS total_bundles,
+          COUNT(*) FILTER (
+            WHERE (ib.weight IS NULL OR ib.weight <= 0)
+               OR (ib."meltNo" IS NULL OR TRIM(ib."meltNo") = '')
+          )::int AS incomplete_bundles,
+          COUNT(*) FILTER (
+            WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
+              AND (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
+          )::int AS complete_bundles,
+          COUNT(*) FILTER (
+            WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
+               OR (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
+          )::int AS any_data_bundles
+        FROM public.inboundbundles ib
+        GROUP BY ib."inboundId"
+      ) bundle_stats ON bundle_stats."inboundId" = i."inboundId"
       WHERE l."jobNo" IN (:paginatedJobNos)
         AND l."status" = 'Received'
         AND l."report" = false
         AND l."isConfirm" = true
-        -- Ensure the details query uses the same pending logic
         AND (
           i."isWeighted" IS NOT TRUE
           OR
@@ -157,7 +185,7 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-    // --- 6. Group the Flat Results into the Nested Structure for the Frontend ---
+    // Group results and include incomplete status
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
@@ -169,15 +197,23 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
           },
           lotDetails: [],
           inboundId: lot.inboundId,
-          // Initialize incomplete status - will be calculated on frontend
-          isIncomplete: false,
-          incompleteLotNos: [], // Initialize empty array
+          isIncomplete: false, // Will be updated below
+          incompleteLotNos: [],
           inboundDates: [],
         };
       }
 
-      if (lot.inbounddate)
+      if (lot.inbounddate) {
         acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
+      }
+
+      // Update incomplete status for this job
+      if (lot.is_incomplete) {
+        acc[jobNo].isIncomplete = true;
+        if (!acc[jobNo].incompleteLotNos.includes(lot.lotNo)) {
+          acc[jobNo].incompleteLotNos.push(lot.lotNo);
+        }
+      }
 
       acc[jobNo].lotDetails.push({
         lotId: lot.lotId,
@@ -192,11 +228,20 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
         report: lot.report,
         inboundId: lot.inboundId,
         netWeight: lot.netWeight,
+        // Include bundle statistics
+        bundleStats: {
+          totalBundles: lot.total_bundles,
+          incompleteBundles: lot.incomplete_bundles,
+          completeBundles: lot.complete_bundles,
+          anyDataBundles: lot.any_data_bundles,
+        },
+        isIncomplete: lot.is_incomplete,
       });
+      
       return acc;
     }, {});
 
-    // --- 7. Compute display date (single vs range) for each job ---
+    // Compute display dates (same as original)
     Object.values(groupedByJobNo).forEach((group) => {
       if (group.inboundDates.length > 0) {
         const minDate = new Date(
@@ -206,7 +251,6 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
           Math.max(...group.inboundDates.map((d) => d.getTime()))
         );
 
-        // Check if dates are the same (compare date strings to avoid time differences)
         const minDateString = minDate.toDateString();
         const maxDateString = maxDate.toDateString();
 
@@ -223,7 +267,7 @@ const getPendingTasks = async (page = 1, pageSize = 10, filters = {}) => {
     const finalData = Object.values(groupedByJobNo);
     return { data: finalData, page, pageSize, totalPages, totalCount };
   } catch (error) {
-    console.error("Error fetching pending tasks records:", error);
+    console.error("Error fetching pending tasks with incomplete status:", error);
     throw error;
   }
 };
@@ -276,7 +320,7 @@ const pendingTasksUserIdSingleDateCrew = async (jobNo) => {
 };
 
 module.exports = {
-  getPendingTasks,
+  getPendingTasksWithIncompleteStatus,
   getDetailsPendingTasksCrew,
   pendingTasksUserIdSingleDateCrew,
 };

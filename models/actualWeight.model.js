@@ -632,84 +632,6 @@ const getBundlesIfWeighted = async (
   }
 };
 
-const checkIncompleteBundles = async (inboundId, strictValidation = false) => {
-  try {
-    const statsSql = `
-      SELECT
-        COUNT(*)::int AS total_count,
-        COUNT(*) FILTER (
-          WHERE (ib.weight IS NULL OR ib.weight <= 0)
-             OR (ib."meltNo" IS NULL OR TRIM(ib."meltNo") = '')
-        )::int AS incomplete_count,
-        COUNT(*) FILTER (
-          WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
-            AND (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
-        )::int AS complete_count,
-        COUNT(*) FILTER (
-          WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
-             OR (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
-        )::int AS any_data_count
-      FROM public.inboundbundles ib
-      WHERE ib."inboundId" = :inboundId;
-    `;
-
-    const stats = await db.sequelize.query(statsSql, {
-      replacements: { inboundId },
-      type: db.sequelize.QueryTypes.SELECT,
-      plain: true,
-    });
-
-    const totalBundles = stats?.total_count ?? 0;
-
-    if (totalBundles === 0) {
-      return {
-        isIncomplete: false,
-        details: { totalBundles: 0, incompleteLotCount: 0 },
-        inboundId,
-        incompleteLotNos: [],
-      };
-    }
-
-    const hasAnyData = (stats.any_data_count ?? 0) > 0;
-
-    // strictValidation toggle (kept for compatibility):
-    const isFullyComplete = (stats.incomplete_count ?? 0) === 0;
-    const isInboundIncomplete = hasAnyData && !isFullyComplete;
-
-    let incompleteLotNos = [];
-    if (isInboundIncomplete) {
-      const lotRows = await db.sequelize.query(
-        `
-        SELECT l."lotId", l."lotNo"
-        FROM public.inbounds i
-        JOIN public.lot l
-          ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
-        WHERE i."inboundId" = :inboundId;
-        `,
-        {
-          replacements: { inboundId },
-          type: db.sequelize.QueryTypes.SELECT,
-        }
-      );
-      incompleteLotNos = Array.from(new Set(lotRows.map(r => r.lotNo)));
-    }
-
-    return {
-      isIncomplete: isInboundIncomplete,
-      details: {
-        totalBundles,
-        incompleteLotCount: incompleteLotNos.length,
-      },
-      inboundId,
-      incompleteLotNos,
-    };
-  } catch (error) {
-    console.error(`[checkIncompleteBundles] Error for inboundId ${inboundId}:`, error);
-    throw error;
-  }
-};
-
-
 // User-provided function to update the report status
 const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
   try {
@@ -1000,6 +922,5 @@ module.exports = {
   upsertBundle,
   duplicateActualWeightBundles,
   updateReportStatus,
-  checkIncompleteBundles,
   checkOutboundScheduleStatus,
 };
