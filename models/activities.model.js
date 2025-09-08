@@ -973,7 +973,7 @@ const getScheduleOutboundRecordById = async (id) => {
         c."commodityName" AS "Commodity", 
         b."brandName" AS "Brand",
         s."shapeName" AS "Shape",
-        i."actualWeight" AS "GrossWeight", 
+        CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END AS "GrossWeight", 
         exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
         i."exWarehouseLot" AS "ExWarehouseLot",
         i."exWarehouseWarrant" AS "ExWarehouseWarrant",

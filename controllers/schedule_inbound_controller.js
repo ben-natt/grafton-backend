@@ -53,7 +53,7 @@ exports.createScheduleInbound = async (req, res) => {
       for (const lot of lots) {
         if (lot.shape && typeof lot.shape === 'string') {
           const shapeLower = lot.shape.toLowerCase();
-          if (shapeLower === 'ing') {
+          if (shapeLower === 'ing' || shapeLower === 'ingot') {
             lot.shape = 'Ingot';
           } else if (shapeLower === 'tbar') {
             lot.shape = 'T-bar';
