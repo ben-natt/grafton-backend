@@ -159,6 +159,24 @@ router.get("/outbound-records/:outboundId", async (req, res) => {
   }
 });
 
+router.get(
+  "/outbound-records/:outboundId/stuffing-photos",
+  async (req, res) => {
+    try {
+      const { outboundId } = req.params;
+      if (!outboundId) {
+        return res.status(400).json({ error: "Outbound ID is required." });
+      }
+      const photos = await activitiesModel.getStuffingPhotosByOutboundId(
+        outboundId
+      );
+      res.status(200).json(photos);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch stuffing photos." });
+    }
+  }
+);
+
 // router.js
 router.get("/scheduled-inbound", async (req, res) => {
   try {
