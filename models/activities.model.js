@@ -545,7 +545,9 @@ const getInboundRecordByInboundId = async (inboundId) => {
 const getOutboundRecordByOutboundId = async (outboundId) => {
   try {
     const query = `SELECT
-          o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", o."noOfBundle" AS "NoOfBundle",o."actualWeight" AS "LotReleaseWeight",
+          o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", o."noOfBundle" AS "NoOfBundle",
+          o."actualWeight" AS "ActualWeight",
+          o."grossWeight" AS "GrossWeight",
           o."outboundTransactionId", o."commodity" AS "Commodity", o."brands" AS "Brand",
           o."shape" AS "Shape", o."exLmeWarehouse" AS "ExLMEWarehouse",
           o."exWarehouseLot" AS "ExWarehouseLot", o."releaseWarehouse" AS "ReleaseWarehouse",

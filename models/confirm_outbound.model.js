@@ -35,6 +35,7 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     i."jobNo",
     i."lotNo",
     i."actualWeight",
+    i."grossWeight",
     i."noOfBundle" AS "expectedBundleCount",
     b."brandName" AS "brand",
     c."commodityName" AS "commodity",
