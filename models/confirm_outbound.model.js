@@ -30,10 +30,12 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "exportDate",
     TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "deliveryDate",
     TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "stuffingDate",
+    so."containerNo",
     so."sealNo",
     i."jobNo",
     i."lotNo",
     i."actualWeight",
+    i."grossWeight",
     i."noOfBundle" AS "expectedBundleCount",
     b."brandName" AS "brand",
     c."commodityName" AS "commodity",
@@ -117,61 +119,70 @@ const getGrnDetailsForSelection = async (
     const aggregateDetails = (key) =>
       [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
 
+    const formatMultipleDates = (dates, dateField) => {
+      // Debug: Print all date values for the field
+      const rawDates = dates.map((lot) => lot[dateField]);
 
-const formatMultipleDates = (dates, dateField) => {
-  
-  // Debug: Print all date values for the field
-  const rawDates = dates.map(lot => lot[dateField]);
-  
-  // Extract unique valid dates
-  const filteredDates = rawDates.filter(dateString => dateString && dateString !== 'Invalid Date');
-  
-  const parsedDates = filteredDates.map(dateString => {
-    // Fix the timezone format: +00 -> +00:00
-    const fixedDateString = dateString.replace(/\+00$/, '+00:00');
-    
-    const date = new Date(fixedDateString);
-    return isNaN(date.getTime()) ? null : date;
-  }).filter(date => date !== null);
-  
-  
-  if (parsedDates.length === 0) {
-    return "N/A";
-  }
-  
-  // Create unique dates by comparing date strings instead of Date objects
-  const uniqueDateStrings = [...new Set(parsedDates.map(date => 
-    date.toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    })
-  ))];
-    
-  if (uniqueDateStrings.length === 1) {
-    return uniqueDateStrings[0];
-  }
-  
-  // Sort the formatted date strings by converting back to dates for sorting
-  const sortedFormattedDates = uniqueDateStrings.sort((a, b) => {
-    const dateA = new Date(a.replace(/(\d{1,2}) (\w+) (\d{4})/, '$2 $1, $3'));
-    const dateB = new Date(b.replace(/(\d{1,2}) (\w+) (\d{4})/, '$2 $1, $3'));
-    return dateA - dateB;
-  });
-  
-  const result = sortedFormattedDates.join(', ');
-  return result;
-};
+      // Extract unique valid dates
+      const filteredDates = rawDates.filter(
+        (dateString) => dateString && dateString !== "Invalid Date"
+      );
+
+      const parsedDates = filteredDates
+        .map((dateString) => {
+          // Fix the timezone format: +00 -> +00:00
+          const fixedDateString = dateString.replace(/\+00$/, "+00:00");
+
+          const date = new Date(fixedDateString);
+          return isNaN(date.getTime()) ? null : date;
+        })
+        .filter((date) => date !== null);
+
+      if (parsedDates.length === 0) {
+        return "N/A";
+      }
+
+      // Create unique dates by comparing date strings instead of Date objects
+      const uniqueDateStrings = [
+        ...new Set(
+          parsedDates.map((date) =>
+            date.toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })
+          )
+        ),
+      ];
+
+      if (uniqueDateStrings.length === 1) {
+        return uniqueDateStrings[0];
+      }
+
+      // Sort the formatted date strings by converting back to dates for sorting
+      const sortedFormattedDates = uniqueDateStrings.sort((a, b) => {
+        const dateA = new Date(
+          a.replace(/(\d{1,2}) (\w+) (\d{4})/, "$2 $1, $3")
+        );
+        const dateB = new Date(
+          b.replace(/(\d{1,2}) (\w+) (\d{4})/, "$2 $1, $3")
+        );
+        return dateA - dateB;
+      });
+
+      const result = sortedFormattedDates.join(", ");
+      return result;
+    };
 
     const firstLot = lots[0];
-    
+
     const result = {
       releaseDate: new Date().toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "long",
         year: "numeric",
       }), // Current date as "12 August 2025"
-      deliveryDate: formatMultipleDates(lots, 'deliveryDate'),
+      deliveryDate: formatMultipleDates(lots, "deliveryDate"),
       exportDate: firstLot.exportDate,
       stuffingDate: firstLot.stuffingDate,
       containerNo: firstLot.containerNo,
@@ -268,7 +279,7 @@ const checkForDuplicateLots = async (lots, transaction) => {
 };
 
 const createGrnAndTransactions = async (formData) => {
-  const { selectedInboundIds } = formData;
+  const { selectedInboundIds, stuffingPhotos } = formData;
   const t = await db.sequelize.transaction();
 
   try {
@@ -305,11 +316,13 @@ const createGrnAndTransactions = async (formData) => {
           "releaseDate", "driverName", "driverIdentityNo", "truckPlateNo",
           "warehouseStaff", "warehouseSupervisor", "userId", "grnNo", "jobIdentifier",
           "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature",
+          "tareWeight", uom,
           "createdAt", "updatedAt"
       ) VALUES (
           NOW(), :driverName, :driverIdentityNo, :truckPlateNo,
           :warehouseStaff, :warehouseSupervisor, :userId, :grnNo, :jobIdentifier,
           :driverSignature, :warehouseStaffSignature, :warehouseSupervisorSignature,
+          :tareWeight, :uom,
           NOW(), NOW()
       ) RETURNING "outboundId", "createdAt" AS "outboundedDate", "jobIdentifier", "grnNo";
     `;
@@ -320,6 +333,25 @@ const createGrnAndTransactions = async (formData) => {
     });
 
     const createdOutbound = outboundResult[0][0];
+    const newOutboundId = createdOutbound.outboundId;
+
+    if (
+      stuffingPhotos &&
+      Array.isArray(stuffingPhotos) &&
+      stuffingPhotos.length > 0
+    ) {
+      for (const imageUrl of stuffingPhotos) {
+        const photoInsertQuery = `
+          INSERT INTO public.stuffing_photos ("outboundId", "imageUrl", "createdAt", "updatedAt")
+          VALUES (:outboundId, :imageUrl, NOW(), NOW());
+        `;
+        await db.sequelize.query(photoInsertQuery, {
+          replacements: { outboundId: newOutboundId, imageUrl },
+          type: db.sequelize.QueryTypes.INSERT,
+          transaction: t,
+        });
+      }
+    }
 
     const lotsDetailsQuery = `
       SELECT

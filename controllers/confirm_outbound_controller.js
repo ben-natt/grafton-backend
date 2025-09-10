@@ -86,6 +86,38 @@ const getGrnDetails = async (req, res) => {
 const createGrnAndTransactions = async (req, res) => {
   try {
     const grnDataFromRequest = req.body;
+    const { stuffingPhotos } = grnDataFromRequest;
+
+    // --- NEW: Image Handling Logic ---
+    if (stuffingPhotos && Array.isArray(stuffingPhotos)) {
+      const photoUrls = [];
+      // Define a directory to save the images
+      const uploadDir = path.join(
+        __dirname,
+        "..",
+        "uploads",
+        "stuffing_photos"
+      );
+      await fs.mkdir(uploadDir, { recursive: true }); // Ensure directory exists
+
+      for (const base64Photo of stuffingPhotos) {
+        // Create a unique filename
+        const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
+        const filePath = path.join(uploadDir, fileName);
+
+        // Decode base64 and write file
+        await fs.writeFile(filePath, base64Photo, { encoding: "base64" });
+
+        // Store the relative path/URL to be saved in the DB
+        // Assuming the 'uploads' folder is served statically
+        const imageUrl = `/uploads/stuffing_photos/${fileName}`;
+        photoUrls.push(imageUrl);
+      }
+
+      // Replace the base64 array with the array of URLs
+      grnDataFromRequest.stuffingPhotos = photoUrls;
+    }
+
     const scheduleId = parseInt(grnDataFromRequest.jobIdentifier, 10);
 
     const { createdOutbound, lotsForPdf } =
