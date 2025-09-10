@@ -163,13 +163,20 @@ const createGrnAndTransactions = async (req, res) => {
         shape: aggregateDetails("shape") ? aggregateDetails("shape") : "N/A",
         brand: aggregateDetails("brand") ? aggregateDetails("brand") : "N/A",
       },
-      lots: lotsForPdf.map((lot) => ({
-        lotNo: `${lot.jobNo}-${lot.lotNo}`,
-        bundles: lot.noOfBundle,
-        grossWeightMt: parseAndFix(lot.grossWeight, 2),
-        netWeightMt: parseAndFix(lot.netWeight, 2),
-        actualWeightMt: parseAndFix(lot.actualWeight, 2),
-      })),
+      lots: lotsForPdf.map((lot) => {
+        const actualWeight = parseFloat(lot.actualWeight) || 0;
+        const grossWeight = parseFloat(lot.grossWeight) || 0;
+
+        const displayWeight = actualWeight !== 0 ? actualWeight : grossWeight;
+
+        return {
+          lotNo: `${lot.jobNo}-${lot.lotNo}`,
+          bundles: lot.noOfBundle,
+          grossWeightMt: parseAndFix(lot.grossWeight, 2), // Not used in PDF but kept for consistency
+          netWeightMt: parseAndFix(lot.netWeight, 2),
+          actualWeightMt: parseAndFix(displayWeight, 2), // This will be drawn in the Gross Weight space
+        };
+      }),
     };
 
     const { outputPath, previewImagePath } = await pdfService.generateGrnPdf(

@@ -102,6 +102,43 @@ router.post("/tasks-outbound-user", async (req, res) => {
   }
 });
 
+router.put("/schedule-outbound/:scheduleOutboundId", async (req, res) => {
+  try {
+    const scheduleOutboundId = parseInt(req.params.scheduleOutboundId);
+    const { containerNo, sealNo } = req.body;
+
+    if (isNaN(scheduleOutboundId)) {
+      return res.status(400).json({ error: "Invalid scheduleOutboundId." });
+    }
+
+    if (!containerNo || !sealNo) {
+      return res
+        .status(400)
+        .json({ error: "Both containerNo and sealNo are required." });
+    }
+
+    const updatedSchedule =
+      await pendingTasksModel.updateScheduleOutboundDetails(
+        scheduleOutboundId,
+        { containerNo, sealNo }
+      );
+
+    if (!updatedSchedule || updatedSchedule.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "Schedule not found or no changes made." });
+    }
+
+    res.status(200).json({
+      message: "Schedule details updated successfully.",
+      data: updatedSchedule[0],
+    });
+  } catch (error) {
+    console.error("Error updating schedule details:", error);
+    res.status(500).json({ error: "Failed to update schedule details." });
+  }
+});
+
 // ----------------------------------- OFFICE Flow ---------------------------------
 // --- NEW ROUTE FOR FILTER OPTIONS ---
 router.get("/office-filter-options", async (req, res) => {
@@ -153,7 +190,6 @@ router.post("/acknowledge-report", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 router.post("/acknowledge-duplicated", async (req, res) => {
   try {
@@ -214,7 +250,6 @@ router.get("/report-supervisor/:lotId", async (req, res) => {
   }
 });
 
-
 router.get("/duplicate-report/:lotId", async (req, res) => {
   try {
     const lotId = parseInt(req.params.lotId);
@@ -226,22 +261,21 @@ router.get("/duplicate-report/:lotId", async (req, res) => {
     const result = await pendingTasksModel.getDuplicateReportUsername(lotId);
 
     if (!result) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         error: "No duplicate report found for this lotId",
-        message: "No user has reported this lot as a duplicate"
+        message: "No user has reported this lot as a duplicate",
       });
     }
 
-    res.status(200).json({ 
+    res.status(200).json({
       username: result.username,
-      message: "Username retrieved successfully"
+      message: "Username retrieved successfully",
     });
   } catch (error) {
     console.error("Error fetching duplicate report username:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 router.post("/quantity/update", async (req, res) => {
   const { lotId, expectedBundleCount } = req.body; // changed from jobNo to lotId
@@ -260,56 +294,56 @@ router.post("/quantity/update", async (req, res) => {
 // Router endpoints (add to your existing router file) (edit functionality )
 router.post("/lot-inbound/get", async (req, res) => {
   const { jobNo, lotNo } = req.body;
-  
+
   if (!jobNo || !lotNo) {
-    return res.status(400).json({ 
-      error: "jobNo and lotNo are required in the request body." 
+    return res.status(400).json({
+      error: "jobNo and lotNo are required in the request body.",
     });
   }
 
   try {
     const result = await pendingTasksModel.getLotInboundDate(jobNo, lotNo);
-    
+
     if (!result) {
       return res.status(404).json({ error: "Lot not found" });
     }
-    
+
     res.status(200).json(result);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to fetch lot inbound date." });
   }
-})
+});
 
 // Update inbound date for a specific lot (edit functionality )
 router.post("/lot-inbound/update", async (req, res) => {
   const { jobNo, lotNo, inboundDate } = req.body;
-  
+
   if (!jobNo || !lotNo || !inboundDate) {
-    return res.status(400).json({ 
-      error: "jobNo, lotNo, and inboundDate are required." 
+    return res.status(400).json({
+      error: "jobNo, lotNo, and inboundDate are required.",
     });
   }
 
   try {
     // Check if lot exists
     const existingLot = await pendingTasksModel.getLotInboundDate(jobNo, lotNo);
-    
+
     if (!existingLot) {
       return res.status(404).json({ error: "Lot not found" });
     }
 
     // Update the lot
     const result = await pendingTasksModel.updateLotInboundDate(
-      jobNo, 
-      lotNo, 
+      jobNo,
+      lotNo,
       inboundDate
     );
 
     res.status(200).json({
       success: true,
       message: "Lot inbound date updated successfully",
-      data: result
+      data: result,
     });
   } catch (error) {
     console.error(error);
@@ -355,8 +389,8 @@ router.post("/lot-outbound/get", async (req, res) => {
   const { jobNo, lotNo } = req.body;
 
   if (!jobNo || !lotNo) {
-    return res.status(400).json({ 
-      error: "jobNo and lotNo are required in the request body." 
+    return res.status(400).json({
+      error: "jobNo and lotNo are required in the request body.",
     });
   }
 
@@ -374,19 +408,28 @@ router.post("/lot-outbound/get", async (req, res) => {
   }
 });
 
-
 // Update outbound dates for a specific lot
 router.post("/lot-outbound/update", async (req, res) => {
-  const { jobNo, lotNo, releaseDate, releaseEndDate, exportDate, deliveryDate } = req.body;
+  const {
+    jobNo,
+    lotNo,
+    releaseDate,
+    releaseEndDate,
+    exportDate,
+    deliveryDate,
+  } = req.body;
 
   if (!jobNo || !lotNo || !releaseDate) {
-    return res.status(400).json({ 
-      error: "jobNo, lotNo, and releaseDate are required." 
+    return res.status(400).json({
+      error: "jobNo, lotNo, and releaseDate are required.",
     });
   }
 
   try {
-    const existingLot = await pendingTasksModel.getLotOutboundDates(jobNo, lotNo);
+    const existingLot = await pendingTasksModel.getLotOutboundDates(
+      jobNo,
+      lotNo
+    );
 
     if (!existingLot) {
       return res.status(404).json({ error: "Lot not found" });
@@ -404,7 +447,7 @@ router.post("/lot-outbound/update", async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Outbound dates updated successfully",
-      data: result
+      data: result,
     });
   } catch (error) {
     console.error(error);
@@ -412,17 +455,18 @@ router.post("/lot-outbound/update", async (req, res) => {
   }
 });
 
-
 // GET: Fetch outbound schedule dates by outbound jobNo
 router.get("/outbound-schedule/:outboundJobNo", async (req, res) => {
   try {
     const outboundJobNo = req.params.outboundJobNo;
-    
+
     if (!outboundJobNo) {
       return res.status(400).json({ error: "outboundJobNo is required" });
     }
 
-    const result = await pendingTasksModel.getOutboundScheduleByJobNo(outboundJobNo);
+    const result = await pendingTasksModel.getOutboundScheduleByJobNo(
+      outboundJobNo
+    );
     res.status(200).json(result);
   } catch (error) {
     console.error("Error fetching outbound schedule dates:", error);
@@ -437,7 +481,7 @@ router.get("/outbound-schedule/:outboundJobNo", async (req, res) => {
 router.put("/outbound-schedule/:outboundJobNo", async (req, res) => {
   try {
     const outboundJobNo = req.params.outboundJobNo;
-    
+
     if (!outboundJobNo) {
       return res.status(400).json({ error: "outboundJobNo is required" });
     }
@@ -452,34 +496,55 @@ router.put("/outbound-schedule/:outboundJobNo", async (req, res) => {
       sealNo,
       storageReleaseLocation,
       releaseWarehouse,
-      transportVendor
+      transportVendor,
     } = req.body;
 
     // Validate that at least one field is provided
     const hasUpdates = [
-      releaseDate, releaseEndDate, exportDate, deliveryDate, stuffingDate,
-      containerNo, sealNo, storageReleaseLocation, releaseWarehouse, transportVendor
-    ].some(field => field !== undefined);
+      releaseDate,
+      releaseEndDate,
+      exportDate,
+      deliveryDate,
+      stuffingDate,
+      containerNo,
+      sealNo,
+      storageReleaseLocation,
+      releaseWarehouse,
+      transportVendor,
+    ].some((field) => field !== undefined);
 
     if (!hasUpdates) {
-      return res.status(400).json({ error: "At least one field to update is required" });
+      return res
+        .status(400)
+        .json({ error: "At least one field to update is required" });
     }
 
     // Validate date formats if provided
-    const dateFields = { releaseDate, releaseEndDate, exportDate, deliveryDate, stuffingDate };
+    const dateFields = {
+      releaseDate,
+      releaseEndDate,
+      exportDate,
+      deliveryDate,
+      stuffingDate,
+    };
     for (const [fieldName, dateValue] of Object.entries(dateFields)) {
       if (dateValue !== undefined && dateValue !== null) {
         const dateObj = new Date(dateValue);
         if (isNaN(dateObj.getTime())) {
-          return res.status(400).json({ error: `Invalid date format for ${fieldName}` });
+          return res
+            .status(400)
+            .json({ error: `Invalid date format for ${fieldName}` });
         }
       }
     }
 
-    const result = await pendingTasksModel.updateOutboundScheduleByJobNo(outboundJobNo, req.body);
+    const result = await pendingTasksModel.updateOutboundScheduleByJobNo(
+      outboundJobNo,
+      req.body
+    );
     res.status(200).json({
       message: "Outbound schedule dates updated successfully",
-      data: result
+      data: result,
     });
   } catch (error) {
     console.error("Error updating outbound schedule dates:", error);

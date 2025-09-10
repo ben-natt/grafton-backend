@@ -23,6 +23,7 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     const query = `
   SELECT
     so."lotReleaseWeight",
+    so."outboundType",
     s."shapeName" AS shape,
     so."releaseWarehouse",
     so."storageReleaseLocation",
@@ -97,6 +98,7 @@ const getGrnDetailsForSelection = async (
       TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "stuffingDate", 
       so."containerNo", so."sealNo",
       so."lotReleaseWeight",
+      so."outboundType",
       so."userId" AS "scheduledBy"
   FROM public.selectedinbounds si
   JOIN public.inbounds i ON si."inboundId" = i."inboundId"
@@ -183,6 +185,7 @@ const getGrnDetailsForSelection = async (
         year: "numeric",
       }), // Current date as "12 August 2025"
       deliveryDate: formatMultipleDates(lots, "deliveryDate"),
+      outboundType: firstLot.outboundType,
       exportDate: firstLot.exportDate,
       stuffingDate: firstLot.stuffingDate,
       containerNo: firstLot.containerNo,
@@ -279,7 +282,13 @@ const checkForDuplicateLots = async (lots, transaction) => {
 };
 
 const createGrnAndTransactions = async (formData) => {
-  const { selectedInboundIds, stuffingPhotos } = formData;
+  const {
+    selectedInboundIds,
+    stuffingPhotos,
+    containerNo,
+    sealNo,
+    scheduleOutboundId,
+  } = formData;
   const t = await db.sequelize.transaction();
 
   try {
@@ -334,6 +343,23 @@ const createGrnAndTransactions = async (formData) => {
 
     const createdOutbound = outboundResult[0][0];
     const newOutboundId = createdOutbound.outboundId;
+
+    if (containerNo !== undefined && sealNo !== undefined) {
+      const updateScheduleQuery = `
+            UPDATE public.scheduleoutbounds
+            SET "containerNo" = :containerNo, "sealNo" = :sealNo, "updatedAt" = NOW()
+            WHERE "scheduleOutboundId" = :scheduleOutboundId;
+        `;
+      await db.sequelize.query(updateScheduleQuery, {
+        replacements: {
+          containerNo,
+          sealNo,
+          scheduleOutboundId: formData.jobIdentifier,
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      });
+    }
 
     if (
       stuffingPhotos &&
