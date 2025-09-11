@@ -545,7 +545,9 @@ const getInboundRecordByInboundId = async (inboundId) => {
 const getOutboundRecordByOutboundId = async (outboundId) => {
   try {
     const query = `SELECT
-          o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", o."noOfBundle" AS "NoOfBundle",o."actualWeight" AS "LotReleaseWeight",
+          o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", o."noOfBundle" AS "NoOfBundle",
+          o."actualWeight" AS "ActualWeight",
+          o."grossWeight" AS "GrossWeight",
           o."outboundTransactionId", o."commodity" AS "Commodity", o."brands" AS "Brand",
           o."shape" AS "Shape", o."exLmeWarehouse" AS "ExLMEWarehouse",
           o."exWarehouseLot" AS "ExWarehouseLot", o."releaseWarehouse" AS "ReleaseWarehouse",
@@ -562,12 +564,17 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
           scheduler."username" AS "ScheduledBy",
           processor."username" AS "ProcessedBy",
           o."updatedAt" AS "UpdatedAt",
+          -- NEW FIELDS FROM outbounds table
+          ob."tareWeight" AS "TareWeight",
+          ob.uom AS "UOM",
+          o."outboundId" as "OutboundId", -- Expose outboundId to fetch photos
           (
           SELECT COUNT(*) 
           FROM public.outboundtransactions 
           WHERE "outboundId" = o."outboundId"
         ) AS "TotalLotsToRelease"
         FROM public.outboundtransactions o
+        LEFT JOIN public.outbounds ob ON o."outboundId" = ob."outboundId" -- NEW JOIN
         LEFT JOIN public.users scheduler ON scheduler.userid = o."scheduledBy"
         LEFT JOIN public.users processor ON processor.userid = o."outboundedBy"
         LEFT JOIN public.selectedinbounds si ON si."inboundId" = o."inboundId"
@@ -583,6 +590,25 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
     return result;
   } catch (error) {
     console.error("Error fetching outbound record by outboundId:", error);
+    throw error;
+  }
+};
+
+const getStuffingPhotosByOutboundId = async (outboundId) => {
+  try {
+    const query = `
+      SELECT "imageUrl"
+      FROM public.stuffing_photos
+      WHERE "outboundId" = :outboundId
+      ORDER BY "createdAt" ASC;
+    `;
+    const results = await db.sequelize.query(query, {
+      replacements: { outboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    return results.map((row) => row.imageUrl);
+  } catch (error) {
+    console.error("Error fetching stuffing photos by outboundId:", error);
     throw error;
   }
 };
@@ -973,7 +999,7 @@ const getScheduleOutboundRecordById = async (id) => {
         c."commodityName" AS "Commodity", 
         b."brandName" AS "Brand",
         s."shapeName" AS "Shape",
-        i."actualWeight" AS "GrossWeight", 
+        CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END AS "GrossWeight", 
         exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
         i."exWarehouseLot" AS "ExWarehouseLot",
         i."exWarehouseWarrant" AS "ExWarehouseWarrant",
@@ -1035,6 +1061,7 @@ module.exports = {
   getFilterOptions,
   getInboundRecordByInboundId,
   getOutboundRecordByOutboundId,
+  getStuffingPhotosByOutboundId,
   getAllScheduleInbound,
   getAllScheduleOutbound,
   getScheduleInboundRecordByLotId,
