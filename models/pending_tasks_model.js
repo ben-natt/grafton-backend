@@ -293,6 +293,7 @@ const getPendingOutboundTasks = async (
         so."stuffingDate", 
         so."containerNo", 
         so."sealNo",
+        so."outboundType",
         u.username,
         i."jobNo", 
         i."lotNo", 
@@ -336,6 +337,7 @@ const getPendingOutboundTasks = async (
               : null,
             containerNo: item.containerNo,
             sealNo: item.sealNo,
+            outboundType: item.outboundType,
           },
           lotDetails: [],
           releaseDates: [],
@@ -393,6 +395,48 @@ const getPendingOutboundTasks = async (
     throw error;
   }
 };
+
+// NEW FUNCTION: To update schedule details
+const updateScheduleOutboundDetails = async (
+  scheduleOutboundId,
+  { containerNo, sealNo }
+) => {
+  try {
+    if (containerNo === undefined && sealNo === undefined) {
+      return null; // Nothing to update
+    }
+
+    const setClauses = [];
+    const replacements = { scheduleOutboundId };
+
+    if (containerNo !== undefined) {
+      setClauses.push(`"containerNo" = :containerNo`);
+      replacements.containerNo = containerNo;
+    }
+    if (sealNo !== undefined) {
+      setClauses.push(`"sealNo" = :sealNo`);
+      replacements.sealNo = sealNo;
+    }
+
+    if (setClauses.length === 0) return null;
+
+    const query = `
+      UPDATE public.scheduleoutbounds
+      SET ${setClauses.join(", ")}, "updatedAt" = NOW()
+      WHERE "scheduleOutboundId" = :scheduleOutboundId
+      RETURNING *;
+    `;
+    const result = await db.sequelize.query(query, {
+      replacements,
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+    return result[0];
+  } catch (error) {
+    console.error("Error updating schedule outbound details:", error);
+    throw error;
+  }
+};
+
 // --- Legacy functions below for compatibility ---
 const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
   try {
@@ -414,6 +458,7 @@ const findJobNoPendingTasks = async (page = 1, pageSize = 10) => {
     throw error;
   }
 };
+
 const getDetailsPendingTasks = async (jobNo) => {
   try {
     const query = `SELECT "lotId", "lotNo","jobNo", "commodity", "expectedBundleCount", "brand", "exWarehouseLot", "exLmeWarehouse", "shape", "report" FROM public.lot WHERE "jobNo" = :jobNo AND "status" = 'Pending' AND "report" = 'False' ORDER BY "exWarehouseLot" ASC;`;
@@ -426,6 +471,7 @@ const getDetailsPendingTasks = async (jobNo) => {
     throw error;
   }
 };
+
 const pendingTasksUserId = async (jobNo) => {
   try {
     const query = `SELECT u."username", TO_CHAR(s."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "inboundDate" FROM public.scheduleinbounds s JOIN public.lot l ON s."jobNo" = l."jobNo" JOIN public.users u ON s."userId" = u."userid" WHERE l."jobNo" = :jobNo AND l."status" = 'Pending'`;
@@ -465,6 +511,7 @@ const pendingTasksUserId = async (jobNo) => {
     throw error;
   }
 };
+
 const findScheduleIdPendingOutbound = async (page = 1, pageSize = 10) => {
   try {
     const offset = (page - 1) * pageSize;
@@ -485,6 +532,7 @@ const findScheduleIdPendingOutbound = async (page = 1, pageSize = 10) => {
     throw error;
   }
 };
+
 const getDetailsPendingOutbound = async (scheduleOutboundId) => {
   try {
     const query = `SELECT si."selectedInboundId", i."jobNo", i."lotNo", s."shapeName" as shape, i."noOfBundle" as "expectedBundleCount", b."brandName" AS "brand", c."commodityName" AS "commodity", w."exLmeWarehouseName" AS "exLmeWarehouse", i."exWarehouseLot", so."lotReleaseWeight" FROM public.selectedinbounds si JOIN public.inbounds i ON si."inboundId" = i."inboundId" JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId" LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId" LEFT JOIN public.brands b ON i."brandId" = b."brandId" LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId" LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId" WHERE si."scheduleOutboundId" = :scheduleOutboundId AND si."isOutbounded" = false ORDER BY i."lotNo" ASC`;
@@ -497,6 +545,7 @@ const getDetailsPendingOutbound = async (scheduleOutboundId) => {
     throw error;
   }
 };
+
 const pendingOutboundTasksUser = async (scheduleOutboundId) => {
   try {
     const query = `SELECT u."username", TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate", TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate", so."containerNo", so."sealNo" FROM public.scheduleoutbounds so JOIN public.users u ON so."userId" = u."userid" WHERE so."scheduleOutboundId" = :scheduleOutboundId LIMIT 1;`;
@@ -1138,6 +1187,7 @@ module.exports = {
   pendingOutboundTasksUser,
   findOutboundTasksOffice,
   getPendingOutboundTasks,
+  updateScheduleOutboundDetails,
   // New
   getOfficeFilterOptions,
   getPendingInboundTasks, // Export the new function
