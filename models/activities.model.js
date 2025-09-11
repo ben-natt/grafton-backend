@@ -149,7 +149,7 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
-      Bdl: 'i."noOfBundle"',
+      BDL: 'i."noOfBundle"',
       "Scheduled By": 'u_scheduled."username"',
     };
 
@@ -297,7 +297,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       Metal: 'o."commodity"',
       Brand: 'o."brands"',
       Shape: 'o."shape"',
-      Bdl: 'o."noOfBundle"',
+      BDL: 'o."noOfBundle"',
       "Scheduled By": 'u_scheduled."username"',
     };
 
