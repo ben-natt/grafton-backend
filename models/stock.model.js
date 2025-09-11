@@ -486,11 +486,11 @@ const createScheduleOutbound = async (scheduleData, userId) => {
     "and userId:",
     userId
   );
-
   try {
     const {
       releaseStartDate, // Used as releaseDate
       releaseEndDate,
+      jobNumber,
       lotReleaseWeight,
       exportDate,
       stuffingDate,
@@ -503,27 +503,26 @@ const createScheduleOutbound = async (scheduleData, userId) => {
       selectedLots,
     } = scheduleData;
 
-    const outboundType =
-      containerNo && containerNo.length > 0 ? "container" : "flatbed";
-
+    const outboundType = stuffingDate ? "container" : "flatbed";
+    
     const scheduleInsertQuery = `
-      INSERT INTO public.scheduleoutbounds (
+     INSERT INTO public.scheduleoutbounds (
         "releaseDate", "releaseEndDate", "userId", "lotReleaseWeight", "outboundType", "exportDate",
         "stuffingDate", "containerNo", "sealNo", "createdAt", "updatedAt",
-        "deliveryDate", "storageReleaseLocation", "releaseWarehouse", "transportVendor"
+        "deliveryDate", "storageReleaseLocation", "releaseWarehouse", "transportVendor","outboundJobNo"
       )
       VALUES (
         :releaseDate, :releaseEndDate, :userId, :lotReleaseWeight, :outboundType, :exportDate,
         :stuffingDate, :containerNo, :sealNo, NOW(), NOW(),
-        :deliveryDate, :storageReleaseLocation, :releaseWarehouse, :transportVendor
+        :deliveryDate, :storageReleaseLocation, :releaseWarehouse, :transportVendor, :outboundJobNo
       )
       RETURNING "scheduleOutboundId";
-    `;
-
-    const insertResult = await db.sequelize.query(scheduleInsertQuery, {
+      `;
+     const insertResult = await db.sequelize.query(scheduleInsertQuery, {
       replacements: {
         releaseDate: releaseStartDate,
         releaseEndDate: releaseEndDate,
+        outboundJobNo: jobNumber,
         userId,
         lotReleaseWeight: parseFloat(lotReleaseWeight),
         outboundType,
@@ -541,55 +540,48 @@ const createScheduleOutbound = async (scheduleData, userId) => {
     });
 
     const scheduleOutboundId = insertResult?.[0]?.[0]?.scheduleOutboundId;
-
+    
     if (!scheduleOutboundId) {
       throw new Error("Failed to retrieve scheduleOutboundId.");
     }
 
-    // Insert selected lots
     if (selectedLots?.length > 0) {
+      // MODIFICATION START: Add "storageReleaseLocation" to the query
       const selectedInboundsQuery = `
         INSERT INTO public.selectedinbounds (
           "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt",
-          "releaseDate", "releaseEndDate", "exportDate", "deliveryDate"
+          "releaseDate", "releaseEndDate", "exportDate", "deliveryDate", "storageReleaseLocation"
         )
         VALUES (
           :inboundId, :scheduleOutboundId, :lotNo, :jobNo, NOW(), NOW(),
-          :releaseDate, :releaseEndDate, :exportDate, :deliveryDate
+          :releaseDate, :releaseEndDate, :exportDate, :deliveryDate, :storageReleaseLocation
         )
         ON CONFLICT ("jobNo", "lotNo") DO NOTHING;
       `;
+      // MODIFICATION END
 
       const updateInboundQuantityQuery = `
-        UPDATE public.inbounds
+       UPDATE public.inbounds
         SET "noOfBundle" = :quantity
         WHERE "inboundId" = :inboundId;
       `;
 
       for (const lot of selectedLots) {
         const inboundId = lot.id;
-        const quantity = lot.Qty;
+        // MODIFICATION: Use 'Bdl' to match your frontend payload
+        const quantity = lot.Bdl; 
 
-        if (!inboundId) {
+          if (!inboundId) {
           console.warn("Skipping lot due to missing inboundId:", lot);
           continue;
         }
-
         const lotNoString = lot["Lot No"]?.toString() ?? "";
         const parts = lotNoString.split("-");
-
-        if (parts.length < 2) {
-          console.warn(`Skipping invalid lot format: "${lotNoString}"`);
-          continue;
-        }
-
+        if (parts.length < 2) continue;
         const jobNo = parts.slice(0, -1).join("-");
         const lotNo = parseInt(parts[parts.length - 1], 10);
+        if (!jobNo || !Number.isInteger(lotNo)) continue;
 
-        if (!jobNo || !Number.isInteger(lotNo)) {
-          console.warn(`Skipping invalid lot format: "${lotNoString}"`);
-          continue;
-        }
 
         await db.sequelize.query(selectedInboundsQuery, {
           replacements: {
@@ -601,13 +593,14 @@ const createScheduleOutbound = async (scheduleData, userId) => {
             releaseEndDate: releaseEndDate || null,
             exportDate: exportDate || null,
             deliveryDate: deliveryDate || null,
+            storageReleaseLocation: lot.storageReleaseLocation ? lot.storageReleaseLocation : storageReleaseLocation,
           },
           type: db.sequelize.QueryTypes.INSERT,
           transaction: t,
         });
 
         if (quantity != null) {
-          await db.sequelize.query(updateInboundQuantityQuery, {
+            await db.sequelize.query(updateInboundQuantityQuery, {
             replacements: {
               quantity,
               inboundId,
@@ -623,7 +616,7 @@ const createScheduleOutbound = async (scheduleData, userId) => {
     return {
       success: true,
       message: "Schedule created successfully.",
-      scheduleOutboundId,
+      outboundJobNo: jobNumber,
     };
   } catch (error) {
     await t.rollback();

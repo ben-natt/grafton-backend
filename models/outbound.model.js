@@ -116,7 +116,7 @@ const getAllScheduleOutbounds = async () => {
          SELECT 
          TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
          TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
-		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
+		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
 		b."brandName"  AS "Brand",
@@ -176,7 +176,7 @@ const getScheduleOutboundByDate = async (date) => {
                 SELECT 
         TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
          TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
-		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
+		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
 		b."brandName"  AS "Brand",
@@ -236,7 +236,7 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
              SELECT 
              TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
          TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "END DATE",
-		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
+		i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') AS "Lot No",
 		i."exWarehouseLot" AS  "Ex-W Lot",
 		c."commodityName" AS "Metal",
 		b."brandName"  AS "Brand",
