@@ -81,7 +81,8 @@ const getGrnDetailsForSelection = async (
       plain: true,
     });
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
-    const grnNo = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    const fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    const grnNo = outboundJobNo;
 
     const lotsQuery = `
   SELECT
@@ -192,6 +193,7 @@ const getGrnDetailsForSelection = async (
       sealNo: firstLot.sealNo,
       ourReference: outboundJobNo,
       grnNo,
+      fileName,
       warehouse: firstLot.releaseWarehouse ? firstLot.releaseWarehouse : "N/A",
       cargoDetails: {
         commodity: aggregateDetails("commodity")
