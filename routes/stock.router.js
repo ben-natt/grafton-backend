@@ -78,8 +78,7 @@ router.post('/schedule-outbound',auth, async (req, res) => {
         const scheduleData = req.body;
         const userId = req.user.userId; 
         const result = await stockModel.createScheduleOutbound(scheduleData, userId);
-        const newId = result.scheduleOutboundId;
-       return res.status(201).json({ jobNo: `SINO${newId}` });
+        return res.status(201).json({ jobNo: result.outboundJobNo });
 
     } catch (error) {
         console.error('Error in /schedule-outbound route:', error.message);

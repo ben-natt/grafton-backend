@@ -13,6 +13,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 router.post('/upload-excel', upload.single('excelFile'), scheduleOutboundController.uploadExcel);
-router.post('/schedule', auth, scheduleOutboundController.createScheduleOutbound);
+//router.post('/schedule', auth, scheduleOutboundController.createScheduleOutbound);
 
 module.exports = router;
