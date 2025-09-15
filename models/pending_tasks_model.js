@@ -104,7 +104,7 @@ const getPendingInboundTasks = async (
     const detailsQuery = `
       SELECT
         l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
-        l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
+        l.brand, l."exWarehouseLot", l."exWarehouseWarrant", l."exLmeWarehouse", l.shape, l.report,
         l."isDuplicated", l."inbounddate",
         u.username
       FROM public.lot l
@@ -143,6 +143,7 @@ const getPendingInboundTasks = async (
         expectedBundleCount: lot.expectedBundleCount,
         brand: lot.brand,
         exWarehouseLot: lot.exWarehouseLot,
+        exWarehouseWarrant: lot.exWarehouseWarrant,
         exLmeWarehouse: lot.exLmeWarehouse,
         shape: lot.shape,
         report: lot.report,
@@ -431,13 +432,34 @@ const getPendingOutboundTasks = async (
   }
 };
 
+const pendingOutboundTasksUser = async (scheduleOutboundId) => {
+  try {
+    const query = `SELECT u."username", TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate", TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate", so."containerNo", so."sealNo" FROM public.scheduleoutbounds so JOIN public.users u ON so."userId" = u."userid" WHERE so."scheduleOutboundId" = :scheduleOutboundId LIMIT 1;`;
+    const result = await db.sequelize.query(query, {
+      replacements: { scheduleOutboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+    return {
+      username: result?.username || "N/A",
+      releaseDate: result?.releaseDate || "N/A",
+      stuffingDate: result?.stuffingDate,
+      containerNo: result?.containerNo,
+      sealNo: result?.sealNo,
+    };
+  } catch (error) {
+    console.error("Error fetching user info for outbound tasks:", error);
+    throw error;
+  }
+};
+
 module.exports = {
   // getDetailsPendingTasks,
   // pendingTasksUserId,
   // findJobNoPendingTasks,
   // findScheduleIdPendingOutbound,
   // getDetailsPendingOutbound,
-  // pendingOutboundTasksUser,
+  pendingOutboundTasksUser,
   getPendingInboundTasks,
   getPendingOutboundTasks,
   updateScheduleOutboundDetails,
