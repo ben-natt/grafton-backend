@@ -268,6 +268,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
 
     if (filters.search) {
       whereClauses.push(`(
+        so."outboundJobNo" ILIKE :searchQuery OR
         o."jobNo" ILIKE :searchQuery OR
         CAST(o."lotNo" AS TEXT) ILIKE :searchQuery OR
         CAST(o."noOfBundle" AS TEXT) ILIKE :searchQuery OR
@@ -294,6 +295,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       "Job No": 'o."jobNo"',
       "Lot No": 'o."lotNo"',
       "Ex-W Lot": 'o."exWarehouseLot"',
+      "Outbound Job No": 'so."outboundJobNo"',
       Metal: 'o."commodity"',
       Brand: 'o."brands"',
       Shape: 'o."shape"',
@@ -314,6 +316,10 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
           public.users u_scheduled ON u_scheduled.userid = o."scheduledBy"
         LEFT JOIN
           public.users u_processed ON u_processed.userid = o."outboundedBy"
+        LEFT JOIN 
+          public.selectedinbounds si ON si."inboundId" = o."inboundId"
+        LEFT JOIN 
+          public.scheduleoutbounds so ON so."scheduleOutboundId" = si."scheduleOutboundId"
         ${whereString}`;
 
     const countQuery = `SELECT COUNT(o."outboundTransactionId")::int ${baseQuery}`;
@@ -328,6 +334,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
         o."outboundTransactionId" AS id,
         TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
         o."jobNo" AS "Job No",
+        so."outboundJobNo" AS "Outbound Job No",
         o."lotNo" AS "Lot No",
         o."exWarehouseLot" AS "Ex-W Lot",
         o."commodity" AS "Metal",
@@ -554,6 +561,7 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
           si."releaseDate" AS "ReleaseDate",
           si."releaseEndDate" AS "ReleaseEndDate", 
           so."createdAt" AS "ScheduleOutboundDate",
+          so."outboundJobNo" AS "OutboundJobNo",
           so."containerNo" AS "ContainerNo",
           so."sealNo" AS "SealNo",
           si."exportDate" AS "ExportDate", si."deliveryDate" AS "DeliveryDate",
