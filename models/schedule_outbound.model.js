@@ -20,14 +20,14 @@ module.exports = (sequelize, DataTypes) => {
     },
     // Changed from ID to string as per updated schema
     storageReleaseLocation: { 
-      type: DataTypes.STRING(20),
-      allowNull: false, // Assuming it's NOT NULL as per updated schema
+      type: DataTypes.STRING(255), // MODIFIED: Increased size for comma-separated values
+      allowNull: false, 
       field: 'storageReleaseLocation',
     },
     // Changed from ID to string as per updated schema
     releaseWarehouse: { 
       type: DataTypes.STRING(20),
-      allowNull: false, // Assuming it's NOT NULL as per updated schema
+      allowNull: false, 
       field: 'releaseWarehouse',
     },
     lotReleaseWeight: {
@@ -38,12 +38,12 @@ module.exports = (sequelize, DataTypes) => {
     // Changed from ID to string as per updated schema
     transportVendor: { 
       type: DataTypes.STRING(255),
-      allowNull: false, // Assuming it's NOT NULL as per updated schema
+      allowNull: false, 
       field: 'transportVendor',
     },
     outboundType: {
       type: DataTypes.ENUM('Flatbed','Container'), // Example enum values
-      allowNull: true, // Assuming it can be null if not provided
+      allowNull: true, 
       field: 'outboundType',
     },
     exportDate: {
@@ -99,13 +99,13 @@ module.exports = (sequelize, DataTypes) => {
       field: 'selectedInboundId',
     },
     inboundId: { // This now refers to the primary key of the 'inbounds' table
-      type: DataTypes.INTEGER, // Changed to INTEGER as per Inbounds_pkey
-      allowNull: true, // Keeping as true as per provided schema
+      type: DataTypes.INTEGER, 
+      allowNull: true, 
       field: 'inboundId',
     },
     scheduleOutboundId: { // Foreign key to ScheduleOutbound
       type: DataTypes.INTEGER,
-      allowNull: true, // Keeping as true as per provided schema, though typically would be false for FK
+      allowNull: true, 
       field: 'scheduleOutboundId',
     },
     isOutbounded: {
@@ -115,34 +115,40 @@ module.exports = (sequelize, DataTypes) => {
     },
     lotNo: { // Lot number from the original 'inbounds' table
       type: DataTypes.INTEGER,
-      allowNull: true, // Can be null
+      allowNull: true, 
       field: 'lotNo',
     },
     jobNo: { // Job number from the original 'inbounds' table
       type: DataTypes.STRING(16),
-      allowNull: true, // Can be null
+      allowNull: true, 
       field: 'jobNo',
     },
-     releaseDate: {
-    type: DataTypes.DATE,
-    allowNull: true,
-    field: 'releaseDate',
-  },
-  releaseEndDate: {
-    type: DataTypes.DATE,
-    allowNull: true,
-    field: 'releaseEndDate',
-  },
-  exportDate: {
-    type: DataTypes.DATE,
-    allowNull: true,
-    field: 'exportDate',
-  },
-  deliveryDate: {
-    type: DataTypes.DATE,
-    allowNull: true,
-    field: 'deliveryDate',
-  },
+    // ADDED: New field to store location for each selected lot
+    storageReleaseLocation: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      field: 'storageReleaseLocation',
+    },
+    releaseDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'releaseDate',
+    },
+    releaseEndDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'releaseEndDate',
+    },
+    exportDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'exportDate',
+    },
+    deliveryDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'deliveryDate',
+    },
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,

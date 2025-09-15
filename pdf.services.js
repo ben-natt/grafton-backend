@@ -5,6 +5,7 @@ const poppler = require("pdf-poppler");
 
 async function generateGrnPdf(data) {
   try {
+    console.log("PDF Service: Data received for PDF generation:", data);
     const templatePath = path.join(__dirname, "./grn/GRN Template.pdf");
     try {
       await fs.access(templatePath);
@@ -102,10 +103,16 @@ async function generateGrnPdf(data) {
     let startY = 393;
     const rowHeight = 14;
     let totalBundles = 0;
+    const uomValue = data.uom;
 
     for (const lot of data.lots) {
       if (startY < 270) break;
       drawText(lot.lotNo, 48, startY);
+
+      if (data.uom != "" && data.uom != null) {
+        drawText(uomValue, 120, startY);
+      }
+
       drawText(lot.bundles, 186, startY);
 
       // Conditionally draw weights based on the visibility flag
@@ -148,7 +155,7 @@ async function generateGrnPdf(data) {
     const previewDir = path.join(grnDir, "preview");
     await fs.mkdir(previewDir, { recursive: true });
 
-    const safeGrnNo = data.grnNo.replace(/[\/\\?%*:|"<>]/g, "_");
+    const safeGrnNo = data.fileName.replace(/[\/\\?%*:|"<>]/g, "_");
     const pdfFileName = `GRN_${safeGrnNo}.pdf`;
     const previewImageFileName = `GRN_${safeGrnNo}_preview`;
 
