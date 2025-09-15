@@ -50,6 +50,10 @@ models.Lot = sequelize.define('Lot', {
     type: DataTypes.STRING(255),
     allowNull: true
   },
+  status: {
+  type: DataTypes.STRING(50), // Use string instead of enum temporarily
+  allowNull: true
+},
   shape: {
     type: DataTypes.STRING(255),
     allowNull: true
@@ -82,7 +86,6 @@ models.Lot = sequelize.define('Lot', {
     type: DataTypes.BOOLEAN,
     allowNull: true
   },
-  // New repack-related columns
   isRelabelled: {
     type: DataTypes.BOOLEAN,
     field: 'isRelabelled'
@@ -99,17 +102,36 @@ models.Lot = sequelize.define('Lot', {
     type: DataTypes.INTEGER,
     field: 'noOfMetalStraps'
   },
-repackDescription: {
-  type: DataTypes.TEXT,
-  allowNull: true,
-  field: 'repackDescription' 
-},
+  repackDescription: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+    field: 'repackDescription'
+  },
   incompleteBundle: {
     type: DataTypes.BOOLEAN,
-    allowNull: false,
     defaultValue: false
   },
   noOfPieces: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  reportDuplicate: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  isDuplicated: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  inbounddate: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  stickerWeight: {
+    type: DataTypes.DOUBLE,
+    allowNull: true
+  },
+  crewLotNo: {
     type: DataTypes.INTEGER,
     allowNull: true
   },
@@ -124,8 +146,8 @@ repackDescription: {
 }, {
   tableName: 'lot',
   timestamps: true,
-  underscored: false, 
-  freezeTableName: true, 
+  underscored: false,
+  freezeTableName: true,
   name: {
     singular: 'lot',
     plural: 'lots'
@@ -179,6 +201,10 @@ models.Inbound = sequelize.define('Inbound', {
     type: DataTypes.DOUBLE,
     allowNull: false
   },
+  netWeight: {
+    type: DataTypes.DOUBLE,
+    allowNull: false
+  },
   actualWeight: {
     type: DataTypes.DOUBLE,
     allowNull: true
@@ -207,15 +233,6 @@ models.Inbound = sequelize.define('Inbound', {
     type: DataTypes.STRING(255),
     allowNull: true
   },
-    incompleteBundle: {
-    type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: false
-  },
-  noOfPieces: {
-    type: DataTypes.INTEGER,
-    allowNull: true
-  },
   userId: {
     type: DataTypes.INTEGER,
     allowNull: true
@@ -237,6 +254,26 @@ models.Inbound = sequelize.define('Inbound', {
     allowNull: true
   },
   exWarehouseLocationId: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  processedId: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  incompleteBundle: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  noOfPieces: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  stickerWeight: {
+    type: DataTypes.DOUBLE,
+    allowNull: true
+  },
+  crewLotNo: {
     type: DataTypes.INTEGER,
     allowNull: true
   },
@@ -291,23 +328,19 @@ models.InboundBundle = sequelize.define('InboundBundle', {
   },
   isOutbounded: {
     type: DataTypes.BOOLEAN,
-    allowNull: false,
     defaultValue: false
   },
   isRelabelled: {
     type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: false
+    allowNull: true
   },
   isRebundled: {
     type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: false
+    allowNull: true
   },
   isRepackProvided: {
     type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: false
+    allowNull: true
   },
   noOfMetalStrap: {
     type: DataTypes.INTEGER,
@@ -317,14 +350,20 @@ models.InboundBundle = sequelize.define('InboundBundle', {
     type: DataTypes.TEXT,
     allowNull: true
   },
-  // New columns
   incompleteBundle: {
     type: DataTypes.BOOLEAN,
-    allowNull: false,
     defaultValue: false
   },
   noOfPieces: {
     type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  isDuplicated: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  stickerWeight: {
+    type: DataTypes.DOUBLE,
     allowNull: true
   },
   createdAt: {
