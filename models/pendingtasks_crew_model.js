@@ -17,27 +17,27 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     const offset = (page - 1) * pageSize;
 
     // Build base filter conditions (same as original)
-    const baseWhere = [
-      `l."status" = 'Received'`,
-      `l."report" = false`,
-      `l."isConfirm" = true`,
-      `(
-        i."isWeighted" IS NOT TRUE
-        OR
-        EXISTS (
-          SELECT 1
-          FROM public.inboundbundles ib
-          WHERE ib."inboundId" = i."inboundId"
-          AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
-        )
-      )`,
-      `NOT EXISTS (
-        SELECT 1
-        FROM public.selectedinbounds si
-        WHERE si."jobNo" = l."jobNo" 
-        AND si."lotNo" = l."lotNo"
-      )`,
-    ];
+const baseWhere = [
+  `l."status" = 'Received'`,
+  `l."report" = false`,
+  `l."isConfirm" = true`,
+  `(
+    i."isWeighted" IS NOT TRUE
+    OR
+    EXISTS (
+      SELECT 1
+      FROM public.inboundbundles ib
+      WHERE ib."inboundId" = i."inboundId"
+      AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '' OR ib."stickerWeight" IS NULL OR ib."stickerWeight" <= 0)
+    )
+  )`,
+  `NOT EXISTS (
+    SELECT 1
+    FROM public.selectedinbounds si
+    WHERE si."jobNo" = l."jobNo" 
+    AND si."lotNo" = l."lotNo"
+  )`,
+];
     
     const replacements = {};
 
@@ -122,7 +122,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     // ENHANCED: Fetch details WITH incomplete status in one query
     const detailsQuery = `
       SELECT
-          l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
+          l."lotId", l."crewLotNo" AS "lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
           l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
           l."inbounddate",
           i."inboundId", i."netWeight",
@@ -144,25 +144,28 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
       JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
       JOIN public.users u ON s."userId" = u.userid
       -- LEFT JOIN to get bundle statistics
-      LEFT JOIN (
-        SELECT 
-          ib."inboundId",
-          COUNT(*)::int AS total_bundles,
-          COUNT(*) FILTER (
-            WHERE (ib.weight IS NULL OR ib.weight <= 0)
-               OR (ib."meltNo" IS NULL OR TRIM(ib."meltNo") = '')
-          )::int AS incomplete_bundles,
-          COUNT(*) FILTER (
-            WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
-              AND (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
-          )::int AS complete_bundles,
-          COUNT(*) FILTER (
-            WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
-               OR (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
-          )::int AS any_data_bundles
-        FROM public.inboundbundles ib
-        GROUP BY ib."inboundId"
-      ) bundle_stats ON bundle_stats."inboundId" = i."inboundId"
+LEFT JOIN (
+  SELECT 
+    ib."inboundId",
+    COUNT(*)::int AS total_bundles,
+    COUNT(*) FILTER (
+      WHERE (ib.weight IS NULL OR ib.weight <= 0)
+         OR (ib."meltNo" IS NULL OR TRIM(ib."meltNo") = '')
+         OR (ib."stickerWeight" IS NULL OR ib."stickerWeight" <= 0)
+    )::int AS incomplete_bundles,
+    COUNT(*) FILTER (
+      WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
+        AND (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
+        AND (ib."stickerWeight" IS NOT NULL AND ib."stickerWeight" > 0)
+    )::int AS complete_bundles,
+    COUNT(*) FILTER (
+      WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
+         OR (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
+         OR (ib."stickerWeight" IS NOT NULL AND ib."stickerWeight" > 0)
+    )::int AS any_data_bundles
+  FROM public.inboundbundles ib
+  GROUP BY ib."inboundId"
+) bundle_stats ON bundle_stats."inboundId" = i."inboundId"
       WHERE l."jobNo" IN (:paginatedJobNos)
         AND l."status" = 'Received'
         AND l."report" = false
@@ -177,13 +180,25 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
             AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
           )
         )
-      ORDER BY l."inbounddate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
+      ORDER BY i."crewLotNo";
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
       replacements: { paginatedJobNos },
       type: db.sequelize.QueryTypes.SELECT,
     });
+
+
+const safeParseLotNo = (value) => {
+  if (value === null || value === undefined) return "N/A";
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = parseInt(value, 10);
+    return isNaN(parsed) ? "N/A" : parsed;
+  }
+  return "N/A";
+};
+
 
     // Group results and include incomplete status
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
@@ -217,7 +232,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
 
       acc[jobNo].lotDetails.push({
         lotId: lot.lotId,
-        lotNo: lot.lotNo,
+  lotNo: safeParseLotNo(lot.lotNo), // This will handle null and return "N/A"
         jobNo: lot.jobNo,
         commodity: lot.commodity,
         expectedBundleCount: lot.expectedBundleCount,
@@ -228,7 +243,6 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
         report: lot.report,
         inboundId: lot.inboundId,
         netWeight: lot.netWeight,
-        // Include bundle statistics
         bundleStats: {
           totalBundles: lot.total_bundles,
           incompleteBundles: lot.incomplete_bundles,

@@ -856,8 +856,9 @@ const getAllScheduleOutbound = async ({
         i."exWarehouseLot" ILIKE :searchQuery OR
         o."releaseWarehouse" ILIKE :searchQuery OR
         CAST(o."lotReleaseWeight" AS TEXT) ILIKE :searchQuery OR
-        o."storageReleaseLocation" ILIKE :searchQuery OR
+        si."storageReleaseLocation" ILIKE :searchQuery OR
         o."transportVendor" ILIKE :searchQuery OR
+        o."outboundJobNo" ILIKE :searchQuery OR
         u1."username" ILIKE :searchQuery OR
         u2."username" ILIKE :searchQuery
       )`);
@@ -870,7 +871,8 @@ const getAllScheduleOutbound = async ({
     const sortableColumns = {
       Date: 'si."releaseDate"',
       "Job No.": 'i."jobNo"', // FIX: Added sort key for Job No.
-      "Lot No.": 'i."lotNo"',
+      "IB Lot No.": 'i."jobNo", i."lotNo"', // Added sort key for Lot No.
+      "OB Job No": 'o."outboundJobNo"',
       "Ex-Whse Lot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
@@ -921,6 +923,7 @@ const getAllScheduleOutbound = async ({
         i."exWarehouseLot" AS "Ex-W Lot",
         exlme."exLmeWarehouseName" AS "exLmeWarehouse",
         c."commodityName" AS "Metal",
+        o."outboundJobNo" AS "Outbound No",
         b."brandName" AS "Brand",
         s."shapeName" AS "Shape",
         i."noOfBundle" AS "Qty",
@@ -1019,7 +1022,8 @@ const getScheduleOutboundRecordById = async (id) => {
         TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "StuffingDate",
         TO_CHAR(selin."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DeliveryDate",
         i."netWeight" AS "TotalReleaseWeight",
-        so."storageReleaseLocation" AS "StorageReleaseLocation",
+        selin."storageReleaseLocation" AS "StorageReleaseLocation",
+        so."outboundJobNo" AS "Outbound No",
         so."transportVendor" AS "TransportVendor",
         so."containerNo" AS "ContainerNo",
         so."sealNo" AS "SealNo",
