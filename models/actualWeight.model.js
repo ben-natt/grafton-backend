@@ -551,15 +551,16 @@ const updateLotActualWeight = async (
     });
 
     // Determine if weighted based on strictValidation
-    let isWeighted;
-    if (strictValidation) {
-      isWeighted =
-        bundleStatus.total_count > 0 &&
-        bundleStatus.total_count === bundleStatus.valid_weights &&
-        bundleStatus.total_count === bundleStatus.valid_melt_nos;
-    } else {
-      isWeighted = true;
-    }
+let isWeighted;
+if (strictValidation) {
+  isWeighted =
+    bundleStatus.total_count > 0 &&
+    bundleStatus.total_count === bundleStatus.valid_weights &&
+    bundleStatus.total_count === bundleStatus.valid_sticker_weights &&
+    bundleStatus.total_count === bundleStatus.valid_melt_nos;
+} else {
+  isWeighted = true;
+}
 
     // Calculate total stickerWeight if bundles are provided
     const totalStickerWeight = bundles ? calculateTotalStickerWeight(bundles) : null;
@@ -637,12 +638,25 @@ const saveInboundWithBundles = async (
     // --- MODIFIED LOGIC ---
     // A lot is considered "weighted" (i.e., started) if any bundle has
     // either a weight greater than 0 or a non-empty melt number.
-    const hasAnyData = bundles.some(
-      (b) =>
-        (b.weight != null && b.weight > 0) ||
-        (b.meltNo != null && b.meltNo.trim() !== "")
-    );
-    const isWeighted = hasAnyData;
+let isWeighted;
+if (strictValidation) {
+  // All bundles must have weight > 0, stickerWeight > 0, and non-empty meltNo
+  isWeighted = bundles.length > 0 && bundles.every(
+    (b) =>
+      (b.weight != null && b.weight > 0) &&
+      (b.stickerWeight != null && b.stickerWeight > 0) &&
+      (b.meltNo != null && b.meltNo.trim() !== "")
+  );
+} else {
+  // Any bundle with weight > 0 or non-empty meltNo makes it weighted
+  const hasAnyData = bundles.some(
+    (b) =>
+      (b.weight != null && b.weight > 0) ||
+      (b.meltNo != null && b.meltNo.trim() !== "")
+  );
+  isWeighted = hasAnyData;
+}
+  
 
     // Calculate total stickerWeight
     const totalStickerWeight = calculateTotalStickerWeight(bundles);
@@ -755,12 +769,24 @@ const saveLotWithBundles = async (
     // --- MODIFIED LOGIC ---
     // A lot is considered "weighted" (i.e., started) if any bundle has
     // either a weight greater than 0 or a non-empty melt number.
-    const hasAnyData = bundles.some(
-      (b) =>
-        (b.weight != null && b.weight > 0) ||
-        (b.meltNo != null && b.meltNo.trim() !== "")
-    );
-    const isWeighted = hasAnyData;
+let isWeighted;
+if (strictValidation) {
+  // All bundles must have weight > 0, stickerWeight > 0, and non-empty meltNo
+  isWeighted = bundles.length > 0 && bundles.every(
+    (b) =>
+      (b.weight != null && b.weight > 0) &&
+      (b.stickerWeight != null && b.stickerWeight > 0) &&
+      (b.meltNo != null && b.meltNo.trim() !== "")
+  );
+} else {
+  // Any bundle with weight > 0 or non-empty meltNo makes it weighted
+  const hasAnyData = bundles.some(
+    (b) =>
+      (b.weight != null && b.weight > 0) ||
+      (b.meltNo != null && b.meltNo.trim() !== "")
+  );
+  isWeighted = hasAnyData;
+}
 
     // Update lot with crewLotNo and stickerWeight
     const updateQuery = `
