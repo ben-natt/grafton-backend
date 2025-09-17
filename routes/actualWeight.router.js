@@ -41,6 +41,15 @@ router.post("/actual/save-weight", async (req, res) => {
       });
     }
 
+    // Validate bundle structure - check for stickerWeight if provided
+    for (const bundle of bundles) {
+      if (bundle.stickerWeight != null && bundle.stickerWeight < 0) {
+        return res.status(400).json({
+          error: `Invalid stickerWeight for bundle ${bundle.bundleNo}: must be non-negative`,
+        });
+      }
+    }
+
     let result;
 
     if (inboundId) {
@@ -48,14 +57,18 @@ router.post("/actual/save-weight", async (req, res) => {
         inboundId,
         actualWeight,
         bundles,
-        strictValidation
+        strictValidation,
+        null,
+        null,
       );
     } else if (lotId) {
       result = await actualWeightModel.saveLotWithBundles(
         lotId,
         actualWeight,
         bundles,
-        strictValidation
+        strictValidation,
+        null,
+        null,
       );
     } else {
       // Handle case where we only have jobNo and lotNo
@@ -74,7 +87,7 @@ router.post("/actual/save-weight", async (req, res) => {
           bundles,
           strictValidation,
           jobNo,
-          lotNo
+          lotNo,
         );
       } else {
         // If no inbound found, try to find lotId
@@ -92,7 +105,7 @@ router.post("/actual/save-weight", async (req, res) => {
             bundles,
             strictValidation,
             jobNo,
-            lotNo
+            lotNo,
           );
         } else {
           return res.status(404).json({
@@ -283,6 +296,17 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
         isInbound ? "inboundId" : "lotId"
       }: ${finalIdValue}`
     );
+
+    // Log additional info about crewLotNo and stickerWeight if available
+    if (bundles.length > 0) {
+      const sampleBundle = bundles[0];
+      console.log(`Additional bundle info:`, {
+        crewLotNo: sampleBundle.crewLotNo || 'N/A',
+        bundleStickerWeight: sampleBundle.stickerWeight || 'N/A',
+        inboundStickerWeight: sampleBundle.inboundStickerWeight || 'N/A',
+      });
+    }
+
     res.json(bundles);
   } catch (error) {
     console.error("Error in get-bundles-if-weighted:", error);
@@ -292,6 +316,7 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
     });
   }
 });
+
 
 router.post("/actual/duplicate-bundles", async (req, res) => {
   console.log("[DEBUG] Request Body:", req.body);
@@ -330,6 +355,81 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
     });
   }
 });
+
+
+// save lotNo
+router.post("/actual/update-crew-lotno", async (req, res) => {
+  try {
+    const { inboundId, lotId, crewLotNo } = req.body;
+
+    let finalIdValue = null;
+    let isInbound = true;
+    let updateResult = null;
+    let searchAttempts = [];
+
+    // Priority 1: inboundId
+    if (inboundId && inboundId !== 0) {
+      finalIdValue = inboundId;
+      isInbound = true;
+
+      updateResult = await actualWeightModel.updateCrewLotNo(
+        finalIdValue,
+        isInbound,
+        crewLotNo
+      );
+
+      searchAttempts.push({
+        type: "inboundId",
+        id: finalIdValue,
+        updated: updateResult ? 1 : 0,
+      });
+    }
+
+    // Priority 2: lotId if inboundId not provided or failed
+    if (!updateResult && lotId && lotId !== 0) {
+      finalIdValue = lotId;
+      isInbound = false;
+
+      updateResult = await actualWeightModel.updateCrewLotNo(
+        finalIdValue,
+        isInbound,
+        crewLotNo
+      );
+
+      searchAttempts.push({
+        type: "lotId",
+        id: finalIdValue,
+        updated: updateResult ? 1 : 0,
+      });
+    }
+
+    // Response formatting
+    if (updateResult) {
+      res.json({
+        success: true,
+        message: `Crew Lot No successfully updated to ${crewLotNo} in both tables.`,
+        finalSearchedId: finalIdValue,
+        finalSearchedType: isInbound ? "inboundId" : "lotId",
+        searchAttempts,
+        updatedRecords: updateResult,
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: "Unable to update Crew Lot No. No matching inboundId or lotId found.",
+        searchAttempts,
+      });
+    }
+  } catch (error) {
+    console.error("Error in update-crew-lotno:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      details: error.message,
+    });
+  }
+});
+
 
 // checks if the jobNo/lotNo is already scheduled outbound also used in repack page to check if it is outbounded
 router.post("/actual/check-outbound-status", async (req, res) => {

@@ -130,12 +130,181 @@ const findRelatedId = async (
   }
 };
 
+const checkDuplicateCrewLotNo = async (crewLotNo, jobNo, idValue, transaction = null) => {
+  if (!crewLotNo) return false; // Skip check if empty
+
+  const options = transaction ? { transaction } : {};
+  
+  // 1. Check duplicate in inbound table only for the same jobNo
+  const duplicateQuery = `
+    SELECT COUNT(*) as count 
+    FROM public.inbounds 
+    WHERE "jobNo" = :jobNo 
+    AND "crewLotNo" = :crewLotNo 
+    AND "inboundId" != :idValue
+    AND ("isWeighted" IS NULL OR "isWeighted" = false)
+  `;
+
+  const [duplicateResult] = await db.sequelize.query(duplicateQuery, {
+    replacements: { 
+      crewLotNo: parseInt(crewLotNo), 
+      jobNo: jobNo,
+      idValue: idValue || 0 // Use 0 if idValue is null to avoid SQL issues
+    },
+    type: db.sequelize.QueryTypes.SELECT,
+    ...options,
+  });
+
+  if (duplicateResult.count > 0) {
+    throw new Error(`Crew Lot No ${crewLotNo} already exists for job ${jobNo} in inbound records.`);
+  }
+
+  // 2. Check range based on jobNo's lot numbers from inbound table only
+  const rangeQuery = `
+    SELECT MIN("lotNo") as minLot, MAX("lotNo") as maxLot
+    FROM public.inbounds 
+    WHERE "jobNo" = :jobNo
+    AND ("isWeighted" IS NULL OR "isWeighted" = false)
+  `;
+
+  const [rangeResult] = await db.sequelize.query(rangeQuery, {
+    replacements: { jobNo },
+    type: db.sequelize.QueryTypes.SELECT,
+    ...options,
+  });
+
+  const { minlot, maxlot } = rangeResult;
+
+  // Only validate range if there are existing records for this job
+  if (minlot !== null && maxlot !== null && (crewLotNo < minlot || crewLotNo > maxlot)) {
+    throw new Error(
+      `Crew Lot No ${crewLotNo} is out of valid range for job ${jobNo} (${minlot} - ${maxlot}).`
+    );
+  }
+
+  return false; // false means no issues
+};
+
+// Update Crew Lot No in both tables
+const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
+  const transaction = await db.sequelize.transaction();
+  try {
+    let jobNo, lotNo;
+    
+    if (isInbound) {
+      // Find from inbound table with isWeighted condition
+      const inboundQuery = `
+        SELECT "jobNo", "lotNo" 
+        FROM public.inbounds 
+        WHERE "inboundId" = :idValue 
+        AND ("isWeighted" IS NULL OR "isWeighted" = false)
+      `;
+      const [inbound] = await db.sequelize.query(inboundQuery, {
+        replacements: { idValue },
+        type: db.sequelize.QueryTypes.SELECT,
+        transaction,
+      });
+      
+      if (!inbound) throw new Error("Inbound record not found or already weighted");
+      jobNo = inbound.jobNo;
+      lotNo = inbound.lotNo;
+    } else {
+      // For lotId, we still need to find the corresponding inbound record for validation
+      const lotQuery = `
+        SELECT "jobNo", "lotNo" 
+        FROM public.lot 
+        WHERE "lotId" = :idValue
+      `;
+      const [lot] = await db.sequelize.query(lotQuery, {
+        replacements: { idValue },
+        type: db.sequelize.QueryTypes.SELECT,
+        transaction,
+      });
+      
+      if (!lot) throw new Error("Lot record not found");
+      
+      // Now find the corresponding inbound record with isWeighted condition
+      const inboundQuery = `
+        SELECT "jobNo", "lotNo" 
+        FROM public.inbounds 
+        WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+        AND ("isWeighted" IS NULL OR "isWeighted" = false)
+      `;
+      const [inbound] = await db.sequelize.query(inboundQuery, {
+        replacements: { jobNo: lot.jobNo, lotNo: lot.lotNo },
+        type: db.sequelize.QueryTypes.SELECT,
+        transaction,
+      });
+      
+      if (!inbound) throw new Error("Corresponding inbound record not found or already weighted");
+      jobNo = inbound.jobNo;
+      lotNo = inbound.lotNo;
+    }
+
+    // Validate duplicate and range (only checks inbound table)
+    await checkDuplicateCrewLotNo(newCrewLotNo, jobNo, idValue, transaction);
+
+    // Update both tables
+    const updateInboundQuery = `
+      UPDATE public.inbounds
+      SET 
+        "crewLotNo" = :crewLotNo,
+        "updatedAt" = NOW()
+      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      AND ("isWeighted" IS NULL OR "isWeighted" = false)
+      RETURNING *
+    `;
+
+    const updateLotQuery = `
+      UPDATE public.lot
+      SET 
+        "crewLotNo" = :crewLotNo,
+        "updatedAt" = NOW()
+      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      RETURNING *
+    `;
+
+    const [inboundResult] = await db.sequelize.query(updateInboundQuery, {
+      replacements: { 
+        crewLotNo: parseInt(newCrewLotNo), 
+        jobNo, 
+        lotNo 
+      },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction,
+    });
+
+    const [lotResult] = await db.sequelize.query(updateLotQuery, {
+      replacements: { 
+        crewLotNo: parseInt(newCrewLotNo), 
+        jobNo, 
+        lotNo 
+      },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction,
+    });
+
+    await transaction.commit();
+    
+    return {
+      inbound: inboundResult || null,
+      lot: lotResult || null
+    };
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error updating Crew Lot No:", error);
+    throw error;
+  }
+};
+
+
 const upsertBundle = async (
   idValue,
   isInbound,
   bundleNo,
   weight,
   meltNo,
+  stickerWeight, // New parameter for stickerWeight
   relatedId = null,
   jobNo = null,
   lotNo = null,
@@ -206,6 +375,7 @@ const upsertBundle = async (
       SET 
         weight = :weight, 
         "meltNo" = :meltNo,
+        "stickerWeight" = :stickerWeight,
         "${relatedIdField}" = COALESCE(:relatedId, "${relatedIdField}"),
         "updatedAt" = NOW()
       WHERE "${idField}" = :idValue 
@@ -219,6 +389,7 @@ const upsertBundle = async (
         bundleNo,
         weight,
         meltNo: meltNo || null,
+        stickerWeight: stickerWeight || null,
         relatedId,
       },
       type: db.sequelize.QueryTypes.UPDATE,
@@ -234,11 +405,12 @@ const upsertBundle = async (
     // If no rows were updated, try to insert
     const insertQuery = `
       INSERT INTO public.inboundbundles 
-      ("inboundId", "lotId", "bundleNo", weight, "meltNo", "isOutbounded", "createdAt", "updatedAt")
-      VALUES (:inboundId, :lotId, :bundleNo, :weight, :meltNo, false, NOW(), NOW())
+      ("inboundId", "lotId", "bundleNo", weight, "meltNo", "stickerWeight", "isOutbounded", "createdAt", "updatedAt")
+      VALUES (:inboundId, :lotId, :bundleNo, :weight, :meltNo, :stickerWeight, false, NOW(), NOW())
       ON CONFLICT ("inboundId", "bundleNo") DO UPDATE SET
         weight = EXCLUDED.weight,
         "meltNo" = EXCLUDED."meltNo",
+        "stickerWeight" = EXCLUDED."stickerWeight",
         "lotId" = COALESCE(EXCLUDED."lotId", inboundbundles."lotId"),
         "updatedAt" = NOW()
       RETURNING *
@@ -250,6 +422,7 @@ const upsertBundle = async (
       bundleNo,
       weight,
       meltNo: meltNo || null,
+      stickerWeight: stickerWeight || null,
     };
 
     const insertResult = await db.sequelize.query(insertQuery, {
@@ -266,11 +439,21 @@ const upsertBundle = async (
   }
 };
 
+// Helper function to calculate total stickerWeight from bundles
+const calculateTotalStickerWeight = (bundles) => {
+  return bundles.reduce((total, bundle) => {
+    const stickerWeight = bundle.stickerWeight || 0;
+    return total + (stickerWeight > 0 ? stickerWeight : 0);
+  }, 0) / 1000; // convert to metric tons
+};
+
 // update the inboundId actual weight
 const updateInboundActualWeight = async (
   inboundId,
   actualWeight,
-  strictValidation = false
+  strictValidation = false,
+  crewLotNo = null,
+  bundles = null // New parameter to calculate total stickerWeight
 ) => {
   const transaction = await db.sequelize.transaction();
   try {
@@ -279,6 +462,7 @@ const updateInboundActualWeight = async (
       SELECT 
         COUNT(*) as total_count,
         SUM(CASE WHEN weight > 0 THEN 1 ELSE 0 END) as valid_weights,
+        SUM(CASE WHEN stickerWeight > 0 THEN 1 ELSE 0 END) as valid_sticker_weights,
         SUM(CASE WHEN "meltNo" IS NOT NULL AND "meltNo" != '' THEN 1 ELSE 0 END) as valid_melt_nos
       FROM public.inboundbundles 
       WHERE "inboundId" = :inboundId
@@ -296,10 +480,14 @@ const updateInboundActualWeight = async (
       isWeighted =
         bundleStatus.total_count > 0 &&
         bundleStatus.total_count === bundleStatus.valid_weights &&
+        bundleStatus.total_count === bundleStatus.valid_sticker_weights &&
         bundleStatus.total_count === bundleStatus.valid_melt_nos;
     } else {
       isWeighted = true;
     }
+
+    // Calculate total stickerWeight if bundles are provided
+    const totalStickerWeight = bundles ? calculateTotalStickerWeight(bundles) : null;
 
     // Update the inbound
     const updateQuery = `
@@ -307,6 +495,7 @@ const updateInboundActualWeight = async (
       SET 
         "actualWeight" = :actualWeight,      
         "isWeighted" = :isWeighted,
+        "stickerWeight" = COALESCE(:stickerWeight, "stickerWeight"),
         "updatedAt" = NOW()
       WHERE "inboundId" = :inboundId
       RETURNING *
@@ -321,6 +510,7 @@ const updateInboundActualWeight = async (
         inboundId,
         actualWeight: actualWeightInMetricTons,
         isWeighted,
+        stickerWeight: totalStickerWeight,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -338,7 +528,9 @@ const updateInboundActualWeight = async (
 const updateLotActualWeight = async (
   lotId,
   actualWeight,
-  strictValidation = false
+  strictValidation = false,
+  crewLotNo = null, // New parameter for crewLotNo
+  bundles = null // New parameter to calculate total stickerWeight
 ) => {
   const transaction = await db.sequelize.transaction();
   try {
@@ -369,12 +561,16 @@ const updateLotActualWeight = async (
       isWeighted = true;
     }
 
+    // Calculate total stickerWeight if bundles are provided
+    const totalStickerWeight = bundles ? calculateTotalStickerWeight(bundles) : null;
+
     // Update the lot
     const updateQuery = `
       UPDATE public.lot 
       SET 
         "actualWeight" = :actualWeight, 
         "isWeighted" = :isWeighted,
+        "stickerWeight" = COALESCE(:stickerWeight, "stickerWeight"),
         "updatedAt" = NOW()
       WHERE "lotId" = :lotId
       RETURNING *
@@ -389,6 +585,7 @@ const updateLotActualWeight = async (
         lotId,
         actualWeight: actualWeightInMetricTons,
         isWeighted,
+        stickerWeight: totalStickerWeight,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -410,11 +607,12 @@ const saveInboundWithBundles = async (
   bundles,
   strictValidation = false,
   jobNo = null,
-  lotNo = null
+  lotNo = null,
 ) => {
   const transaction = await db.sequelize.transaction();
 
   try {
+    
     // Find related lotId, using jobNo and lotNo if inboundId is null
     const relatedLotId = await findRelatedId(inboundId, false, jobNo, lotNo);
 
@@ -427,6 +625,7 @@ const saveInboundWithBundles = async (
         bundle.bundleNo,
         bundle.weight,
         bundle.meltNo,
+        bundle.stickerWeight, // Pass stickerWeight to upsertBundle
         relatedLotId,
         jobNo,
         lotNo,
@@ -445,12 +644,16 @@ const saveInboundWithBundles = async (
     );
     const isWeighted = hasAnyData;
 
-    // Update inbound
+    // Calculate total stickerWeight
+    const totalStickerWeight = calculateTotalStickerWeight(bundles);
+
+    // Update inbound with crewLotNo and stickerWeight
     const updateQuery = `
       UPDATE public.inbounds 
       SET 
         "actualWeight" = :actualWeight, 
         "isWeighted" = :isWeighted,
+        "stickerWeight" = :stickerWeight,
         "updatedAt" = NOW()
       WHERE "inboundId" = :inboundId
       RETURNING *
@@ -464,6 +667,7 @@ const saveInboundWithBundles = async (
         inboundId,
         actualWeight: actualWeightInMetricTons,
         isWeighted, // Use the new conditional flag here
+        stickerWeight: totalStickerWeight,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -477,6 +681,7 @@ const saveInboundWithBundles = async (
         SET 
           "actualWeight" = :actualWeight, 
           "isWeighted" = :isWeighted,
+          "stickerWeight" = :stickerWeight,
           "updatedAt" = NOW()
         WHERE "lotId" = :lotId
       `,
@@ -485,6 +690,7 @@ const saveInboundWithBundles = async (
             lotId: relatedLotId,
             actualWeight: actualWeightInMetricTons,
             isWeighted, // And also use it here
+            stickerWeight: totalStickerWeight,
           },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
@@ -499,6 +705,7 @@ const saveInboundWithBundles = async (
       actualWeight,
       bundles: savedBundles,
       isWeighted,
+      stickerWeight: totalStickerWeight,
     };
   } catch (error) {
     await transaction.rollback();
@@ -514,7 +721,7 @@ const saveLotWithBundles = async (
   bundles,
   strictValidation = false,
   jobNo = null,
-  lotNo = null
+  lotNo = null,
 ) => {
   const transaction = await db.sequelize.transaction();
 
@@ -531,6 +738,7 @@ const saveLotWithBundles = async (
         bundle.bundleNo,
         bundle.weight,
         bundle.meltNo,
+        bundle.stickerWeight, // Pass stickerWeight to upsertBundle
         relatedInboundId,
         jobNo,
         lotNo,
@@ -541,21 +749,67 @@ const saveLotWithBundles = async (
       }
     }
 
-    // Now update weights with proper validation
-    await updateLotActualWeight(
-      lotId,
-      actualWeight,
-      strictValidation,
-      transaction
-    );
+    // Calculate total stickerWeight
+    const totalStickerWeight = calculateTotalStickerWeight(bundles);
 
-    // Also update related inbound if exists
+    // --- MODIFIED LOGIC ---
+    // A lot is considered "weighted" (i.e., started) if any bundle has
+    // either a weight greater than 0 or a non-empty melt number.
+    const hasAnyData = bundles.some(
+      (b) =>
+        (b.weight != null && b.weight > 0) ||
+        (b.meltNo != null && b.meltNo.trim() !== "")
+    );
+    const isWeighted = hasAnyData;
+
+    // Update lot with crewLotNo and stickerWeight
+    const updateQuery = `
+      UPDATE public.lot 
+      SET 
+        "actualWeight" = :actualWeight, 
+        "isWeighted" = :isWeighted,
+        "stickerWeight" = :stickerWeight,
+        "updatedAt" = NOW()
+      WHERE "lotId" = :lotId
+      RETURNING *
+    `;
+
+    // Convert actualWeight from kg to metric tons (divide by 1000)
+    const actualWeightInMetricTons = actualWeight / 1000;
+
+    const lotResult = await db.sequelize.query(updateQuery, {
+      replacements: {
+        lotId,
+        actualWeight: actualWeightInMetricTons,
+        isWeighted,
+        stickerWeight: totalStickerWeight,
+      },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction,
+    });
+
+    // Also update related inbound if exists (including crewLotNo and stickerWeight)
     if (relatedInboundId) {
-      await updateInboundActualWeight(
-        relatedInboundId,
-        actualWeight,
-        strictValidation,
-        transaction
+      await db.sequelize.query(
+        `
+        UPDATE public.inbounds 
+        SET 
+          "actualWeight" = :actualWeight, 
+          "isWeighted" = :isWeighted,
+          "stickerWeight" = :stickerWeight,
+          "updatedAt" = NOW()
+        WHERE "inboundId" = :inboundId
+      `,
+        {
+          replacements: {
+            inboundId: relatedInboundId,
+            actualWeight: actualWeightInMetricTons,
+            isWeighted,
+            stickerWeight: totalStickerWeight,
+          },
+          type: db.sequelize.QueryTypes.UPDATE,
+          transaction,
+        }
       );
     }
 
@@ -565,6 +819,8 @@ const saveLotWithBundles = async (
       inboundId: relatedInboundId,
       actualWeight,
       bundles: savedBundles,
+      stickerWeight: totalStickerWeight,
+      isWeighted,
     };
   } catch (error) {
     await transaction.rollback();
@@ -584,21 +840,31 @@ const getBundlesIfWeighted = async (
     let replacements;
 
     if (isInbound) {
-      // Direct inboundId lookup
+      // Direct inboundId lookup with JOIN to get crewLotNo and stickerWeight
       console.log(`Searching bundles by inboundId: ${idValue}`);
       query = `
-        SELECT * FROM inboundbundles
-        WHERE "inboundId" = ?
-        ORDER BY "bundleNo"
+        SELECT 
+          ib.*,
+          i."crewLotNo",
+          i."stickerWeight" as inboundStickerWeight
+        FROM inboundbundles ib
+        LEFT JOIN inbounds i ON ib."inboundId" = i."inboundId"
+        WHERE ib."inboundId" = ?
+        ORDER BY ib."bundleNo"
       `;
       replacements = [idValue];
     } else {
-      // Direct lotId lookup
+      // Direct lotId lookup with JOIN to get crewLotNo and stickerWeight
       console.log(`Searching bundles by lotId: ${idValue}`);
       query = `
-        SELECT * FROM inboundbundles
-        WHERE "lotId" = ?
-        ORDER BY "bundleNo"
+        SELECT 
+          ib.*,
+          i."crewLotNo",
+          i."stickerWeight" as inboundStickerWeight
+        FROM inboundbundles ib
+        LEFT JOIN inbounds i ON ib."inboundId" = i."inboundId"
+        WHERE ib."lotId" = ?
+        ORDER BY ib."bundleNo"
       `;
       replacements = [idValue];
     }
@@ -622,6 +888,9 @@ const getBundlesIfWeighted = async (
         meltNo: bundles[0].meltNo,
         inboundId: bundles[0].inboundId,
         lotId: bundles[0].lotId,
+        stickerWeight: bundles[0].stickerWeight, // bundle-level stickerWeight
+        inboundStickerWeight: bundles[0].inboundStickerWeight, // inbound-level stickerWeight
+        crewLotNo: bundles[0].crewLotNo,
       });
     }
 
@@ -921,6 +1190,7 @@ module.exports = {
   getBundlesIfWeighted,
   upsertBundle,
   duplicateActualWeightBundles,
+  updateCrewLotNo,
   updateReportStatus,
   checkOutboundScheduleStatus,
 };

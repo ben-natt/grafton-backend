@@ -96,6 +96,7 @@ const createGrnAndTransactions = async (req, res) => {
         __dirname,
         "..",
         "uploads",
+        "img",
         "stuffing_photos"
       );
       await fs.mkdir(uploadDir, { recursive: true }); // Ensure directory exists
@@ -107,10 +108,7 @@ const createGrnAndTransactions = async (req, res) => {
 
         // Decode base64 and write file
         await fs.writeFile(filePath, base64Photo, { encoding: "base64" });
-
-        // Store the relative path/URL to be saved in the DB
-        // Assuming the 'uploads' folder is served statically
-        const imageUrl = `/uploads/stuffing_photos/${fileName}`;
+        const imageUrl = `/uploads/img/stuffing_photos/${fileName}`;
         photoUrls.push(imageUrl);
       }
 
@@ -125,6 +123,11 @@ const createGrnAndTransactions = async (req, res) => {
 
     const scheduleInfo = await pendingTasksModel.pendingOutboundTasksUser(
       scheduleId
+    );
+
+    const grnDetailsForPdf = await outboundModel.getGrnDetailsForSelection(
+      scheduleId,
+      grnDataFromRequest.selectedInboundIds
     );
 
     const aggregateDetails = (key) =>
@@ -156,6 +159,8 @@ const createGrnAndTransactions = async (req, res) => {
       transportVendor:
         lotsForPdf.length > 0 ? lotsForPdf[0].transportVendor : "N/A",
       containerAndSealNo: containerAndSealNo,
+      uom: grnDataFromRequest.uom,
+      fileName: grnDetailsForPdf.fileName,
       cargoDetails: {
         commodity: aggregateDetails("commodity")
           ? aggregateDetails("commodity")
@@ -163,14 +168,23 @@ const createGrnAndTransactions = async (req, res) => {
         shape: aggregateDetails("shape") ? aggregateDetails("shape") : "N/A",
         brand: aggregateDetails("brand") ? aggregateDetails("brand") : "N/A",
       },
-      lots: lotsForPdf.map((lot) => ({
-        lotNo: `${lot.jobNo}-${lot.lotNo}`,
-        bundles: lot.noOfBundle,
-        grossWeightMt: parseAndFix(lot.grossWeight, 2),
-        netWeightMt: parseAndFix(lot.netWeight, 2),
-        actualWeightMt: parseAndFix(lot.actualWeight, 2),
-      })),
+      lots: lotsForPdf.map((lot) => {
+        const actualWeight = parseFloat(lot.actualWeight) || 0;
+        const grossWeight = parseFloat(lot.grossWeight) || 0;
+
+        const displayWeight = actualWeight !== 0 ? actualWeight : grossWeight;
+
+        return {
+          lotNo: `${lot.jobNo}-${lot.lotNo}`,
+          bundles: lot.noOfBundle,
+          grossWeightMt: parseAndFix(lot.grossWeight, 2), // Not used in PDF but kept for consistency
+          netWeightMt: parseAndFix(lot.netWeight, 2),
+          actualWeightMt: parseAndFix(displayWeight, 2), // This will be drawn in the Gross Weight space
+        };
+      }),
     };
+
+    console.log("Controller: pdfData for PDF service:", pdfData);
 
     const { outputPath, previewImagePath } = await pdfService.generateGrnPdf(
       pdfData

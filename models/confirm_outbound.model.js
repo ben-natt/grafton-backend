@@ -23,6 +23,7 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     const query = `
   SELECT
     so."lotReleaseWeight",
+    so."outboundType",
     s."shapeName" AS shape,
     so."releaseWarehouse",
     so."storageReleaseLocation",
@@ -33,7 +34,7 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     so."containerNo",
     so."sealNo",
     i."jobNo",
-    i."lotNo",
+    COALESCE(i."crewLotNo", i."lotNo") as "lotNo",
     i."actualWeight",
     i."grossWeight",
     i."noOfBundle" AS "expectedBundleCount",
@@ -67,31 +68,49 @@ const getGrnDetailsForSelection = async (
   selectedInboundIds
 ) => {
   try {
-    const outboundJobNo = `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
+    // First, get the details for one lot to determine the outboundJobNo
+    const preliminaryLotQuery = `
+      SELECT so."outboundJobNo"
+      FROM public.selectedinbounds si
+      JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
+      WHERE si."selectedInboundId" = :selectedInboundId
+      LIMIT 1;
+    `;
+    const prelimLot = await db.sequelize.query(preliminaryLotQuery, {
+      replacements: { selectedInboundId: selectedInboundIds[0] },
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+
+    const outboundJobNo =
+      prelimLot?.outboundJobNo ||
+      `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
 
     const grnCountQuery = `
       SELECT COUNT(*) as grn_count
       FROM public.outbounds
-      WHERE "jobIdentifier" = :scheduleOutboundId::text;
+      WHERE "jobIdentifier" = :outboundJobNo;
     `;
     const grnCountResult = await db.sequelize.query(grnCountQuery, {
-      replacements: { scheduleOutboundId },
+      replacements: { outboundJobNo },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
-    const grnNo = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    const fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    const grnNo = outboundJobNo;
 
     const lotsQuery = `
   SELECT
       si."inboundId", si."scheduleOutboundId",
-      i."jobNo", i."lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
+      i."jobNo", COALESCE(i."crewLotNo", i."lotNo") as "lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
       i."exWarehouseLot", i."exWarehouseWarrant",
       w."exLmeWarehouseName" AS "exLmeWarehouse",
       s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
       TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "scheduledReleaseDate", 
-      so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
+      so."releaseWarehouse", si."storageReleaseLocation", so."transportVendor",
       so."outboundType",
+      so."outboundJobNo",
       TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "deliveryDate", 
       TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "exportDate", 
       TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "stuffingDate", 
@@ -183,12 +202,14 @@ const getGrnDetailsForSelection = async (
         year: "numeric",
       }), // Current date as "12 August 2025"
       deliveryDate: formatMultipleDates(lots, "deliveryDate"),
+      outboundType: firstLot.outboundType,
       exportDate: firstLot.exportDate,
       stuffingDate: firstLot.stuffingDate,
       containerNo: firstLot.containerNo,
       sealNo: firstLot.sealNo,
       ourReference: outboundJobNo,
       grnNo,
+      fileName,
       warehouse: firstLot.releaseWarehouse ? firstLot.releaseWarehouse : "N/A",
       cargoDetails: {
         commodity: aggregateDetails("commodity")
@@ -279,13 +300,20 @@ const checkForDuplicateLots = async (lots, transaction) => {
 };
 
 const createGrnAndTransactions = async (formData) => {
-  const { selectedInboundIds, stuffingPhotos } = formData;
+  const {
+    selectedInboundIds,
+    stuffingPhotos,
+    containerNo,
+    sealNo,
+    scheduleOutboundId,
+    outboundJobNo, // Get outboundJobNo from formData
+  } = formData;
   const t = await db.sequelize.transaction();
 
   try {
     // Fetch both jobNo and lotNo for the duplicate check
     const lotsDetailsQueryForDuplicateCheck = `
-      SELECT i."jobNo", i."lotNo"
+      SELECT i."jobNo", COALESCE(i."crewLotNo", i."lotNo") as "lotNo"
       FROM public.selectedinbounds si
       JOIN public.inbounds i ON si."inboundId" = i."inboundId"
       WHERE si."selectedInboundId" IN (:selectedInboundIds);
@@ -311,6 +339,13 @@ const createGrnAndTransactions = async (formData) => {
     }
 
     await confirmSelectedInbounds(selectedInboundIds, t);
+
+    // Prepare replacements for the insert query, ensuring jobIdentifier is correct
+    const outboundInsertReplacements = {
+      ...formData,
+      jobIdentifier: outboundJobNo, // Use outboundJobNo for the jobIdentifier
+    };
+
     const outboundInsertQuery = `
       INSERT INTO public.outbounds (
           "releaseDate", "driverName", "driverIdentityNo", "truckPlateNo",
@@ -327,13 +362,30 @@ const createGrnAndTransactions = async (formData) => {
       ) RETURNING "outboundId", "createdAt" AS "outboundedDate", "jobIdentifier", "grnNo";
     `;
     const outboundResult = await db.sequelize.query(outboundInsertQuery, {
-      replacements: formData,
+      replacements: outboundInsertReplacements,
       type: db.sequelize.QueryTypes.INSERT,
       transaction: t,
     });
 
     const createdOutbound = outboundResult[0][0];
     const newOutboundId = createdOutbound.outboundId;
+
+    if (containerNo !== undefined && sealNo !== undefined) {
+      const updateScheduleQuery = `
+            UPDATE public.scheduleoutbounds
+            SET "containerNo" = :containerNo, "sealNo" = :sealNo, "updatedAt" = NOW()
+            WHERE "scheduleOutboundId" = :scheduleOutboundId;
+        `;
+      await db.sequelize.query(updateScheduleQuery, {
+        replacements: {
+          containerNo,
+          sealNo,
+          scheduleOutboundId: scheduleOutboundId, // Use original scheduleOutboundId
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      });
+    }
 
     if (
       stuffingPhotos &&
@@ -356,11 +408,11 @@ const createGrnAndTransactions = async (formData) => {
     const lotsDetailsQuery = `
       SELECT
           si."inboundId", si."scheduleOutboundId",
-          i."jobNo", i."lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
+          i."jobNo", COALESCE(i."crewLotNo", i."lotNo") as "lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
           i."exWarehouseLot", i."exWarehouseWarrant",
           w."exLmeWarehouseName" AS "exLmeWarehouse",
           s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
-          so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", so."storageReleaseLocation", so."transportVendor",
+          so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", si."storageReleaseLocation", so."transportVendor",
           so."outboundType", so."stuffingDate", so."containerNo", so."sealNo",
           so."lotReleaseWeight",
           so."userId" AS "scheduledBy",

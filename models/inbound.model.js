@@ -193,7 +193,7 @@ const getAllScheduleInbound = async () => {
         const query = `
           select  
           TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-		l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 2, '0') AS "Lot No",
+		l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 3, '0') AS "Lot No",
         l."lotId",
 		l."exWarehouseLot" AS  "Ex-W Lot",
 		l."commodity" AS "Metal",
@@ -239,7 +239,7 @@ const getScheduleInboundByDate = async (date) => {
         const query = `
             SELECT
                 TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-                l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 2, '0') AS "Lot No",
+                l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 3, '0') AS "Lot No",
                 l."lotId",
                 l."exWarehouseLot" AS "Ex-W Lot",
                 l."commodity" AS "Metal",
@@ -287,7 +287,7 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
         const query = `
             SELECT
                 TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-                l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 2, '0') AS "Lot No",
+                l."jobNo" || ' - ' || LPAD(l."lotNo"::text, 3, '0') AS "Lot No",
                 l."lotId",
                 l."exWarehouseLot" AS "Ex-W Lot",
                 l."commodity" AS "Metal",
