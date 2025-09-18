@@ -27,6 +27,26 @@ router.get("/tasks-jobNo", async (req, res) => {
   }
 });
 
+router.post("/reverse-inbound/:inboundId", async (req, res) => {
+  try {
+    const { inboundId } = req.params;
+    if (!inboundId) {
+      return res.status(400).json({ error: "Inbound ID is required." });
+    }
+
+    const result = await pendingTasksModel.reverseInbound(parseInt(inboundId, 10));
+    res
+      .status(200)
+      .json({ message: "Inbound successfully reversed.", data: result });
+  } catch (error) {
+    console.error("Error in reverse-inbound route:", error);
+    res.status(500).json({
+      error: "Failed to reverse inbound task.",
+      details: error.message,
+    });
+  }
+});
+
 // --- OUTBOUND ROUTES ---
 router.get("/tasks-outbound-ids", async (req, res) => {
   try {
