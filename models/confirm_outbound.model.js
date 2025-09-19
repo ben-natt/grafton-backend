@@ -237,25 +237,25 @@ const getGrnDetailsForSelection = async (
   }
 };
 
-const getOperators = async () => {
-  try {
-    const query = `
-      SELECT 
-        userid AS "userId", 
-        username AS "fullName", 
-        roleid AS "roleId"
-      FROM public.users
-      WHERE roleid IN (1, 2)
-      ORDER BY username;
-    `;
-    const users = await db.sequelize.query(query, {
-      type: db.sequelize.QueryTypes.SELECT,
-    });
-    return users;
-  } catch (error) {
-    throw error;
-  }
-};
+// const getOperators = async () => {
+//   try {
+//     const query = `
+//       SELECT
+//         userid AS "userId",
+//         username AS "fullName",
+//         roleid AS "roleId"
+//       FROM public.users
+//       WHERE roleid IN (1, 2)
+//       ORDER BY username;
+//     `;
+//     const users = await db.sequelize.query(query, {
+//       type: db.sequelize.QueryTypes.SELECT,
+//     });
+//     return users;
+//   } catch (error) {
+//     throw error;
+//   }
+// };
 
 const checkForDuplicateLots = async (lots, transaction) => {
   try {
@@ -509,11 +509,42 @@ const updateOutboundWithPdfDetails = async (
   }
 };
 
+const getUserSignature = async (userId) => {
+  try {
+    const query = `SELECT "signature" FROM public.users WHERE "userid" = :userId;`;
+    const result = await db.sequelize.query(query, {
+      replacements: { userId },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    return result.length > 0 ? result[0].signature : null;
+  } catch (error) {
+    throw error;
+  }
+};
+
+const updateUserSignature = async (userId, signature) => {
+  try {
+    const query = `
+      UPDATE public.users 
+      SET "signature" = :signature 
+      WHERE "userid" = :userId;
+    `;
+    await db.sequelize.query(query, {
+      replacements: { userId, signature },
+      type: db.sequelize.QueryTypes.UPDATE,
+    });
+  } catch (error) {
+    throw error;
+  }
+};
+
 module.exports = {
   getConfirmationDetailsById,
   getGrnDetailsForSelection,
   createGrnAndTransactions,
-  getOperators,
+  getUserSignature,
+  updateUserSignature,
+  // getOperators,
   confirmSelectedInbounds,
   updateOutboundWithPdfDetails,
   checkForDuplicateLots,

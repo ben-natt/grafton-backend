@@ -40,6 +40,7 @@ router.post(
  * GET /confirm-outbound/operators
  * Fetches warehouse staff (roleId 1) and supervisors (roleId 2) for dropdowns.
  */
-router.get("/operators", outboundController.getOperators);
+// router.get("/operators", outboundController.getOperators);
 
+router.get("/user-signature/:userId", outboundController.getUserSignature);
 module.exports = router;

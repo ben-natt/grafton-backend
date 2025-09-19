@@ -83,12 +83,48 @@ const getGrnDetails = async (req, res) => {
   }
 };
 
+const getUserSignature = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required." });
+    }
+
+    const signature = await outboundModel.getUserSignature(userId);
+
+    if (signature) {
+      // If found, send the signature back as a base64 string
+      res.status(200).json({ signature: signature.toString("base64") });
+    } else {
+      // This is not an error; it's expected if the user has never signed.
+      res.status(404).json({ message: "Signature not found for this user." });
+    }
+  } catch (error) {
+    console.error("Error fetching user signature:", error);
+    res.status(500).json({ error: "Failed to fetch user signature" });
+  }
+};
+
 const createGrnAndTransactions = async (req, res) => {
   try {
     const grnDataFromRequest = req.body;
-    const { stuffingPhotos } = grnDataFromRequest;
+    const { stuffingPhotos, userId, warehouseSupervisorSignature } =
+      grnDataFromRequest;
 
-    // --- NEW: Image Handling Logic ---
+    if (warehouseSupervisorSignature) {
+      const savedSignature = await outboundModel.getUserSignature(userId);
+
+      // Only save the signature if one doesn't already exist in the database.
+      if (!savedSignature) {
+        const signatureBuffer = Buffer.from(
+          warehouseSupervisorSignature,
+          "base64"
+        );
+        await outboundModel.updateUserSignature(userId, signatureBuffer);
+      }
+    }
+
+    // --- Image Handling Logic ---
     if (stuffingPhotos && Array.isArray(stuffingPhotos)) {
       const photoUrls = [];
       // Define a directory to save the images
@@ -239,22 +275,23 @@ const createGrnAndTransactions = async (req, res) => {
   }
 };
 
-const getOperators = async (req, res) => {
-  try {
-    const users = await outboundModel.getOperators();
-    const staff = users.filter((user) => user.roleId === 1);
-    const supervisors = users.filter((user) => user.roleId === 2);
+// const getOperators = async (req, res) => {
+//   try {
+//     const users = await outboundModel.getOperators();
+//     const staff = users.filter((user) => user.roleId === 1);
+//     const supervisors = users.filter((user) => user.roleId === 2);
 
-    res.status(200).json({ staff, supervisors });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch operators." });
-  }
-};
+//     res.status(200).json({ staff, supervisors });
+//   } catch (error) {
+//     res.status(500).json({ error: "Failed to fetch operators." });
+//   }
+// };
 
 module.exports = {
   getConfirmationDetails,
   confirmOutbound,
   getGrnDetails,
+  getUserSignature,
   createGrnAndTransactions,
-  getOperators,
+  // getOperators,
 };
