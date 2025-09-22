@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const stockModel = require('../models/stock.model');
 const auth = require('../middleware/auth'); // Assuming auth.js is in a middleware folder
+const stockController = require('../controllers/export_controller.js');
 
 router.get('/', async (req, res) => {
     try {
@@ -135,4 +136,5 @@ router.get('/inventory1', async (req, res) => {
     }
 });
 
+router.get('/export', stockController.exportStocksToExcel);
 module.exports = router;

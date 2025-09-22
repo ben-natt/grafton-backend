@@ -921,6 +921,46 @@ const getInventory1 = async () => {
   }
 };
 
+
+const getAllLotsForExport = async () => {
+  try {
+    const replacements = {};
+    const dataQuery = `
+        SELECT
+            i."jobNo" AS "JobNo",
+            i."lotNo" AS "LotNo",
+            i."exWarehouseLot" AS "ExWarehouseLot",
+            c."commodityName" AS "Metal",
+            b."brandName" AS "Brand",
+            s."shapeName" AS "Shape",
+            i."noOfBundle" AS "Bundles",
+            i."grossWeight" AS "GrossWeight",
+            i."netWeight" AS "NetWeight",
+            iw."inboundWarehouseName" AS "InboundWarehouse",
+            TO_CHAR(ot."releaseDate" AT TIME ZONE 'Asia/Singapore', 'FMDD/FMMM/YYYY') AS "ReleaseDate"
+        FROM public.inbounds i
+        LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
+        LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
+        JOIN public.commodities c ON i."commodityId" = c."commodityId"
+        JOIN public.shapes s ON i."shapeId" = s."shapeId"
+        LEFT JOIN public.brands b ON i."brandId" = b."brandId"
+        LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
+        ORDER BY i."inboundId" ASC;
+    `;
+
+    const items = await db.sequelize.query(dataQuery, {
+      type: db.sequelize.QueryTypes.SELECT,
+      replacements,
+    });
+
+    return items; // Return the array of items directly
+
+  } catch (error) {
+    console.error("Error fetching lots for export:", error);
+    throw error;
+  }
+};
+
 module.exports = {
   getAllStock,
   getLotDetails,
@@ -931,4 +971,5 @@ module.exports = {
   EditInformation,
   getLotsByJobNo,
   getInventory1,
+   getAllLotsForExport,
 };
