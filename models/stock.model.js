@@ -925,10 +925,6 @@ const getInventory1 = async () => {
 const getAllLotsForExport = async () => {
   try {
     const replacements = {};
-    let whereClauses = ['o."inboundId" IS NULL', 'ot."inboundId" IS NULL'];
-
-    const whereString = " WHERE " + whereClauses.join(" AND ");
-
     const dataQuery = `
         SELECT
             i."jobNo" AS "JobNo",
@@ -940,7 +936,8 @@ const getAllLotsForExport = async () => {
             i."noOfBundle" AS "Bundles",
             i."grossWeight" AS "GrossWeight",
             i."netWeight" AS "NetWeight",
-            iw."inboundWarehouseName" AS "InboundWarehouse"
+            iw."inboundWarehouseName" AS "InboundWarehouse",
+            TO_CHAR(ot."releaseDate" AT TIME ZONE 'Asia/Singapore', 'FMDD/FMMM/YYYY') AS "ReleaseDate"
         FROM public.inbounds i
         LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
         LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
@@ -948,10 +945,6 @@ const getAllLotsForExport = async () => {
         JOIN public.shapes s ON i."shapeId" = s."shapeId"
         LEFT JOIN public.brands b ON i."brandId" = b."brandId"
         LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
-        ${whereString}
-        GROUP BY
-            i."inboundId", i."jobNo", i."lotNo", i."exWarehouseLot",
-            c."commodityName", b."brandName", s."shapeName", iw."inboundWarehouseName"
         ORDER BY i."inboundId" ASC;
     `;
 
