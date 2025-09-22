@@ -12,6 +12,15 @@ router.get(
 );
 
 /*
+ * GET /confirm-outbound/stuffing-photos/:scheduleOutboundId
+ * Fetches existing stuffing photos for a given schedule.
+ */
+router.get(
+  "/stuffing-photos/:scheduleOutboundId",
+  outboundController.getStuffingPhotos
+);
+
+/*
  * POST /outbound/confirm
  * Confirms a list of lots for outbound, updating their status.
  * @body   { "itemsToConfirm": [{ "selectedInboundId": 1 }, { "selectedInboundId": 2 }], "scheduleOutboundId": 1 }

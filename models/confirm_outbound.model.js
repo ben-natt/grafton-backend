@@ -33,6 +33,8 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "stuffingDate",
     so."containerNo",
     so."sealNo",
+    so."tareWeight",
+    so."uom",
     i."jobNo",
     COALESCE(i."crewLotNo", i."lotNo") as "lotNo",
     i."actualWeight",
@@ -59,6 +61,24 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
 
     return result;
   } catch (error) {
+    throw error;
+  }
+};
+
+const getStuffingPhotosByScheduleId = async (scheduleOutboundId) => {
+  try {
+    const query = `
+      SELECT "imageUrl" 
+      FROM public.stuffing_photos
+      WHERE "scheduleoutboundId" = :scheduleOutboundId;
+    `;
+    const results = await db.sequelize.query(query, {
+      replacements: { scheduleOutboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    return results.map((row) => row.imageUrl);
+  } catch (error) {
+    console.error("Error in getStuffingPhotosByScheduleId:", error);
     throw error;
   }
 };
@@ -370,6 +390,20 @@ const createGrnAndTransactions = async (formData) => {
     const createdOutbound = outboundResult[0][0];
     const newOutboundId = createdOutbound.outboundId;
 
+    const updateExistingPhotosQuery = `
+      UPDATE public.stuffing_photos
+      SET "outboundId" = :outboundId, "updatedAt" = NOW()
+      WHERE "scheduleoutboundId" = :scheduleOutboundId;
+    `;
+    await db.sequelize.query(updateExistingPhotosQuery, {
+      replacements: {
+        outboundId: newOutboundId,
+        scheduleOutboundId: scheduleOutboundId,
+      },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction: t,
+    });
+
     if (containerNo !== undefined && sealNo !== undefined) {
       const updateScheduleQuery = `
             UPDATE public.scheduleoutbounds
@@ -394,11 +428,15 @@ const createGrnAndTransactions = async (formData) => {
     ) {
       for (const imageUrl of stuffingPhotos) {
         const photoInsertQuery = `
-          INSERT INTO public.stuffing_photos ("outboundId", "imageUrl", "createdAt", "updatedAt")
-          VALUES (:outboundId, :imageUrl, NOW(), NOW());
+          INSERT INTO public.stuffing_photos ("outboundId", "imageUrl", "createdAt", "updatedAt", "scheduleoutboundId")
+          VALUES (:outboundId, :imageUrl, NOW(), NOW(), :scheduleOutboundId);
         `;
         await db.sequelize.query(photoInsertQuery, {
-          replacements: { outboundId: newOutboundId, imageUrl },
+          replacements: {
+            outboundId: newOutboundId,
+            imageUrl: imageUrl, // The URL from the controller
+            scheduleOutboundId: scheduleOutboundId,
+          },
           type: db.sequelize.QueryTypes.INSERT,
           transaction: t,
         });
@@ -541,6 +579,7 @@ const updateUserSignature = async (userId, signature) => {
 module.exports = {
   getConfirmationDetailsById,
   getGrnDetailsForSelection,
+  getStuffingPhotosByScheduleId,
   createGrnAndTransactions,
   getUserSignature,
   updateUserSignature,

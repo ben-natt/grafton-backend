@@ -20,6 +20,19 @@ const getConfirmationDetails = async (req, res) => {
   }
 };
 
+const getStuffingPhotos = async (req, res) => {
+  try {
+    const { scheduleOutboundId } = req.params;
+    const photos = await outboundModel.getStuffingPhotosByScheduleId(
+      scheduleOutboundId
+    );
+    res.status(200).json({ photos });
+  } catch (error) {
+    console.error("Error fetching stuffing photos:", error);
+    res.status(500).json({ error: "Failed to fetch stuffing photos." });
+  }
+};
+
 const confirmOutbound = async (req, res) => {
   try {
     const { itemsToConfirm, scheduleOutboundId, outboundJobNo } = req.body;
@@ -289,6 +302,7 @@ const createGrnAndTransactions = async (req, res) => {
 
 module.exports = {
   getConfirmationDetails,
+  getStuffingPhotos,
   confirmOutbound,
   getGrnDetails,
   getUserSignature,

@@ -1,4 +1,3 @@
-// models/schedule_outbound.model.js
 module.exports = (sequelize, DataTypes) => {
   // Define ScheduleOutbound model
   const ScheduleOutbound = sequelize.define(
@@ -68,15 +67,15 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: "sealNo",
       },
+      tareWeight: {
+        type: DataTypes.DECIMAL(10, 3),
+        allowNull: true,
+        field: "tareWeight",
+      },
       uom: {
         type: DataTypes.STRING(20),
         allowNull: true,
         field: "uom",
-      },
-      TareWeight: {
-        type: DataTypes.DOUBLE,
-        allowNull: true,
-        field: "TareWeight",
       },
       deliveryDate: {
         type: DataTypes.DATE,
@@ -101,6 +100,33 @@ module.exports = (sequelize, DataTypes) => {
       timestamps: true,
       updatedAt: "updatedAt",
       createdAt: "createdAt",
+    }
+  );
+
+  // NEW: Define StuffingPhotos model
+  const StuffingPhotos = sequelize.define(
+    "StuffingPhotos",
+    {
+      stuffingPhotoId: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true,
+        field: "stuffingPhotoId",
+      },
+      scheduleOutboundId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "scheduleoutboundId",
+      },
+      imageUrl: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        field: "imageUrl",
+      },
+    },
+    {
+      tableName: "stuffing_photos",
+      timestamps: true,
     }
   );
 
@@ -611,6 +637,15 @@ module.exports = (sequelize, DataTypes) => {
     as: "scheduleOutbound",
   });
 
+  // NEW: Association for StuffingPhotos
+  ScheduleOutbound.hasMany(StuffingPhotos, {
+    foreignKey: "scheduleOutboundId",
+    as: "stuffingPhotos",
+  });
+  StuffingPhotos.belongsTo(ScheduleOutbound, {
+    foreignKey: "scheduleOutboundId",
+  });
+
   // Link SelectedInbounds to Inbounds (master record)
   SelectedInbounds.belongsTo(Inbounds, {
     foreignKey: "inboundId", // This is the PK of the Inbounds table
@@ -622,6 +657,7 @@ module.exports = (sequelize, DataTypes) => {
   return {
     ScheduleOutbound,
     SelectedInbounds,
+    StuffingPhotos,
     ScheduleInbound,
     Lot,
     Inbounds,
