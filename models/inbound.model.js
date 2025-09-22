@@ -219,6 +219,7 @@ const getAllScheduleInbound = async () => {
         LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
         LEFT JOIN public.users u1 ON u1."userid" = si."userId"
         LEFT JOIN public.users u2 ON u2."userid" = i."processedId"
+        WHERE l."isConfirm" = false
         ORDER BY
                 TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
 
@@ -268,6 +269,7 @@ const getScheduleInboundByDate = async (date) => {
             LEFT JOIN public.users u2 ON u2."userid" = i."processedId"
             WHERE
                 TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
+            AND l."isConfirm" = false
             ORDER BY
                 TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
@@ -316,6 +318,7 @@ const getScheduleInboundByDateRange = async (startDate, endDate) => {
                 LEFT JOIN public.users u2 ON u2."userid" = i."processedId"
             WHERE
                 TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
+            AND l."isConfirm" = false
             ORDER BY
                 TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
