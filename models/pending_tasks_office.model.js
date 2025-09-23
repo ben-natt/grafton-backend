@@ -645,15 +645,36 @@ const getJobReportInfo = async (jobNo) => {
 
 const updateJobReportStatus = async ({ jobNo, status, resolvedBy }, existingTransaction = null) => {
   const logic = async (t) => {
-    // Step 1: Update the job_reports table
+    // Step 1: Determine the true final status for the report.
+    // For "lack" reports, "accepted" is the final resolution step and should be stored as "resolved".
+    let finalStatus = status;
+    if (status === 'accepted') {
+        const getReportTypeQuery = `
+            SELECT "discrepancyType" FROM public.job_reports
+            WHERE "jobNo" = :jobNo AND "reportStatus" = 'pending'
+            LIMIT 1;
+        `;
+        const reportTypeResult = await db.sequelize.query(getReportTypeQuery, {
+            replacements: { jobNo },
+            type: db.sequelize.QueryTypes.SELECT,
+            plain: true,
+            transaction: t,
+        });
+
+        if (reportTypeResult && reportTypeResult.discrepancyType === 'lack') {
+            finalStatus = 'resolved';
+        }
+    }
+
+    // Step 2: Update the job_reports table with the determined status.
     const updateReportQuery = `
       UPDATE public.job_reports
-      SET "reportStatus" = :status, "resolvedById" = :resolvedBy, "resolvedOn" = NOW()
-      WHERE "jobNo" = :jobNo AND "reportStatus" IN ('pending', 'accepted') -- THIS IS THE FIX
+      SET "reportStatus" = :finalStatus, "resolvedById" = :resolvedBy, "resolvedOn" = NOW()
+      WHERE "jobNo" = :jobNo AND "reportStatus" IN ('pending', 'accepted')
       RETURNING "discrepancyType", "reportStatus";
     `;
     const reportResult = await db.sequelize.query(updateReportQuery, {
-      replacements: { jobNo, status, resolvedBy },
+      replacements: { jobNo, finalStatus, resolvedBy }, // Use finalStatus
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
       transaction: t,
@@ -664,7 +685,7 @@ const updateJobReportStatus = async ({ jobNo, status, resolvedBy }, existingTran
       throw new Error("No pending or accepted report found for this job to update.");
     }
 
-    // Step 2: Reset the report flag for all lots in this job.
+    // Step 3: Reset the report flag for all lots in this job.
     const resetLotFlagsQuery = `
       UPDATE public.lot
       SET report = false
@@ -679,7 +700,7 @@ const updateJobReportStatus = async ({ jobNo, status, resolvedBy }, existingTran
     return reportResult;
   };
 
-  // This part remains the same, handling transactions correctly
+  // This part handles transactions correctly
   if (existingTransaction) {
     return logic(existingTransaction);
   } else {
