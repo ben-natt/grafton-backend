@@ -630,7 +630,7 @@ const getAllScheduleInbound = async ({
   pageSize = 25,
 }) => {
   try {
-    let whereClauses = [];
+    let whereClauses = [ 'l."isConfirm" = false'];
     const replacements = {};
 
     if (filters.commodity) {
@@ -791,7 +791,7 @@ const getAllScheduleOutbound = async ({
   pageSize = 25,
 }) => {
   try {
-    let whereClauses = [];
+    let whereClauses = ['si."isOutbounded" = false'];
     const replacements = {};
 
     if (filters.commodity) {

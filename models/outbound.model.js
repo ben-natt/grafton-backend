@@ -157,6 +157,7 @@ const getAllScheduleOutbounds = async () => {
         LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = si."inboundId"
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
+            WHERE si."isOutbounded" = false
           ORDER BY
                 TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
@@ -218,6 +219,7 @@ const getScheduleOutboundByDate = async (date) => {
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
             WHERE TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') = :date
+        AND si."isOutbounded" = false
         ORDER BY
                 TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
@@ -279,6 +281,7 @@ const getScheduleOutboundByDateRange = async (startDate, endDate) => {
         LEFT JOIN public.users u2 ON u2.userid = ot."outboundedBy"
         LEFT JOIN public.exlmewarehouses exlme ON i."exLmeWarehouseId" = exlme."exLmeWarehouseId"
             WHERE TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') BETWEEN :startDate AND :endDate
+        AND si."isOutbounded" = false
         ORDER BY
                 TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD')
         `;
