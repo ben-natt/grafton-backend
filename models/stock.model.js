@@ -145,7 +145,6 @@ const getInventory = async (filters) => {
   }
 };
 
-
 const getFilterOptions = async () => {
   try {
     const brandsQuery =
@@ -478,7 +477,7 @@ const getLotDetails = async (filters) => {
   }
 };
 
-const createScheduleOutbound = async (scheduleData, userId) => {
+const createScheduleOutbound = async (scheduleData, userId, files = []) => {
   const t = await db.sequelize.transaction();
   console.log(
     "Creating schedule outbound with data:",
@@ -488,7 +487,7 @@ const createScheduleOutbound = async (scheduleData, userId) => {
   );
   try {
     const {
-      releaseStartDate, // Used as releaseDate
+      releaseStartDate,
       releaseEndDate,
       jobNumber,
       lotReleaseWeight,
@@ -501,24 +500,30 @@ const createScheduleOutbound = async (scheduleData, userId) => {
       releaseWarehouse,
       transportVendor,
       selectedLots,
+      tareWeight,
+      uom,
     } = scheduleData;
 
+    const parsedLots = JSON.parse(selectedLots);
+
     const outboundType = stuffingDate ? "container" : "flatbed";
-    
+
     const scheduleInsertQuery = `
      INSERT INTO public.scheduleoutbounds (
         "releaseDate", "releaseEndDate", "userId", "lotReleaseWeight", "outboundType", "exportDate",
         "stuffingDate", "containerNo", "sealNo", "createdAt", "updatedAt",
-        "deliveryDate", "storageReleaseLocation", "releaseWarehouse", "transportVendor","outboundJobNo"
+        "deliveryDate", "storageReleaseLocation", "releaseWarehouse", "transportVendor","outboundJobNo",
+        "tareWeight", "uom"
       )
       VALUES (
         :releaseDate, :releaseEndDate, :userId, :lotReleaseWeight, :outboundType, :exportDate,
         :stuffingDate, :containerNo, :sealNo, NOW(), NOW(),
-        :deliveryDate, :storageReleaseLocation, :releaseWarehouse, :transportVendor, :outboundJobNo
+        :deliveryDate, :storageReleaseLocation, :releaseWarehouse, :transportVendor, :outboundJobNo,
+        :tareWeight, :uom
       )
       RETURNING "scheduleOutboundId";
       `;
-     const insertResult = await db.sequelize.query(scheduleInsertQuery, {
+    const insertResult = await db.sequelize.query(scheduleInsertQuery, {
       replacements: {
         releaseDate: releaseStartDate,
         releaseEndDate: releaseEndDate,
@@ -534,19 +539,40 @@ const createScheduleOutbound = async (scheduleData, userId) => {
         storageReleaseLocation,
         releaseWarehouse,
         transportVendor,
+        tareWeight: tareWeight || null,
+        uom: uom || null,
       },
       type: db.sequelize.QueryTypes.INSERT,
       transaction: t,
     });
 
     const scheduleOutboundId = insertResult?.[0]?.[0]?.scheduleOutboundId;
-    
+
     if (!scheduleOutboundId) {
       throw new Error("Failed to retrieve scheduleOutboundId.");
     }
 
-    if (selectedLots?.length > 0) {
-      // MODIFICATION START: Add "storageReleaseLocation" to the query
+    // --- REVERTED CODE SECTION ---
+    // This query is now simpler because "outboundId" can be null by default.
+    if (files && files.length > 0) {
+      const stuffingPhotosQuery = `
+            INSERT INTO public.stuffing_photos ("scheduleoutboundId", "imageUrl", "createdAt", "updatedAt")
+            VALUES (:scheduleOutboundId, :imageUrl, NOW(), NOW());
+        `;
+      for (const file of files) {
+        await db.sequelize.query(stuffingPhotosQuery, {
+          replacements: {
+            scheduleOutboundId: scheduleOutboundId,
+            imageUrl: `/uploads/img/stuffing_photos/${file.filename}`,
+          },
+          type: db.sequelize.QueryTypes.INSERT,
+          transaction: t,
+        });
+      }
+    }
+    // --- END REVERTED CODE SECTION ---
+
+    if (parsedLots?.length > 0) {
       const selectedInboundsQuery = `
         INSERT INTO public.selectedinbounds (
           "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt",
@@ -558,7 +584,6 @@ const createScheduleOutbound = async (scheduleData, userId) => {
         )
         ON CONFLICT ("jobNo", "lotNo") DO NOTHING;
       `;
-      // MODIFICATION END
 
       const updateInboundQuantityQuery = `
        UPDATE public.inbounds
@@ -566,22 +591,23 @@ const createScheduleOutbound = async (scheduleData, userId) => {
         WHERE "inboundId" = :inboundId;
       `;
 
-      for (const lot of selectedLots) {
+      for (const lot of parsedLots) {
         const inboundId = lot.id;
-        // MODIFICATION: Use 'Bdl' to match your frontend payload
-        const quantity = lot.Bdl; 
+        const quantity = lot.Bdl;
 
-          if (!inboundId) {
+        if (!inboundId) {
           console.warn("Skipping lot due to missing inboundId:", lot);
           continue;
         }
-        const lotNoString = lot["Lot No"]?.toString() ?? "";
-        const parts = lotNoString.split("-");
-        if (parts.length < 2) continue;
-        const jobNo = parts.slice(0, -1).join("-");
-        const lotNo = parseInt(parts[parts.length - 1], 10);
-        if (!jobNo || !Number.isInteger(lotNo)) continue;
 
+        const lotNoDisplay = lot["Lot No"]?.toString() ?? "";
+        const parts = lotNoDisplay.split("-");
+        const jobNo =
+          parts.length > 1 ? parts.slice(0, -1).join("-") : lot.jobNo;
+        const lotNo =
+          parts.length > 1 ? parseInt(parts[parts.length - 1], 10) : lot.lotNo;
+
+        if (!jobNo || isNaN(lotNo)) continue;
 
         await db.sequelize.query(selectedInboundsQuery, {
           replacements: {
@@ -593,14 +619,15 @@ const createScheduleOutbound = async (scheduleData, userId) => {
             releaseEndDate: releaseEndDate || null,
             exportDate: exportDate || null,
             deliveryDate: deliveryDate || null,
-            storageReleaseLocation: lot.storageReleaseLocation ? lot.storageReleaseLocation : storageReleaseLocation,
+            storageReleaseLocation:
+              lot.storageReleaseLocation || storageReleaseLocation,
           },
           type: db.sequelize.QueryTypes.INSERT,
           transaction: t,
         });
 
         if (quantity != null) {
-            await db.sequelize.query(updateInboundQuantityQuery, {
+          await db.sequelize.query(updateInboundQuantityQuery, {
             replacements: {
               quantity,
               inboundId,
@@ -626,7 +653,6 @@ const createScheduleOutbound = async (scheduleData, userId) => {
     );
   }
 };
-
 
 const EditInformation = async (inboundId, updateData) => {
   try {
@@ -921,7 +947,6 @@ const getInventory1 = async () => {
   }
 };
 
-
 const getAllLotsForExport = async () => {
   try {
     const replacements = {};
@@ -954,7 +979,6 @@ const getAllLotsForExport = async () => {
     });
 
     return items; // Return the array of items directly
-
   } catch (error) {
     console.error("Error fetching lots for export:", error);
     throw error;
@@ -971,5 +995,5 @@ module.exports = {
   EditInformation,
   getLotsByJobNo,
   getInventory1,
-   getAllLotsForExport,
+  getAllLotsForExport,
 };

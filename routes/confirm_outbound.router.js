@@ -12,6 +12,15 @@ router.get(
 );
 
 /*
+ * GET /confirm-outbound/stuffing-photos/:scheduleOutboundId
+ * Fetches existing stuffing photos for a given schedule.
+ */
+router.get(
+  "/stuffing-photos/:scheduleOutboundId",
+  outboundController.getStuffingPhotos
+);
+
+/*
  * POST /outbound/confirm
  * Confirms a list of lots for outbound, updating their status.
  * @body   { "itemsToConfirm": [{ "selectedInboundId": 1 }, { "selectedInboundId": 2 }], "scheduleOutboundId": 1 }
@@ -40,6 +49,7 @@ router.post(
  * GET /confirm-outbound/operators
  * Fetches warehouse staff (roleId 1) and supervisors (roleId 2) for dropdowns.
  */
-router.get("/operators", outboundController.getOperators);
+// router.get("/operators", outboundController.getOperators);
 
+router.get("/user-signature/:userId", outboundController.getUserSignature);
 module.exports = router;

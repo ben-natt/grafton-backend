@@ -1032,6 +1032,10 @@ const getScheduleOutboundRecordById = async (id) => {
         TO_CHAR(selin."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
         TO_CHAR(ot."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
         TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2",
+        so."scheduleOutboundId" AS "ScheduleOutboundId",
+        so."outboundType" AS "OutboundType",
+        so."tareWeight" AS "TareWeight",
+        so.uom AS "UOM",
         
         (
           SELECT COUNT(*)
