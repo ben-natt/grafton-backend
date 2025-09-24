@@ -20,6 +20,19 @@ const getConfirmationDetails = async (req, res) => {
   }
 };
 
+const getStuffingPhotos = async (req, res) => {
+  try {
+    const { scheduleOutboundId } = req.params;
+    const photos = await outboundModel.getStuffingPhotosByScheduleId(
+      scheduleOutboundId
+    );
+    res.status(200).json({ photos });
+  } catch (error) {
+    console.error("Error fetching stuffing photos:", error);
+    res.status(500).json({ error: "Failed to fetch stuffing photos." });
+  }
+};
+
 const confirmOutbound = async (req, res) => {
   try {
     const { itemsToConfirm, scheduleOutboundId, outboundJobNo } = req.body;
@@ -83,15 +96,72 @@ const getGrnDetails = async (req, res) => {
   }
 };
 
+const getUserSignature = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required." });
+    }
+
+    const signature = await outboundModel.getUserSignature(userId);
+
+    if (signature) {
+      // If found, send the signature back as a base64 string
+      res.status(200).json({ signature: signature.toString("base64") });
+    } else {
+      // This is not an error; it's expected if the user has never signed.
+      res.status(404).json({ message: "Signature not found for this user." });
+    }
+  } catch (error) {
+    console.error("Error fetching user signature:", error);
+    res.status(500).json({ error: "Failed to fetch user signature" });
+  }
+};
+
 const createGrnAndTransactions = async (req, res) => {
   try {
     const grnDataFromRequest = req.body;
-    const { stuffingPhotos } = grnDataFromRequest;
+    const {
+      stuffingPhotos,
+      userId,
+      warehouseSupervisorSignature,
+      scheduleOutboundId,
+    } = grnDataFromRequest;
 
-    // --- NEW: Image Handling Logic ---
+    // --- Photo Limit Validation ---
+    const PHOTO_LIMIT = 15;
+    const newPhotosCount =
+      stuffingPhotos && Array.isArray(stuffingPhotos)
+        ? stuffingPhotos.length
+        : 0;
+
+    // Get the count of photos already in the database for this schedule
+    const existingPhotosCount =
+      await outboundModel.countStuffingPhotosByScheduleId(scheduleOutboundId);
+
+    if (existingPhotosCount + newPhotosCount > PHOTO_LIMIT) {
+      return res.status(400).json({
+        error: "Photo limit exceeded.",
+        details: `A maximum of ${PHOTO_LIMIT} photos is allowed. You already have ${existingPhotosCount} saved and are trying to add ${newPhotosCount}.`,
+      });
+    }
+    // --- End Validation ---
+
+    if (warehouseSupervisorSignature) {
+      const savedSignature = await outboundModel.getUserSignature(userId);
+
+      if (!savedSignature) {
+        const signatureBuffer = Buffer.from(
+          warehouseSupervisorSignature,
+          "base64"
+        );
+        await outboundModel.updateUserSignature(userId, signatureBuffer);
+      }
+    }
+
+    // --- Image Handling Logic --- (rest of the function continues as before)
     if (stuffingPhotos && Array.isArray(stuffingPhotos)) {
       const photoUrls = [];
-      // Define a directory to save the images
       const uploadDir = path.join(
         __dirname,
         "..",
@@ -99,20 +169,16 @@ const createGrnAndTransactions = async (req, res) => {
         "img",
         "stuffing_photos"
       );
-      await fs.mkdir(uploadDir, { recursive: true }); // Ensure directory exists
+      await fs.mkdir(uploadDir, { recursive: true });
 
       for (const base64Photo of stuffingPhotos) {
-        // Create a unique filename
         const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
         const filePath = path.join(uploadDir, fileName);
 
-        // Decode base64 and write file
         await fs.writeFile(filePath, base64Photo, { encoding: "base64" });
         const imageUrl = `/uploads/img/stuffing_photos/${fileName}`;
         photoUrls.push(imageUrl);
       }
-
-      // Replace the base64 array with the array of URLs
       grnDataFromRequest.stuffingPhotos = photoUrls;
     }
 
@@ -239,22 +305,24 @@ const createGrnAndTransactions = async (req, res) => {
   }
 };
 
-const getOperators = async (req, res) => {
-  try {
-    const users = await outboundModel.getOperators();
-    const staff = users.filter((user) => user.roleId === 1);
-    const supervisors = users.filter((user) => user.roleId === 2);
+// const getOperators = async (req, res) => {
+//   try {
+//     const users = await outboundModel.getOperators();
+//     const staff = users.filter((user) => user.roleId === 1);
+//     const supervisors = users.filter((user) => user.roleId === 2);
 
-    res.status(200).json({ staff, supervisors });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch operators." });
-  }
-};
+//     res.status(200).json({ staff, supervisors });
+//   } catch (error) {
+//     res.status(500).json({ error: "Failed to fetch operators." });
+//   }
+// };
 
 module.exports = {
   getConfirmationDetails,
+  getStuffingPhotos,
   confirmOutbound,
   getGrnDetails,
+  getUserSignature,
   createGrnAndTransactions,
-  getOperators,
+  // getOperators,
 };

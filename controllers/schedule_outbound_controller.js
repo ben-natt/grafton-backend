@@ -1,19 +1,28 @@
-const XLSX = require('xlsx');
-const { v4: uuidv4 } = require('uuid');
-const { sequelize, DataTypes } = require('../database');
-const { Op, fn, col, where } = require('sequelize');
-const { ScheduleOutbound, SelectedInbounds, ScheduleInbound, Lot, Inbounds, Brand, Commodity, Shape } =
-  require('../models/schedule_outbound.model')(sequelize, DataTypes);
-const fs = require('fs');
-const auth = require('../middleware/auth');
+const XLSX = require("xlsx");
+const { v4: uuidv4 } = require("uuid");
+const { sequelize, DataTypes } = require("../database");
+const { Op, fn, col, where } = require("sequelize");
+const {
+  ScheduleOutbound,
+  SelectedInbounds,
+  ScheduleInbound,
+  Lot,
+  Inbounds,
+  Brand,
+  Commodity,
+  Shape,
+} = require("../models/schedule_outbound.model")(sequelize, DataTypes);
+const fs = require("fs");
+const auth = require("../middleware/auth");
 
 function excelDateToJSDate(excelDate) {
-  if (excelDate === null || excelDate === undefined || excelDate === '') return null;
+  if (excelDate === null || excelDate === undefined || excelDate === "")
+    return null;
 
   let parsedDate;
 
   // Handle string dates first
-  if (typeof excelDate === 'string') {
+  if (typeof excelDate === "string") {
     const shortDateParts = excelDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
     if (shortDateParts) {
       const month = parseInt(shortDateParts[1], 10) - 1;
@@ -32,7 +41,7 @@ function excelDateToJSDate(excelDate) {
   }
 
   // Handle numeric Excel dates
-  if (typeof excelDate === 'number') {
+  if (typeof excelDate === "number") {
     const date = new Date(Date.UTC(1899, 11, 30));
     date.setUTCDate(date.getUTCDate() + excelDate);
     return date;
@@ -44,8 +53,8 @@ function excelDateToJSDate(excelDate) {
 function toLocalYYYYMMDD(date) {
   if (!date) return null;
   const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 
@@ -54,7 +63,7 @@ function parseLocalDate(d) {
 }
 exports.uploadExcel = async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ message: 'No file uploaded.' });
+    return res.status(400).json({ message: "No file uploaded." });
   }
 
   try {
@@ -67,7 +76,9 @@ exports.uploadExcel = async (req, res) => {
     });
 
     if (jsonData.length < 2) {
-      return res.status(400).json({ message: 'Excel file is empty or missing data rows.' });
+      return res
+        .status(400)
+        .json({ message: "Excel file is empty or missing data rows." });
     }
 
     const headers = jsonData[0];
@@ -78,7 +89,11 @@ exports.uploadExcel = async (req, res) => {
     let notFoundCount = 0;
 
     for (const row of dataRows) {
-      if (!row || row.length === 0 || row.every((cell) => cell === null || cell === undefined || cell === '')) {
+      if (
+        !row ||
+        row.length === 0 ||
+        row.every((cell) => cell === null || cell === undefined || cell === "")
+      ) {
         continue;
       }
 
@@ -87,28 +102,33 @@ exports.uploadExcel = async (req, res) => {
         return index !== -1 && index < row.length ? row[index] : null;
       };
 
-      const jobNoFromExcel = getCellValue('Job Number')?.toString().trim();
-      const lotNoValue = getCellValue('Lot No');
-      const lotNoFromExcel = lotNoValue ? parseInt(String(lotNoValue).trim(), 10) : NaN;
+      const jobNoFromExcel = getCellValue("Job Number")?.toString().trim();
+      const lotNoValue = getCellValue("Lot No");
+      const lotNoFromExcel = lotNoValue
+        ? parseInt(String(lotNoValue).trim(), 10)
+        : NaN;
 
       if (!jobNoFromExcel || isNaN(lotNoFromExcel)) {
-        console.warn('Skipping row due to missing or invalid Job Number or Lot No:', row);
+        console.warn(
+          "Skipping row due to missing or invalid Job Number or Lot No:",
+          row
+        );
         continue;
       }
 
-      const normalizedJobNo = jobNoFromExcel.replace(/-/g, '');
+      const normalizedJobNo = jobNoFromExcel.replace(/-/g, "");
 
       const masterInbound = await Inbounds.findOne({
         where: {
           [Op.and]: [
-            where(fn('REPLACE', col('jobNo'), '-', ''), normalizedJobNo),
+            where(fn("REPLACE", col("jobNo"), "-", ""), normalizedJobNo),
             { lotNo: lotNoFromExcel },
           ],
         },
         include: [
-          { model: Brand, as: 'brandDetails', attributes: ['name'] },
-          { model: Commodity, as: 'commodityDetails', attributes: ['name'] },
-          { model: Shape, as: 'shapeDetails', attributes: ['name'] },
+          { model: Brand, as: "brandDetails", attributes: ["name"] },
+          { model: Commodity, as: "commodityDetails", attributes: ["name"] },
+          { model: Shape, as: "shapeDetails", attributes: ["name"] },
         ],
         raw: true,
         nest: true,
@@ -124,16 +144,26 @@ exports.uploadExcel = async (req, res) => {
             `Lot with inboundId: ${masterInbound.inboundId} is already scheduled. Skipping.`
           );
           alreadyScheduledCount++;
-          continue; 
+          continue;
         }
 
-        const releaseDateExcel = excelDateToJSDate(getCellValue('Release Date'));
-        const releaseEndDateExcel = excelDateToJSDate(getCellValue('Release End Date'));
-        const exportDateExcel = excelDateToJSDate(getCellValue('Export Date'));
-        const stuffingDateExcel = excelDateToJSDate(getCellValue('Stuffing Date'));
-        const deliveryDateExcel = excelDateToJSDate(getCellValue('Delivery Date'));
+        const releaseDateExcel = excelDateToJSDate(
+          getCellValue("Release Date")
+        );
+        const releaseEndDateExcel = excelDateToJSDate(
+          getCellValue("Release End Date")
+        );
+        const exportDateExcel = excelDateToJSDate(getCellValue("Export Date"));
+        const stuffingDateExcel = excelDateToJSDate(
+          getCellValue("Stuffing Date")
+        );
+        const deliveryDateExcel = excelDateToJSDate(
+          getCellValue("Delivery Date")
+        );
 
-        const weightToUse = masterInbound.isWeighted ? masterInbound.actualWeight : masterInbound.netWeight;
+        const weightToUse = masterInbound.isWeighted
+          ? masterInbound.actualWeight
+          : masterInbound.netWeight;
 
         const lotDataForFrontend = {
           inboundId: masterInbound.inboundId,
@@ -146,15 +176,22 @@ exports.uploadExcel = async (req, res) => {
           quantity: masterInbound.noOfBundle,
           weight: weightToUse,
           releaseDate: toLocalYYYYMMDD(releaseDateExcel),
-          releaseEndDate: releaseEndDateExcel ? toLocalYYYYMMDD(releaseEndDateExcel) : null,
-          storageReleaseLocation: getCellValue('Storage Release Location')?.toString().trim() ?? null,
-          releaseWarehouse: getCellValue('Release To Warehouse')?.toString().trim() ?? null,
-          transportVendor: getCellValue('Transport Vendor')?.toString().trim() ?? null,
+          releaseEndDate: releaseEndDateExcel
+            ? toLocalYYYYMMDD(releaseEndDateExcel)
+            : null,
+          storageReleaseLocation:
+            getCellValue("Storage Release Location")?.toString().trim() ?? null,
+          releaseWarehouse:
+            getCellValue("Release To Warehouse")?.toString().trim() ?? null,
+          transportVendor:
+            getCellValue("Transport Vendor")?.toString().trim() ?? null,
           lotReleaseWeight: weightToUse,
           exportDate: toLocalYYYYMMDD(exportDateExcel),
           stuffingDate: toLocalYYYYMMDD(stuffingDateExcel),
-          containerNo: getCellValue('Container No')?.toString().trim() ?? null,
-          sealNo: getCellValue('Seal No')?.toString().trim() ?? null,
+          containerNo: getCellValue("Container No")?.toString().trim() ?? null,
+          sealNo: getCellValue("Seal No")?.toString().trim() ?? null,
+          uom: getCellValue("UOM")?.toString().trim() ?? null,
+          tareWeight: getCellValue("Tare Weight")?.toString().trim() ?? null,
           deliveryDate: toLocalYYYYMMDD(deliveryDateExcel),
         };
 
@@ -183,12 +220,17 @@ exports.uploadExcel = async (req, res) => {
       data: processedLots,
     });
   } catch (error) {
-    console.error('Error reading or parsing Excel file or querying database:', error);
-    res.status(500).json({ message: 'Error processing Excel data.', error: error.message });
+    console.error(
+      "Error reading or parsing Excel file or querying database:",
+      error
+    );
+    res
+      .status(500)
+      .json({ message: "Error processing Excel data.", error: error.message });
   } finally {
     if (req.file && req.file.path) {
       fs.unlink(req.file.path, (err) => {
-        if (err) console.error('Error deleting temp file:', err);
+        if (err) console.error("Error deleting temp file:", err);
       });
     }
   }
