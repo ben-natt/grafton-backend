@@ -1179,9 +1179,62 @@ const checkOutboundScheduleStatus = async (
   }
 };
 
+const getHistoricalBundlesByJobAndLot = async (jobNo, lotNo) => {
+  try {
+   
+    const sourceTransactionQuery = `
+      SELECT "inboundId"
+      FROM public.outboundtransactions
+      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      ORDER BY "createdAt" DESC
+      LIMIT 1;
+    `;
+    // console.log(`[DEBUG] Model: Preparing to execute sourceTransactionQuery.`);
+    // console.log(sourceTransactionQuery);
+
+    const replacements = { jobNo, lotNo: parseInt(lotNo, 10) };
+
+    const [sourceTransaction] = await db.sequelize.query(
+      sourceTransactionQuery,
+      {
+        replacements,
+        type: db.sequelize.QueryTypes.SELECT,
+      }
+    );
+    console.log(`[DEBUG] Model: sourceTransaction result:`, sourceTransaction);
+
+    if (!sourceTransaction || !sourceTransaction.inboundId) {
+      // --- DEBUG LOGGING ---
+      //console.log(`[DEBUG] Model: No outbounded transaction found for the provided details. Returning empty array.`);
+      // --- END DEBUG LOGGING ---
+      return []; // Return an empty array if no shipped lot is found
+    }
+    const sourceInboundId = sourceTransaction.inboundId;
+
+    // --- DEBUG LOGGING ---
+    //console.log(`[DEBUG] Model: Found source inboundId: ${sourceInboundId}. Now fetching bundles from "inboundbundles" table.`);
+    // --- END DEBUG LOGGING ---
+
+    // Step 2: Fetch all bundle details associated with that source inboundId.
+    const sourceBundlesQuery = `
+      SELECT "bundleNo", "weight", "stickerWeight", "meltNo"
+      FROM public.inboundbundles
+      WHERE "inboundId" = :sourceInboundId
+      ORDER BY "bundleNo";
+    `;
+    const sourceBundles = await db.sequelize.query(sourceBundlesQuery, {
+      replacements: { sourceInboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    
+
+    return sourceBundles;
+  } catch (error) {
+    throw error;
+  }
+};
 
 module.exports = {
-  // Helper function
   findRelatedId,
   updateInboundActualWeight,
   saveInboundWithBundles,
@@ -1193,4 +1246,5 @@ module.exports = {
   updateCrewLotNo,
   updateReportStatus,
   checkOutboundScheduleStatus,
+  getHistoricalBundlesByJobAndLot,
 };

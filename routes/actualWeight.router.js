@@ -634,4 +634,38 @@ router.post("/actual/check-outbound-status", async (req, res) => {
   }
 });
 
+router.post("/actual/get-historical-bundles", async (req, res) => {
+  const { jobNo, lotNo } = req.body;
+  try {
+    // Validation
+    if (!jobNo || !lotNo) {
+      console.log("[DEBUG] Validation failed: jobNo or lotNo is missing.");
+      return res.status(400).json({
+        error: "Both jobNo and lotNo must be provided.",
+      });
+    }
+
+    const bundles = await actualWeightModel.getHistoricalBundlesByJobAndLot(
+      jobNo,
+      lotNo
+    );
+
+    if (bundles && bundles.length > 0) {
+      console.log(`[DEBUG] Found ${bundles.length} bundles. Sending 200 OK response.`);
+      res.status(200).json(bundles);
+    } else {
+      console.log("[DEBUG] No bundles found by the model. Sending 404 Not Found response.");
+      res.status(404).json({
+        error:
+          `No historical bundles found for ${jobNo} - ${lotNo}.`,
+      });
+    }
+  } catch (error) {
+    console.error("[DEBUG] An error occurred in the router:", error);
+    res.status(500).json({
+      error: error.message || "Internal server error",
+    });
+  }
+});
+
 module.exports = router;
