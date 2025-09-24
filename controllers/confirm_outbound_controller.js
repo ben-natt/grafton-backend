@@ -121,13 +121,35 @@ const getUserSignature = async (req, res) => {
 const createGrnAndTransactions = async (req, res) => {
   try {
     const grnDataFromRequest = req.body;
-    const { stuffingPhotos, userId, warehouseSupervisorSignature } =
-      grnDataFromRequest;
+    const {
+      stuffingPhotos,
+      userId,
+      warehouseSupervisorSignature,
+      scheduleOutboundId,
+    } = grnDataFromRequest;
+
+    // --- Photo Limit Validation ---
+    const PHOTO_LIMIT = 15;
+    const newPhotosCount =
+      stuffingPhotos && Array.isArray(stuffingPhotos)
+        ? stuffingPhotos.length
+        : 0;
+
+    // Get the count of photos already in the database for this schedule
+    const existingPhotosCount =
+      await outboundModel.countStuffingPhotosByScheduleId(scheduleOutboundId);
+
+    if (existingPhotosCount + newPhotosCount > PHOTO_LIMIT) {
+      return res.status(400).json({
+        error: "Photo limit exceeded.",
+        details: `A maximum of ${PHOTO_LIMIT} photos is allowed. You already have ${existingPhotosCount} saved and are trying to add ${newPhotosCount}.`,
+      });
+    }
+    // --- End Validation ---
 
     if (warehouseSupervisorSignature) {
       const savedSignature = await outboundModel.getUserSignature(userId);
 
-      // Only save the signature if one doesn't already exist in the database.
       if (!savedSignature) {
         const signatureBuffer = Buffer.from(
           warehouseSupervisorSignature,
@@ -137,10 +159,9 @@ const createGrnAndTransactions = async (req, res) => {
       }
     }
 
-    // --- Image Handling Logic ---
+    // --- Image Handling Logic --- (rest of the function continues as before)
     if (stuffingPhotos && Array.isArray(stuffingPhotos)) {
       const photoUrls = [];
-      // Define a directory to save the images
       const uploadDir = path.join(
         __dirname,
         "..",
@@ -148,20 +169,16 @@ const createGrnAndTransactions = async (req, res) => {
         "img",
         "stuffing_photos"
       );
-      await fs.mkdir(uploadDir, { recursive: true }); // Ensure directory exists
+      await fs.mkdir(uploadDir, { recursive: true });
 
       for (const base64Photo of stuffingPhotos) {
-        // Create a unique filename
         const fileName = `${Date.now()}-${Math.round(Math.random() * 1e9)}.png`;
         const filePath = path.join(uploadDir, fileName);
 
-        // Decode base64 and write file
         await fs.writeFile(filePath, base64Photo, { encoding: "base64" });
         const imageUrl = `/uploads/img/stuffing_photos/${fileName}`;
         photoUrls.push(imageUrl);
       }
-
-      // Replace the base64 array with the array of URLs
       grnDataFromRequest.stuffingPhotos = photoUrls;
     }
 

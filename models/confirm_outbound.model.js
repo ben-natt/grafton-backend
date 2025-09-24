@@ -319,6 +319,30 @@ const checkForDuplicateLots = async (lots, transaction) => {
   }
 };
 
+const countStuffingPhotosByScheduleId = async (
+  scheduleOutboundId,
+  transaction
+) => {
+  try {
+    const query = `
+      SELECT COUNT(*) AS "photoCount"
+      FROM public.stuffing_photos
+      WHERE "scheduleoutboundId" = :scheduleOutboundId;
+    `;
+    const result = await db.sequelize.query(query, {
+      replacements: { scheduleOutboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+      transaction, // Pass transaction if one is active
+    });
+    // The count is returned as a string from the DB, so parse it.
+    return parseInt(result.photoCount, 10);
+  } catch (error) {
+    console.error("Error in countStuffingPhotosByScheduleId:", error);
+    throw error;
+  }
+};
+
 const createGrnAndTransactions = async (formData) => {
   const {
     selectedInboundIds,
@@ -580,6 +604,7 @@ module.exports = {
   getConfirmationDetailsById,
   getGrnDetailsForSelection,
   getStuffingPhotosByScheduleId,
+  countStuffingPhotosByScheduleId,
   createGrnAndTransactions,
   getUserSignature,
   updateUserSignature,
