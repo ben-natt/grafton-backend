@@ -456,8 +456,9 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
 const reverseInbound = async (inboundId) => {
   const t = await db.sequelize.transaction();
   try {
+    // Step 1: Get both "jobNo" and "exWarehouseLot" from the inbounds table to uniquely identify the record.
     const inboundEntry = await db.sequelize.query(
-      `SELECT "exWarehouseLot" FROM public.inbounds WHERE "inboundId" = :inboundId`,
+      `SELECT "jobNo", "exWarehouseLot" FROM public.inbounds WHERE "inboundId" = :inboundId`,
       {
         replacements: { inboundId },
         type: db.sequelize.QueryTypes.SELECT,
@@ -470,17 +471,19 @@ const reverseInbound = async (inboundId) => {
       throw new Error("Inbound entry not found.");
     }
 
-    const exWarehouseLot = inboundEntry.exWarehouseLot;
+    const { jobNo, exWarehouseLot } = inboundEntry;
 
+    // Step 2: Update the corresponding lot's status back to 'Pending' using both identifiers.
     await db.sequelize.query(
-      `UPDATE public."lot" SET status = 'Pending' WHERE "exWarehouseLot" = :exWarehouseLot`,
+      `UPDATE public."lot" SET status = 'Pending' WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot`,
       {
-        replacements: { exWarehouseLot },
+        replacements: { jobNo, exWarehouseLot },
         type: db.sequelize.QueryTypes.UPDATE,
         transaction: t,
       }
     );
 
+    // Step 3: Delete the entry from the inbounds table.
     await db.sequelize.query(
       `DELETE FROM public.inbounds WHERE "inboundId" = :inboundId`,
       {
