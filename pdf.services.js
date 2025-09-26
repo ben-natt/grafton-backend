@@ -77,6 +77,29 @@ async function generateGrnPdf(data) {
     drawText(data.cargoDetails.brand, 300, 421, boldFont);
     drawText(data.containerAndSealNo, 300, 465, boldFont);
 
+    if (data.containerAndSealNo && data.containerAndSealNo == "N/A") {
+      // drawText("√", 117, 465, boldFont, 10);
+      // A manual tick mark
+      const tickX = 117;
+      const tickY = 456;
+      const tickColor = rgb(0, 0, 0);
+      const tickThickness = 1.5; // Adjust for a thicker line like bold text
+
+      // The two lines that form the tick
+      page.drawLine({
+        start: { x: tickX, y: tickY },
+        end: { x: tickX + 4, y: tickY - 5 }, // Short part of the tick
+        color: tickColor,
+        thickness: tickThickness,
+      });
+      page.drawLine({
+        start: { x: tickX + 4, y: tickY - 5 },
+        end: { x: tickX + 10, y: tickY + 3 }, // Long part of the tick
+        color: tickColor,
+        thickness: tickThickness,
+      });
+    }
+
     if (data.containerAndSealNo && data.containerAndSealNo !== "N/A") {
       // drawText("√", 117, 465, boldFont, 10);
       // A manual tick mark

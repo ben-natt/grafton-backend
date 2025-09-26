@@ -11,4 +11,10 @@ router.get("/preview/:outboundId", grnController.previewGrnPdf);
 // This route serves the generated preview image.
 router.get("/preview-image/:outboundId", grnController.previewGrnImage);
 
+router.post("/download-multiple", grnController.downloadMultiplePdfs);
+
+// New routes for editing GRN
+router.get("/edit-details/:outboundId", grnController.getGrnForEdit);
+router.put("/update/:outboundId", grnController.updateGrn);
+
 module.exports = router;

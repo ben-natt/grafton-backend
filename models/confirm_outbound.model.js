@@ -88,9 +88,9 @@ const getGrnDetailsForSelection = async (
   selectedInboundIds
 ) => {
   try {
-    // First, get the details for one lot to determine the outboundJobNo
+    // First, get the details for one lot to determine outboundJobNo and outboundType
     const preliminaryLotQuery = `
-      SELECT so."outboundJobNo"
+      SELECT so."outboundJobNo", so."outboundType"
       FROM public.selectedinbounds si
       JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
       WHERE si."selectedInboundId" = :selectedInboundId
@@ -106,6 +106,9 @@ const getGrnDetailsForSelection = async (
       prelimLot?.outboundJobNo ||
       `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
 
+    // FIX: Get outboundType from the preliminary query result
+    const outboundType = prelimLot?.outboundType;
+
     const grnCountQuery = `
       SELECT COUNT(*) as grn_count
       FROM public.outbounds
@@ -117,12 +120,24 @@ const getGrnDetailsForSelection = async (
       plain: true,
     });
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
-    const fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
-    const grnNo = outboundJobNo;
+
+    // FIX: Declare grnNo and fileName variables
+    let grnNo;
+    let fileName;
+
+    if (outboundType && outboundType.toLowerCase() === "flatbed") {
+      // For Flatbed, append an auto-incrementing number to grnNo.
+      grnNo = `${outboundJobNo}-${grnIndex}`;
+      fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    } else {
+      // For Container (or any other type), grnNo is just the job number without a suffix.
+      grnNo = outboundJobNo;
+      fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    }
 
     const lotsQuery = `
   SELECT
-      si."inboundId", si."scheduleOutboundId",
+      si."selectedInboundId", si."inboundId", si."scheduleOutboundId",
       i."jobNo", COALESCE(i."crewLotNo", i."lotNo") as "lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
       i."exWarehouseLot", i."exWarehouseWarrant",
       w."exLmeWarehouseName" AS "exLmeWarehouse",
@@ -170,7 +185,7 @@ const getGrnDetailsForSelection = async (
       const parsedDates = filteredDates
         .map((dateString) => {
           // Fix the timezone format: +00 -> +00:00
-          const fixedDateString = dateString.replace(/\+00$/, "+00:00");
+          const fixedDateString = dateString.replace(/\\+00$/, "+00:00");
 
           const date = new Date(fixedDateString);
           return isNaN(date.getTime()) ? null : date;
@@ -201,10 +216,10 @@ const getGrnDetailsForSelection = async (
       // Sort the formatted date strings by converting back to dates for sorting
       const sortedFormattedDates = uniqueDateStrings.sort((a, b) => {
         const dateA = new Date(
-          a.replace(/(\d{1,2}) (\w+) (\d{4})/, "$2 $1, $3")
+          a.replace(/(\\d{1,2}) (\\w+) (\\d{4})/, "$2 $1, $3")
         );
         const dateB = new Date(
-          b.replace(/(\d{1,2}) (\w+) (\d{4})/, "$2 $1, $3")
+          b.replace(/(\\d{1,2}) (\\w+) (\\d{4})/, "$2 $1, $3")
         );
         return dateA - dateB;
       });
@@ -216,12 +231,8 @@ const getGrnDetailsForSelection = async (
     const firstLot = lots[0];
 
     const result = {
-      releaseDate: new Date().toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-      }), // Current date as "12 August 2025"
-      deliveryDate: formatMultipleDates(lots, "deliveryDate"),
+      releaseDate: new Date().toISOString(), // Use ISO string for consistency
+      deliveryDate: firstLot.deliveryDate,
       outboundType: firstLot.outboundType,
       exportDate: firstLot.exportDate,
       stuffingDate: firstLot.stuffingDate,
@@ -253,6 +264,7 @@ const getGrnDetailsForSelection = async (
     };
     return result;
   } catch (error) {
+    console.error("Error in getGrnDetailsForSelection:", error);
     throw error;
   }
 };
