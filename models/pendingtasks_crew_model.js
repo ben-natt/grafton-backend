@@ -1,3 +1,4 @@
+
 const db = require("../database");
 const { Op } = require("sequelize");
 
@@ -16,39 +17,39 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
-    // Build base filter conditions (same as original)
-const baseWhere = [
-  `l."status" = 'Received'`,
-  `l."report" = false`,
-  `l."isConfirm" = true`,
-  `(
-    i."isWeighted" IS NOT TRUE
-    OR
-    EXISTS (
-      SELECT 1
-      FROM public.inboundbundles ib
-      WHERE ib."inboundId" = i."inboundId"
-      AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '' OR ib."stickerWeight" IS NULL OR ib."stickerWeight" <= 0)
-    )
-  )`,
-  `NOT EXISTS (
-    SELECT 1
-    FROM public.selectedinbounds si
-    WHERE si."jobNo" = l."jobNo" 
-    AND si."lotNo" = l."lotNo"
-  )`,
-];
+    // Build base filter conditions for finding relevant jobs
+    const baseWhere = [
+      `l."status" = 'Received'`,
+      `l."report" = false`,
+      `l."isConfirm" = true`,
+      `(
+        i."isWeighted" IS NOT TRUE
+        OR
+        EXISTS (
+          SELECT 1
+          FROM public.inboundbundles ib
+          WHERE ib."inboundId" = i."inboundId"
+          AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '' OR ib."stickerWeight" IS NULL OR ib."stickerWeight" <= 0)
+        )
+      )`,
+      `NOT EXISTS (
+        SELECT 1
+        FROM public.selectedinbounds si
+        WHERE si."jobNo" = l."jobNo" 
+        AND si."lotNo" = l."lotNo"
+      )`,
+    ];
     
     const replacements = {};
 
     if (exWarehouseLot) {
-      baseWhere.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
-      replacements.exWarehouseLot = `%${exWarehouseLot}%`;
+      const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
+      baseWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      replacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
 
     const baseWhereString = baseWhere.join(" AND ");
 
-    // Date overlap logic (same as original)
     const dateOverlapWhere =
       startDate && endDate
         ? `WHERE jr.max_date >= :startDate::date AND jr.min_date <= :endDate::date`
@@ -59,7 +60,7 @@ const baseWhere = [
       replacements.endDate = endDate;
     }
 
-    // Count query (same as original)
+    // Count query to find total number of matching jobs
     const countQuery = `
       WITH jr AS (
         SELECT
@@ -89,7 +90,7 @@ const baseWhere = [
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // Get paginated job numbers (same as original)
+    // Get paginated job numbers
     const jobNoQuery = `
       WITH jr AS (
         SELECT
@@ -118,8 +119,37 @@ const baseWhere = [
     if (paginatedJobNos.length === 0) {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
+    
+    // Build a separate WHERE clause for the details query to filter lots precisely.
+    const detailsWhere = [
+      `l."jobNo" IN (:paginatedJobNos)`,
+      `l."status" = 'Received'`,
+      `l."report" = false`,
+      `l."isConfirm" = true`,
+      `(
+        i."isWeighted" IS NOT TRUE
+        OR
+        EXISTS (
+          SELECT 1
+          FROM public.inboundbundles ib
+          WHERE ib."inboundId" = i."inboundId"
+          AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
+        )
+      )`
+    ];
+    
+    const detailsReplacements = { paginatedJobNos };
 
-    // ENHANCED: Fetch details WITH incomplete status in one query
+    if (exWarehouseLot) {
+      const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
+      detailsWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
+    }
+    
+    const detailsWhereString = detailsWhere.join(" AND ");
+
+
+    // Fetch details for the paginated jobs, now with lot-level filtering
     const detailsQuery = `
       SELECT
           l."lotId", l."crewLotNo" AS "lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
@@ -143,64 +173,50 @@ const baseWhere = [
       JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
       JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
       JOIN public.users u ON s."userId" = u.userid
-      -- LEFT JOIN to get bundle statistics
-LEFT JOIN (
-  SELECT 
-    ib."inboundId",
-    COUNT(*)::int AS total_bundles,
-    COUNT(*) FILTER (
-      WHERE (ib.weight IS NULL OR ib.weight <= 0)
-         OR (ib."meltNo" IS NULL OR TRIM(ib."meltNo") = '')
-         OR (ib."stickerWeight" IS NULL OR ib."stickerWeight" <= 0)
-    )::int AS incomplete_bundles,
-    COUNT(*) FILTER (
-      WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
-        AND (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
-        AND (ib."stickerWeight" IS NOT NULL AND ib."stickerWeight" > 0)
-    )::int AS complete_bundles,
-    COUNT(*) FILTER (
-      WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
-         OR (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
-         OR (ib."stickerWeight" IS NOT NULL AND ib."stickerWeight" > 0)
-    )::int AS any_data_bundles
-  FROM public.inboundbundles ib
-  GROUP BY ib."inboundId"
-) bundle_stats ON bundle_stats."inboundId" = i."inboundId"
-      WHERE l."jobNo" IN (:paginatedJobNos)
-        AND l."status" = 'Received'
-        AND l."report" = false
-        AND l."isConfirm" = true
-        AND (
-          i."isWeighted" IS NOT TRUE
-          OR
-          EXISTS (
-            SELECT 1
-            FROM public.inboundbundles ib
-            WHERE ib."inboundId" = i."inboundId"
-            AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
-          )
-        )
-      ORDER BY i."crewLotNo";
+      LEFT JOIN (
+        SELECT 
+          ib."inboundId",
+          COUNT(*)::int AS total_bundles,
+          COUNT(*) FILTER (
+            WHERE (ib.weight IS NULL OR ib.weight <= 0)
+              OR (ib."meltNo" IS NULL OR TRIM(ib."meltNo") = '')
+              OR (ib."stickerWeight" IS NULL OR ib."stickerWeight" <= 0)
+          )::int AS incomplete_bundles,
+          COUNT(*) FILTER (
+            WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
+              AND (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
+              AND (ib."stickerWeight" IS NOT NULL AND ib."stickerWeight" > 0)
+          )::int AS complete_bundles,
+          COUNT(*) FILTER (
+            WHERE (ib.weight IS NOT NULL AND ib.weight > 0)
+              OR (ib."meltNo" IS NOT NULL AND TRIM(ib."meltNo") <> '')
+              OR (ib."stickerWeight" IS NOT NULL AND ib."stickerWeight" > 0)
+          )::int AS any_data_bundles
+        FROM public.inboundbundles ib
+        GROUP BY ib."inboundId"
+      ) bundle_stats ON bundle_stats."inboundId" = i."inboundId"
+      WHERE ${detailsWhereString} 
+      ORDER BY i."crewLotNo", l."jobNo";
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
-      replacements: { paginatedJobNos },
+      replacements: detailsReplacements, // Use the new replacements object
       type: db.sequelize.QueryTypes.SELECT,
     });
 
 
-const safeParseLotNo = (value) => {
-  if (value === null || value === undefined) return "N/A";
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const parsed = parseInt(value, 10);
-    return isNaN(parsed) ? "N/A" : parsed;
-  }
-  return "N/A";
-};
+    const safeParseLotNo = (value) => {
+      if (value === null || value === undefined) return "N/A";
+      if (typeof value === 'number') return value;
+      if (typeof value === 'string') {
+        const parsed = parseInt(value, 10);
+        return isNaN(parsed) ? "N/A" : parsed;
+      }
+      return "N/A";
+    };
 
 
-    // Group results and include incomplete status
+    // Group results (this logic remains the same)
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
@@ -212,7 +228,7 @@ const safeParseLotNo = (value) => {
           },
           lotDetails: [],
           inboundId: lot.inboundId,
-          isIncomplete: false, // Will be updated below
+          isIncomplete: false,
           incompleteLotNos: [],
           inboundDates: [],
         };
@@ -222,7 +238,6 @@ const safeParseLotNo = (value) => {
         acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
       }
 
-      // Update incomplete status for this job
       if (lot.is_incomplete) {
         acc[jobNo].isIncomplete = true;
         if (!acc[jobNo].incompleteLotNos.includes(lot.lotNo)) {
@@ -232,7 +247,7 @@ const safeParseLotNo = (value) => {
 
       acc[jobNo].lotDetails.push({
         lotId: lot.lotId,
-  lotNo: safeParseLotNo(lot.lotNo), // This will handle null and return "N/A"
+        lotNo: safeParseLotNo(lot.lotNo),
         jobNo: lot.jobNo,
         commodity: lot.commodity,
         expectedBundleCount: lot.expectedBundleCount,
@@ -255,7 +270,6 @@ const safeParseLotNo = (value) => {
       return acc;
     }, {});
 
-    // Compute display dates (same as original)
     Object.values(groupedByJobNo).forEach((group) => {
       if (group.inboundDates.length > 0) {
         const minDate = new Date(
@@ -285,6 +299,7 @@ const safeParseLotNo = (value) => {
     throw error;
   }
 };
+
 
 const getDetailsPendingTasksCrew = async (jobNo) => {
   try {

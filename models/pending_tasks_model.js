@@ -514,6 +514,54 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
   } catch (error) {
     await transaction.rollback();
     console.error("Error reporting job discrepancy:", error);
+
+const reverseInbound = async (inboundId) => {
+  const t = await db.sequelize.transaction();
+  try {
+    const inboundEntry = await db.sequelize.query(
+      `SELECT "exWarehouseLot" FROM public.inbounds WHERE "inboundId" = :inboundId`,
+      {
+        replacements: { inboundId },
+        type: db.sequelize.QueryTypes.SELECT,
+        transaction: t,
+        plain: true,
+      }
+    );
+
+    if (!inboundEntry) {
+      throw new Error("Inbound entry not found.");
+    }
+
+    const exWarehouseLot = inboundEntry.exWarehouseLot;
+
+    await db.sequelize.query(
+      `UPDATE public."lot" SET status = 'Pending' WHERE "exWarehouseLot" = :exWarehouseLot`,
+      {
+        replacements: { exWarehouseLot },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      }
+    );
+
+    await db.sequelize.query(
+      `DELETE FROM public.inbounds WHERE "inboundId" = :inboundId`,
+      {
+        replacements: { inboundId },
+        type: db.sequelize.QueryTypes.DELETE,
+        transaction: t,
+      }
+    );
+
+    await t.commit();
+    return {
+      success: true,
+      message: "Inbound reversed successfully.",
+      inboundId: inboundId,
+    };
+  } catch (error) {
+    await t.rollback();
+    console.error("Error reversing inbound:", error);
+
     throw error;
   }
 };
@@ -524,4 +572,5 @@ module.exports = {
   getPendingOutboundTasks,
   updateScheduleOutboundDetails,
   reportJobDiscrepancy,
+  reverseInbound,
 };
