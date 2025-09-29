@@ -52,7 +52,8 @@ router.post("/report-job-discrepancy", async (req, res) => {
   } catch (error) {
     console.error("Error reporting job discrepancy:", error);
     res.status(500).json({ error: "Failed to report job discrepancy." });
-
+  }
+});
 router.post("/reverse-inbound/:inboundId", async (req, res) => {
   try {
     const { inboundId } = req.params;
@@ -529,5 +530,5 @@ router.delete("/lot/:lotId", async (req, res) => {
     res.status(500).json({ error: "Failed to delete lot." });
   }
 });
-
+  
 module.exports = router;

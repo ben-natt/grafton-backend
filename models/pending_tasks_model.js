@@ -514,6 +514,8 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
   } catch (error) {
     await transaction.rollback();
     console.error("Error reporting job discrepancy:", error);
+  }
+};
 
 const reverseInbound = async (inboundId) => {
   const t = await db.sequelize.transaction();
