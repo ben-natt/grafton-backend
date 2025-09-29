@@ -15,6 +15,7 @@ router.post("/download-multiple", grnController.downloadMultiplePdfs);
 
 // New routes for editing GRN
 router.get("/edit-details/:outboundId", grnController.getGrnForEdit);
+router.get("/dropdown-options", grnController.getDropdownOptions);
 router.put("/update/:outboundId", grnController.updateGrn);
 
 module.exports = router;

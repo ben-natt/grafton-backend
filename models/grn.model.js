@@ -191,6 +191,8 @@ const grnModel = {
             o."driverName", o."driverIdentityNo", o."truckPlateNo",
             o."warehouseStaff", o."warehouseSupervisor",
             o."releaseDate",
+            o."uom",
+            (SELECT ot."outboundType" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "outboundType",
             (SELECT STRING_AGG(DISTINCT ot.commodity, ', ') FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId") as commodities,
             (SELECT STRING_AGG(DISTINCT ot.shape, ', ') FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId") as shapes,
             (SELECT STRING_AGG(DISTINCT ot.brands, ', ') FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId") as brands,
@@ -233,13 +235,26 @@ const grnModel = {
       const outboundUpdateQuery = `
         UPDATE public.outbounds SET
           "releaseDate" = :releaseDate,
+          "uom" = :uom,
           "updatedAt" = NOW()
         WHERE "outboundId" = :outboundId;
       `;
       await db.sequelize.query(outboundUpdateQuery, {
-        replacements: { releaseDate: data.releaseDate, outboundId },
+        replacements: {
+          releaseDate: data.releaseDate,
+          uom: data.uom,
+          outboundId,
+        },
         type: db.sequelize.QueryTypes.UPDATE,
         transaction: t,
+      });
+
+      // Sanitize date fields before updating to prevent timestamp errors
+      const sanitizedData = { ...data };
+      ["deliveryDate", "exportDate", "stuffingDate"].forEach((key) => {
+        if (sanitizedData[key] === "") {
+          sanitizedData[key] = null;
+        }
       });
 
       const transactionUpdateQuery = `
@@ -259,7 +274,7 @@ const grnModel = {
         WHERE "outboundId" = :outboundId;
       `;
       await db.sequelize.query(transactionUpdateQuery, {
-        replacements: { ...data, outboundId },
+        replacements: { ...sanitizedData, outboundId },
         type: db.sequelize.QueryTypes.UPDATE,
         transaction: t,
       });
@@ -339,6 +354,58 @@ const grnModel = {
     } catch (error) {
       await t.rollback();
       console.error("MODEL ERROR in updateAndRegenerateGrn:", error);
+      throw error;
+    }
+  },
+
+  async getDropdownOptions() {
+    try {
+      const queries = [
+        db.sequelize.query(
+          'SELECT "releaseWarehouseName" as name FROM public.releasewarehouses ORDER BY "releaseWarehouseName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          'SELECT "transportVendorName" as name FROM public.transportvendors ORDER BY "transportVendorName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          'SELECT "commodityName" as name FROM public.commodities ORDER BY "commodityName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          'SELECT "shapeName" as name FROM public.shapes ORDER BY "shapeName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          'SELECT "brandName" as name FROM public.brands ORDER BY "brandName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          "SELECT DISTINCT uom as name FROM public.outbounds WHERE uom IS NOT NULL AND uom <> '' ORDER BY name",
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+      ];
+
+      const [
+        releaseWarehouses,
+        transportVendors,
+        commodities,
+        shapes,
+        brands,
+        uoms,
+      ] = await Promise.all(queries);
+
+      return {
+        releaseWarehouses: releaseWarehouses.map((item) => item.name),
+        transportVendors: transportVendors.map((item) => item.name),
+        commodities: commodities.map((item) => item.name),
+        shapes: shapes.map((item) => item.name),
+        brands: brands.map((item) => item.name),
+        uoms: uoms.map((item) => item.name),
+      };
+    } catch (error) {
+      console.error("MODEL ERROR in getDropdownOptions:", error);
       throw error;
     }
   },

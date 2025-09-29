@@ -96,6 +96,41 @@ const getGrnDetails = async (req, res) => {
   }
 };
 
+const updateOutboundDetails = async (req, res) => {
+  try {
+    const { scheduleOutboundId } = req.params;
+    const {
+      selectedInboundId,
+      releaseDate,
+      containerNo,
+      sealNo,
+      tareWeight,
+      uom,
+    } = req.body;
+
+    if (!selectedInboundId) {
+      return res.status(400).json({ error: "selectedInboundId is required." });
+    }
+
+    await outboundModel.updateOutboundDetails(
+      parseInt(scheduleOutboundId),
+      selectedInboundId,
+      {
+        releaseDate,
+        containerNo,
+        sealNo,
+        tareWeight,
+        uom,
+      }
+    );
+
+    res.status(200).json({ message: "Outbound details updated successfully." });
+  } catch (error) {
+    console.error("Error updating outbound details:", error);
+    res.status(500).json({ error: "Failed to update outbound details." });
+  }
+};
+
 const getUserSignature = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -321,6 +356,7 @@ module.exports = {
   getConfirmationDetails,
   getStuffingPhotos,
   confirmOutbound,
+  updateOutboundDetails,
   getGrnDetails,
   getUserSignature,
   createGrnAndTransactions,

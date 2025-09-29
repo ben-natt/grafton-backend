@@ -175,6 +175,16 @@ const grnController = {
     }
   },
 
+  async getDropdownOptions(req, res) {
+    try {
+      const options = await grnModel.getDropdownOptions();
+      res.status(200).json(options);
+    } catch (error) {
+      console.error("CONTROLLER ERROR in getDropdownOptions:", error);
+      res.status(500).json({ error: "Failed to fetch dropdown options." });
+    }
+  },
+
   async getGrnForEdit(req, res) {
     try {
       const { outboundId } = req.params;

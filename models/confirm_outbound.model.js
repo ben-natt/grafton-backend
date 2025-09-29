@@ -83,6 +83,63 @@ const getStuffingPhotosByScheduleId = async (scheduleOutboundId) => {
   }
 };
 
+const updateOutboundDetails = async (
+  scheduleOutboundId,
+  selectedInboundId,
+  details
+) => {
+  const t = await db.sequelize.transaction();
+  try {
+    const { releaseDate, containerNo, sealNo, tareWeight, uom } = details;
+
+    // Update the release date on the specific selected inbound record
+    if (releaseDate) {
+      const updateSelectedInboundQuery = `
+        UPDATE public.selectedinbounds
+        SET "releaseDate" = :releaseDate, "updatedAt" = NOW()
+        WHERE "selectedInboundId" = :selectedInboundId;
+      `;
+      await db.sequelize.query(updateSelectedInboundQuery, {
+        replacements: {
+          releaseDate,
+          selectedInboundId,
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      });
+    }
+
+    // Update the container details on the parent schedule record
+    const updateScheduleQuery = `
+      UPDATE public.scheduleoutbounds
+      SET 
+        "containerNo" = :containerNo, 
+        "sealNo" = :sealNo, 
+        "tareWeight" = :tareWeight, 
+        "uom" = :uom, 
+        "updatedAt" = NOW()
+      WHERE "scheduleOutboundId" = :scheduleOutboundId;
+    `;
+    await db.sequelize.query(updateScheduleQuery, {
+      replacements: {
+        containerNo,
+        sealNo,
+        tareWeight: tareWeight ? parseFloat(tareWeight) : null,
+        uom,
+        scheduleOutboundId,
+      },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction: t,
+    });
+
+    await t.commit();
+  } catch (error) {
+    await t.rollback();
+    console.error("Error in updateOutboundDetails model:", error);
+    throw error;
+  }
+};
+
 const getGrnDetailsForSelection = async (
   scheduleOutboundId,
   selectedInboundIds
@@ -617,6 +674,7 @@ module.exports = {
   getGrnDetailsForSelection,
   getStuffingPhotosByScheduleId,
   countStuffingPhotosByScheduleId,
+  updateOutboundDetails,
   createGrnAndTransactions,
   getUserSignature,
   updateUserSignature,
