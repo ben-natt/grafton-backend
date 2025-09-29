@@ -45,6 +45,11 @@ router.post(
   outboundController.createGrnAndTransactions
 );
 
+router.put(
+  "/update-details/:scheduleOutboundId",
+  outboundController.updateOutboundDetails
+);
+
 /*
  * GET /confirm-outbound/operators
  * Fetches warehouse staff (roleId 1) and supervisors (roleId 2) for dropdowns.
