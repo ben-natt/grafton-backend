@@ -27,6 +27,33 @@ router.get("/tasks-jobNo", async (req, res) => {
   }
 });
 
+router.post("/report-job-discrepancy", async (req, res) => {
+  try {
+    const { jobNo, reportedBy, discrepancyType } = req.body; // Accept discrepancyType
+    if (!jobNo || !reportedBy || !discrepancyType) {
+      return res.status(400).json({ error: "jobNo, reportedBy, and discrepancyType are required." });
+    }
+
+    // Validate the discrepancyType value
+    if (!['lack', 'extra'].includes(discrepancyType)) {
+      return res.status(400).json({ error: "Invalid discrepancyType. Must be 'lack' or 'extra'." });
+    }
+
+    // Pass all required data to the model function
+    const reportedCount = await pendingTasksModel.reportJobDiscrepancy(jobNo, reportedBy, discrepancyType);
+
+    if (reportedCount > 0) {
+      res.status(200).json({
+        message: `Successfully reported discrepancy for ${reportedCount} lot(s) in job ${jobNo}.`
+      });
+    } else {
+      res.status(404).json({ message: "No pending, unreported lots found for the specified job." });
+    }
+  } catch (error) {
+    console.error("Error reporting job discrepancy:", error);
+    res.status(500).json({ error: "Failed to report job discrepancy." });
+  }
+});
 router.post("/reverse-inbound/:inboundId", async (req, res) => {
   try {
     const { inboundId } = req.params;
@@ -44,6 +71,7 @@ router.post("/reverse-inbound/:inboundId", async (req, res) => {
       error: "Failed to reverse inbound task.",
       details: error.message,
     });
+
   }
 });
 
@@ -310,30 +338,26 @@ router.post("/lot-inbound/get", async (req, res) => {
 
 // Update inbound date for a specific lot (edit functionality )
 router.post("/lot-inbound/update", async (req, res) => {
-  const { jobNo, lotNo, inboundDate } = req.body;
+  const { jobNo, lotNo, inboundDate, userId } = req.body; // Added userId
 
-  if (!jobNo || !lotNo || !inboundDate) {
+  if (!jobNo || !lotNo || !inboundDate || !userId) {
     return res.status(400).json({
-      error: "jobNo, lotNo, and inboundDate are required.",
+      error: "jobNo, lotNo, inboundDate, and userId are required.",
     });
   }
 
   try {
-    // Check if lot exists
-    const existingLot = await pendingTasksOfficeModel.getLotInboundDate(
-      jobNo,
-      lotNo
-    );
-
+    const existingLot = await pendingTasksOfficeModel.getLotInboundDate(jobNo, lotNo);
     if (!existingLot) {
       return res.status(404).json({ error: "Lot not found" });
     }
 
-    // Update the lot
+    // MODIFIED: Pass userId for activity logging
     const result = await pendingTasksOfficeModel.updateLotInboundDate(
       jobNo,
       lotNo,
-      inboundDate
+      inboundDate,
+      userId
     );
 
     res.status(200).json({
@@ -380,26 +404,21 @@ router.post("/tasks-outbound-office", async (req, res) => {
   }
 });
 
-// Get outbound dates for a specific lot
 router.post("/lot-outbound/get", async (req, res) => {
   const { jobNo, lotNo } = req.body;
-
   if (!jobNo || !lotNo) {
     return res.status(400).json({
       error: "jobNo and lotNo are required in the request body.",
     });
   }
-
   try {
     const result = await pendingTasksOfficeModel.getLotOutboundDates(
       jobNo,
       lotNo
     );
-
     if (!result) {
       return res.status(404).json({ error: "Lot not found" });
     }
-
     res.status(200).json(result);
   } catch (error) {
     console.error(error);
@@ -407,7 +426,6 @@ router.post("/lot-outbound/get", async (req, res) => {
   }
 });
 
-// Update outbound dates for a specific lot
 router.post("/lot-outbound/update", async (req, res) => {
   const {
     jobNo,
@@ -429,11 +447,9 @@ router.post("/lot-outbound/update", async (req, res) => {
       jobNo,
       lotNo
     );
-
     if (!existingLot) {
       return res.status(404).json({ error: "Lot not found" });
     }
-
     const result = await pendingTasksOfficeModel.updateLotOutboundDates(
       jobNo,
       lotNo,
@@ -442,7 +458,6 @@ router.post("/lot-outbound/update", async (req, res) => {
       exportDate,
       deliveryDate
     );
-
     res.status(200).json({
       success: true,
       message: "Outbound dates updated successfully",
@@ -454,4 +469,66 @@ router.post("/lot-outbound/update", async (req, res) => {
   }
 });
 
+router.get("/job-report-info/:jobNo", async (req, res) => {
+  try {
+    const { jobNo } = req.params;
+    const info = await pendingTasksOfficeModel.getJobReportInfo(jobNo);
+    if (info) {
+      res.status(200).json(info);
+    } else {
+      res.status(404).json({ message: "No pending report found for this job." });
+    }
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch job report info." });
+  }
+});
+
+// NEW & CONSOLIDATED: Handles the initial "Accept" or "Decline" of a job report
+router.post("/acknowledge-job-report", async (req, res) => {
+  try {
+    const { jobNo, status, resolvedBy } = req.body;
+    if (!jobNo || !status || !resolvedBy) {
+      return res.status(400).json({ error: "jobNo, status, and resolvedBy are required." });
+    }
+    const result = await pendingTasksOfficeModel.updateJobReportStatus({ jobNo, status, resolvedBy });
+    res.status(200).json({ message: "Job report status updated.", data: result });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to update job report status." });
+  }
+});
+
+// NEW ROUTE: Handles finalization of an "extra lots" report.
+router.post('/finalize-job-report', async (req, res) => {
+  try {
+    const { jobNo, deletedLotIds, resolvedBy } = req.body;
+    if (!jobNo || !deletedLotIds || resolvedBy === undefined) {
+      return res.status(400).json({ error: 'Missing required fields: jobNo, deletedLotIds, resolvedBy' });
+    }
+    await pendingTasksOfficeModel.finalizeJobReport({
+      jobNo,
+      deletedLotIds,
+      resolvedBy,
+    });
+    res.status(200).json({ message: 'Job report finalized successfully.' });
+  } catch (error) {
+    console.error('Error finalizing job report:', error);
+    res.status(500).json({ error: 'Failed to finalize job report.' });
+  }
+});
+
+// NEW ROUTE: Deletes a lot (by updating its status)
+router.delete("/lot/:lotId", async (req, res) => {
+  try {
+    const { lotId } = req.params;
+    const result = await pendingTasksOfficeModel.deleteLot(parseInt(lotId));
+    if (result) {
+      res.status(200).json({ message: "Lot deleted successfully." });
+    } else {
+      res.status(404).json({ message: "Lot not found." });
+    }
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete lot." });
+  }
+});
+  
 module.exports = router;

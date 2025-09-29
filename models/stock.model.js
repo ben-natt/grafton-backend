@@ -100,7 +100,7 @@ const getInventory = async (filters) => {
       Metal: '"Metal"',
       Brand: '"Brand"',
       Shape: '"Shape"',
-      Bdl: '"Qty"',
+      Bundles: '"Qty"',
       Weight: '"Weight"',
     };
     let orderByClause = 'ORDER BY "Job No" ASC'; // Default sort
@@ -401,7 +401,7 @@ const getLotDetails = async (filters) => {
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
-      Bdl: 'i."noOfBundle"',
+      Bundles: 'i."noOfBundle"',
       Weight: '"Weight"',
     };
     let orderByClause = 'ORDER BY i."inboundId" ASC'; // Default sort

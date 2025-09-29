@@ -21,8 +21,8 @@ const getPendingInboundTasks = async (
     // base filters for "visible + pending" lots
     const baseWhere = [
       `l.status = 'Pending'`,
-      `l.report = False`,
-      `(l."reportDuplicate" = False OR l."isDuplicated" = True)`,
+      `l.report = false`,
+      `(l."reportDuplicate" = false OR l."isDuplicated" = true)`,
     ];
     const replacements = {};
 
@@ -112,8 +112,8 @@ const getPendingInboundTasks = async (
       JOIN public.users u ON s."userId" = u.userid
       WHERE l."jobNo" IN (:paginatedJobNos)
         AND l.status = 'Pending'
-        AND l.report = False
-        AND (l."reportDuplicate" = False OR l."isDuplicated" = True)
+        AND l.report = false
+        AND (l."reportDuplicate" = false OR l."isDuplicated" = true)
       ORDER BY l."inbounddate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
@@ -237,7 +237,7 @@ const getPendingOutboundTasks = async (
 
     if (jobNo) {
       baseWhere.push(
-        `(i."jobNo" iLIKE :jobNo OR COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))) iLIKE :jobNo)`
+        `(i."jobNo" ILIKE :jobNo OR COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))) ILIKE :jobNo)`
       );
       replacements.jobNo = `%${jobNo}%`;
     }
@@ -434,7 +434,18 @@ const getPendingOutboundTasks = async (
 
 const pendingOutboundTasksUser = async (scheduleOutboundId) => {
   try {
-    const query = `SELECT u."username", TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate", TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate", so."containerNo", so."sealNo" FROM public.scheduleoutbounds so JOIN public.users u ON so."userId" = u."userid" WHERE so."scheduleOutboundId" = :scheduleOutboundId LIMIT 1;`;
+    const query = `
+      SELECT
+        u."username",
+        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
+        TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate",
+        so."containerNo",
+        so."sealNo"
+      FROM public.scheduleoutbounds so
+      JOIN public.users u ON so."userId" = u."userid"
+      WHERE so."scheduleOutboundId" = :scheduleOutboundId
+      LIMIT 1;
+    `;
     const result = await db.sequelize.query(query, {
       replacements: { scheduleOutboundId },
       type: db.sequelize.QueryTypes.SELECT,
@@ -450,6 +461,59 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
   } catch (error) {
     console.error("Error fetching user info for outbound tasks:", error);
     throw error;
+  }
+};
+
+const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
+  const transaction = await db.sequelize.transaction();
+  try {
+    // Check if there are any lots to report
+    const lotsToUpdate = await db.sequelize.query(
+      `SELECT "lotId" FROM public.lot 
+       WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
+      {
+        replacements: { jobNo },
+        type: db.sequelize.QueryTypes.SELECT,
+        transaction,
+      }
+    );
+
+    if (lotsToUpdate.length === 0) {
+      await transaction.rollback();
+      return 0; // No lots were found to update
+    }
+
+    // Create the report entry
+    await db.sequelize.query(
+      `INSERT INTO public.job_reports ("jobNo", "reportedById", "discrepancyType") 
+       VALUES (:jobNo, :reportedById, :discrepancyType)`,
+      {
+        replacements: {
+          jobNo: jobNo,
+          reportedById: reportedBy,
+          discrepancyType: discrepancyType,
+        },
+        type: db.sequelize.QueryTypes.INSERT,
+        transaction,
+      }
+    );
+
+    // Mark all associated lots as reported
+    const [updateResult, updateCount] = await db.sequelize.query(
+      `UPDATE public.lot SET report = true 
+       WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
+      {
+        replacements: { jobNo },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
+    await transaction.commit();
+    return updateCount; // Return the number of lots that were updated
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error reporting job discrepancy:", error);
   }
 };
 
@@ -502,19 +566,16 @@ const reverseInbound = async (inboundId) => {
   } catch (error) {
     await t.rollback();
     console.error("Error reversing inbound:", error);
+
     throw error;
   }
 };
 
 module.exports = {
-  // getDetailsPendingTasks,
-  // pendingTasksUserId,
-  // findJobNoPendingTasks,
-  // findScheduleIdPendingOutbound,
-  // getDetailsPendingOutbound,
   pendingOutboundTasksUser,
   getPendingInboundTasks,
   getPendingOutboundTasks,
   updateScheduleOutboundDetails,
+  reportJobDiscrepancy,
   reverseInbound,
 };
