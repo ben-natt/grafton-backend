@@ -340,6 +340,17 @@ const createGrnAndTransactions = async (req, res) => {
   }
 };
 
+module.exports = {
+  getConfirmationDetails,
+  getStuffingPhotos,
+  confirmOutbound,
+  updateOutboundDetails,
+  getGrnDetails,
+  getUserSignature,
+  createGrnAndTransactions,
+};
+
+
 // const getOperators = async (req, res) => {
 //   try {
 //     const users = await outboundModel.getOperators();
@@ -351,14 +362,3 @@ const createGrnAndTransactions = async (req, res) => {
 //     res.status(500).json({ error: "Failed to fetch operators." });
 //   }
 // };
-
-module.exports = {
-  getConfirmationDetails,
-  getStuffingPhotos,
-  confirmOutbound,
-  updateOutboundDetails,
-  getGrnDetails,
-  getUserSignature,
-  createGrnAndTransactions,
-  // getOperators,
-};
