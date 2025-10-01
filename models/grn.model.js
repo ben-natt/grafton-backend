@@ -218,46 +218,46 @@ const grnModel = {
     }
   },
 
-    async updateAndRegenerateGrn(outboundId, data) {
-      const t = await db.sequelize.transaction();
-      try {
-        const signatureQuery = `
-          SELECT "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature"
+  async updateAndRegenerateGrn(outboundId, data) {
+    const t = await db.sequelize.transaction();
+    try {
+      const oldDataQuery = `
+          SELECT "grnImage", "grnPreviewImage", "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature"
           FROM public.outbounds WHERE "outboundId" = :outboundId;
         `;
-        const signatures = await db.sequelize.query(signatureQuery, {
-          replacements: { outboundId },
-          type: db.sequelize.QueryTypes.SELECT,
-          plain: true,
-          transaction: t,
-        });
+      const oldData = await db.sequelize.query(oldDataQuery, {
+        replacements: { outboundId },
+        type: db.sequelize.QueryTypes.SELECT,
+        plain: true,
+        transaction: t,
+      });
 
-        const outboundUpdateQuery = `
+      const outboundUpdateQuery = `
           UPDATE public.outbounds SET
             "releaseDate" = :releaseDate,
             "uom" = :uom,
             "updatedAt" = NOW()
           WHERE "outboundId" = :outboundId;
         `;
-        await db.sequelize.query(outboundUpdateQuery, {
-          replacements: {
-            releaseDate: data.releaseDate,
-            uom: data.uom,
-            outboundId,
-          },
-          type: db.sequelize.QueryTypes.UPDATE,
-          transaction: t,
-        });
+      await db.sequelize.query(outboundUpdateQuery, {
+        replacements: {
+          releaseDate: data.releaseDate,
+          uom: data.uom,
+          outboundId,
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      });
 
-        // Sanitize date fields before updating to prevent timestamp errors
-        const sanitizedData = { ...data };
-        ["deliveryDate", "exportDate", "stuffingDate"].forEach((key) => {
-          if (sanitizedData[key] === "") {
-            sanitizedData[key] = null;
-          }
-        });
+      // Sanitize date fields before updating to prevent timestamp errors
+      const sanitizedData = { ...data };
+      ["deliveryDate", "exportDate", "stuffingDate"].forEach((key) => {
+        if (sanitizedData[key] === "") {
+          sanitizedData[key] = null;
+        }
+      });
 
-        const transactionUpdateQuery = `
+      const transactionUpdateQuery = `
           UPDATE public.outboundtransactions SET
             "releaseWarehouse" = :releaseWarehouse,
             "transportVendor" = :transportVendor,
@@ -273,57 +273,68 @@ const grnModel = {
             "updatedAt" = NOW()
           WHERE "outboundId" = :outboundId;
         `;
-        await db.sequelize.query(transactionUpdateQuery, {
-          replacements: { ...sanitizedData, outboundId },
-          type: db.sequelize.QueryTypes.UPDATE,
-          transaction: t,
-        });
+      await db.sequelize.query(transactionUpdateQuery, {
+        replacements: { ...sanitizedData, outboundId },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      });
 
-        const pdfData = await this._gatherDataForPdfRegeneration(outboundId, t);
+      const pdfData = await this._gatherDataForPdfRegeneration(outboundId, t);
 
-        pdfData.driverSignature = signatures.driverSignature;
-        pdfData.warehouseStaffSignature = signatures.warehouseStaffSignature;
+      if (oldData.driverSignature)
+        pdfData.driverSignature = oldData.driverSignature.toString("base64");
+      if (oldData.warehouseStaffSignature)
+        pdfData.warehouseStaffSignature =
+          oldData.warehouseStaffSignature.toString("base64");
+      if (oldData.warehouseSupervisorSignature)
         pdfData.warehouseSupervisorSignature =
-          signatures.warehouseSupervisorSignature;
-        pdfData.isWeightVisible = true;
+          oldData.warehouseSupervisorSignature.toString("base64");
+      pdfData.isWeightVisible = true;
 
-        const oldFilesQuery = `SELECT "grnImage", "grnPreviewImage" FROM public.outbounds WHERE "outboundId" = :outboundId;`;
-        const oldFiles = await db.sequelize.query(oldFilesQuery, {
-          replacements: { outboundId },
-          type: db.sequelize.QueryTypes.SELECT,
-          plain: true,
-          transaction: t,
-        });
+      if (oldData && oldData.grnImage) {
+        const oldBaseName = path.basename(
+          oldData.grnImage,
+          path.extname(oldData.grnImage)
+        );
+        pdfData.fileName = oldBaseName.replace(/^GRN_/, "").replace(/_/, "/");
+      } else {
+        const grnParts = pdfData.grnNo.split("-");
+        const sequence = grnParts.length > 1 ? grnParts[1] : "1";
+        pdfData.fileName = `${pdfData.ourReference}/${sequence.padStart(
+          2,
+          "0"
+        )}`;
+      }
 
-        if (oldFiles) {
-          if (oldFiles.grnImage) {
-            await fs
-              .unlink(path.join(__dirname, "..", oldFiles.grnImage))
-              .catch((err) => console.error("Error deleting old PDF:", err));
-          }
-          if (oldFiles.grnPreviewImage) {
-            await fs
-              .unlink(path.join(__dirname, "..", oldFiles.grnPreviewImage))
-              .catch((err) => console.error("Error deleting old preview:", err));
-          }
+      if (oldData) {
+        if (oldData.grnImage) {
+          await fs
+            .unlink(path.join(__dirname, "..", oldData.grnImage))
+            .catch((err) => console.error("Error deleting old PDF:", err));
         }
+        if (oldData.grnPreviewImage) {
+          await fs
+            .unlink(path.join(__dirname, "..", oldData.grnPreviewImage))
+            .catch((err) => console.error("Error deleting old preview:", err));
+        }
+      }
 
-        const { outputPath, previewImagePath } = await pdfService.generateGrnPdf(
-          pdfData
-        );
+      const { outputPath, previewImagePath } = await pdfService.generateGrnPdf(
+        pdfData
+      );
 
-        const stats = await fs.stat(outputPath);
-        const fileSizeInBytes = stats.size;
-        const relativePdfPath = path.relative(
-          path.join(__dirname, ".."),
-          outputPath
-        );
-        const relativePreviewPath = path.relative(
-          path.join(__dirname, ".."),
-          previewImagePath
-        );
+      const stats = await fs.stat(outputPath);
+      const fileSizeInBytes = stats.size;
+      const relativePdfPath = path.relative(
+        path.join(__dirname, ".."),
+        outputPath
+      );
+      const relativePreviewPath = path.relative(
+        path.join(__dirname, ".."),
+        previewImagePath
+      );
 
-        const fileUpdateQuery = `
+      const fileUpdateQuery = `
           UPDATE public.outbounds SET
             "grnImage" = :grnImage,
             "grnPreviewImage" = :grnPreviewImage,
@@ -331,162 +342,145 @@ const grnModel = {
             "updatedAt" = NOW()
           WHERE "outboundId" = :outboundId;
         `;
-        await db.sequelize.query(fileUpdateQuery, {
-          replacements: {
-            grnImage: relativePdfPath,
-            grnPreviewImage: relativePreviewPath,
-            fileSize: fileSizeInBytes,
-            outboundId,
-          },
-          type: db.sequelize.QueryTypes.UPDATE,
-          transaction: t,
-        });
+      await db.sequelize.query(fileUpdateQuery, {
+        replacements: {
+          grnImage: relativePdfPath,
+          grnPreviewImage: relativePreviewPath,
+          fileSize: fileSizeInBytes,
+          outboundId,
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      });
 
-        await t.commit();
+      await t.commit();
 
-        const pdfBuffer = await fs.readFile(outputPath);
-        const previewImageBuffer = await fs.readFile(previewImagePath);
+      const pdfBuffer = await fs.readFile(outputPath);
+      const previewImageBuffer = await fs.readFile(previewImagePath);
 
-        return {
-          pdf: pdfBuffer.toString("base64"),
-          previewImage: previewImageBuffer.toString("base64"),
-        };
-      } catch (error) {
-        await t.rollback();
-        console.error("MODEL ERROR in updateAndRegenerateGrn:", error);
-        throw error;
-      }
-    },
+      return {
+        pdf: pdfBuffer.toString("base64"),
+        previewImage: previewImageBuffer.toString("base64"),
+      };
+    } catch (error) {
+      await t.rollback();
+      console.error("MODEL ERROR in updateAndRegenerateGrn:", error);
+      throw error;
+    }
+  },
 
-    async getDropdownOptions() {
-      try {
-        const queries = [
-          db.sequelize.query(
-            'SELECT "releaseWarehouseName" as name FROM public.releasewarehouses ORDER BY "releaseWarehouseName"',
-            { type: db.sequelize.QueryTypes.SELECT }
-          ),
-          db.sequelize.query(
-            'SELECT "transportVendorName" as name FROM public.transportvendors ORDER BY "transportVendorName"',
-            { type: db.sequelize.QueryTypes.SELECT }
-          ),
-          db.sequelize.query(
-            'SELECT "commodityName" as name FROM public.commodities ORDER BY "commodityName"',
-            { type: db.sequelize.QueryTypes.SELECT }
-          ),
-          db.sequelize.query(
-            'SELECT "shapeName" as name FROM public.shapes ORDER BY "shapeName"',
-            { type: db.sequelize.QueryTypes.SELECT }
-          ),
-          db.sequelize.query(
-            'SELECT "brandName" as name FROM public.brands ORDER BY "brandName"',
-            { type: db.sequelize.QueryTypes.SELECT }
-          ),
-          db.sequelize.query(
-            "SELECT DISTINCT uom as name FROM public.outbounds WHERE uom IS NOT NULL AND uom <> '' ORDER BY name",
-            { type: db.sequelize.QueryTypes.SELECT }
-          ),
-        ];
+  async getDropdownOptions() {
+    try {
+      const queries = [
+        db.sequelize.query(
+          'SELECT "releaseWarehouseName" as name FROM public.releasewarehouses ORDER BY "releaseWarehouseName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          'SELECT "transportVendorName" as name FROM public.transportvendors ORDER BY "transportVendorName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          'SELECT "commodityName" as name FROM public.commodities ORDER BY "commodityName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          'SELECT "shapeName" as name FROM public.shapes ORDER BY "shapeName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          'SELECT "brandName" as name FROM public.brands ORDER BY "brandName"',
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+        db.sequelize.query(
+          "SELECT DISTINCT uom as name FROM public.outbounds WHERE uom IS NOT NULL AND uom <> '' ORDER BY name",
+          { type: db.sequelize.QueryTypes.SELECT }
+        ),
+      ];
 
-        const [
-          releaseWarehouses,
-          transportVendors,
-          commodities,
-          shapes,
-          brands,
-          uoms,
-        ] = await Promise.all(queries);
+      const [
+        releaseWarehouses,
+        transportVendors,
+        commodities,
+        shapes,
+        brands,
+        uoms,
+      ] = await Promise.all(queries);
 
-        return {
-          releaseWarehouses: releaseWarehouses.map((item) => item.name),
-          transportVendors: transportVendors.map((item) => item.name),
-          commodities: commodities.map((item) => item.name),
-          shapes: shapes.map((item) => item.name),
-          brands: brands.map((item) => item.name),
-          uoms: uoms.map((item) => item.name),
-        };
-      } catch (error) {
-        console.error("MODEL ERROR in getDropdownOptions:", error);
-        throw error;
-      }
-    },
+      return {
+        releaseWarehouses: releaseWarehouses.map((item) => item.name),
+        transportVendors: transportVendors.map((item) => item.name),
+        commodities: commodities.map((item) => item.name),
+        shapes: shapes.map((item) => item.name),
+        brands: brands.map((item) => item.name),
+        uoms: uoms.map((item) => item.name),
+      };
+    } catch (error) {
+      console.error("MODEL ERROR in getDropdownOptions:", error);
+      throw error;
+    }
+  },
 
-    async _gatherDataForPdfRegeneration(outboundId, transaction) {
-      const outboundDetailsQuery = `
+  async _gatherDataForPdfRegeneration(outboundId, transaction) {
+    const outboundDetailsQuery = `
         SELECT "grnNo", "jobIdentifier", "releaseDate", "driverName", 
               "driverIdentityNo", "truckPlateNo", "warehouseStaff", "warehouseSupervisor", uom
         FROM public.outbounds
         WHERE "outboundId" = :outboundId;
       `;
-      const outboundDetails = await db.sequelize.query(outboundDetailsQuery, {
-        replacements: { outboundId },
-        type: db.sequelize.QueryTypes.SELECT,
-        plain: true,
-        transaction,
-      });
+    const outboundDetails = await db.sequelize.query(outboundDetailsQuery, {
+      replacements: { outboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+      transaction,
+    });
 
-      const lotsQuery = `
-        SELECT 
-          "jobNo", "lotNo", "noOfBundle", "grossWeight", "netWeight", "actualWeight",
-          commodity, shape, brands, "transportVendor", "releaseWarehouse", "containerNo", "sealNo"
-        FROM public.outboundtransactions
-        WHERE "outboundId" = :outboundId;
-      `;
-      const lots = await db.sequelize.query(lotsQuery, {
-        replacements: { outboundId },
-        type: db.sequelize.QueryTypes.SELECT,
-        transaction,
-      });
+    if (!outboundDetails || lots.length === 0) {
+      throw new Error("Could not find necessary details to regenerate PDF.");
+    }
 
-      if (!outboundDetails || lots.length === 0) {
-        throw new Error("Could not find necessary details to regenerate PDF.");
-      }
+    const firstLot = lots[0];
+    const aggregateDetails = (key) =>
+      [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
 
-      const firstLot = lots[0];
-      const aggregateDetails = (key) =>
-        [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
+    return {
+      ourReference: outboundDetails.jobIdentifier,
+      grnNo: outboundDetails.grnNo,
+      releaseDate: new Date(outboundDetails.releaseDate).toLocaleDateString(
+        "en-GB",
+        { day: "2-digit", month: "short", year: "numeric" }
+      ),
+      warehouse: firstLot.releaseWarehouse || "N/A",
+      transportVendor: firstLot.transportVendor || "N/A",
+      containerAndSealNo:
+        firstLot.containerNo && firstLot.sealNo
+          ? `${firstLot.containerNo} / ${firstLot.sealNo}`
+          : "N/A",
+      driverName: outboundDetails.driverName,
+      driverIdentityNo: outboundDetails.driverIdentityNo,
+      truckPlateNo: outboundDetails.truckPlateNo,
+      warehouseStaff: outboundDetails.warehouseStaff,
+      warehouseSupervisor: outboundDetails.warehouseSupervisor,
+      uom: outboundDetails.uom,
+      cargoDetails: {
+        commodity: aggregateDetails("commodity") || "N/A",
+        shape: aggregateDetails("shape") || "N/A",
+        brand: aggregateDetails("brands") || "N/A",
+      },
+      lots: lots.map((lot) => {
+        const actualWeight = parseFloat(lot.actualWeight) || 0;
+        const grossWeight = parseFloat(lot.grossWeight) || 0;
+        const displayWeight = actualWeight !== 0 ? actualWeight : grossWeight;
 
-      return {
-        ourReference: outboundDetails.jobIdentifier,
-        grnNo: outboundDetails.grnNo,
-        fileName: `${outboundDetails.jobIdentifier}/${outboundDetails.grnNo
-          .split("-")
-          .pop()
-          .padStart(2, "0")}`,
-        releaseDate: new Date(outboundDetails.releaseDate).toLocaleDateString(
-          "en-GB",
-          { day: "2-digit", month: "short", year: "numeric" }
-        ),
-        warehouse: firstLot.releaseWarehouse || "N/A",
-        transportVendor: firstLot.transportVendor || "N/A",
-        containerAndSealNo:
-          firstLot.containerNo && firstLot.sealNo
-            ? `${firstLot.containerNo} / ${firstLot.sealNo}`
-            : "N/A",
-        driverName: outboundDetails.driverName,
-        driverIdentityNo: outboundDetails.driverIdentityNo,
-        truckPlateNo: outboundDetails.truckPlateNo,
-        warehouseStaff: outboundDetails.warehouseStaff,
-        warehouseSupervisor: outboundDetails.warehouseSupervisor,
-        uom: outboundDetails.uom,
-        cargoDetails: {
-          commodity: aggregateDetails("commodity") || "N/A",
-          shape: aggregateDetails("shape") || "N/A",
-          brand: aggregateDetails("brands") || "N/A",
-        },
-        lots: lots.map((lot) => {
-          const actualWeight = parseFloat(lot.actualWeight) || 0;
-          const grossWeight = parseFloat(lot.grossWeight) || 0;
-          const displayWeight = actualWeight !== 0 ? actualWeight : grossWeight;
+        return {
+          lotNo: `${lot.jobNo}-${lot.lotNo}`,
+          bundles: lot.noOfBundle,
+          actualWeightMt: displayWeight.toFixed(3),
+          netWeightMt: (parseFloat(lot.netWeight) || 0).toFixed(3),
+        };
+      }),
+    };
+  },
+};
 
-          return {
-            lotNo: `${lot.jobNo}-${lot.lotNo}`,
-            bundles: lot.noOfBundle,
-            actualWeightMt: displayWeight.toFixed(3),
-            netWeightMt: (parseFloat(lot.netWeight) || 0).toFixed(3),
-          };
-        }),
-      };
-    },
-  };
-
-  module.exports = grnModel;
+module.exports = grnModel;
