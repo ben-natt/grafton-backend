@@ -4,7 +4,6 @@ const {
   getReportsByLotId,
   getDuplicateReportsByStatus,
   getJobReportsByStatus,
-  // +++ IMPORT NEW DELETE FUNCTIONS +++
   deleteDiscrepancyReportById,
   deleteDuplicateReportById,
 } = require('../models/notifications.model');
@@ -93,24 +92,21 @@ router.get('/lot/:lotId/reports', async (req, res) => {
   }
 });
 
-// +++ START: NEW DELETE ROUTES +++
-
 /**
- * @route DELETE /report/notifications/:reportId
- * @description Delete a discrepancy report by its ID.
+ * @route DELETE /report/notifications/:status/:reportId
+ * @description Delete a discrepancy report by its ID and status.
  * @access Public
  */
-router.delete('/notifications/:reportId', async (req, res) => {
+router.delete('/notifications/:status/:reportId', async (req, res) => {
   try {
-    const { reportId } = req.params;
-    console.log(`[Router] DELETE /notifications/${reportId} hit.`);
+    const { reportId, status } = req.params;
+    console.log(`[Router] DELETE /notifications/${status}/${reportId} hit.`);
 
     const success = await deleteDiscrepancyReportById(reportId);
 
     if (success) {
       res.status(200).json({ message: `Discrepancy report ${reportId} deleted successfully.` });
     } else {
-      // Return 404 if the model function indicates no report was found/deleted.
       res.status(404).json({ error: `Discrepancy report with ID ${reportId} not found.` });
     }
   } catch (error) {
@@ -120,14 +116,14 @@ router.delete('/notifications/:reportId', async (req, res) => {
 });
 
 /**
- * @route DELETE /report/notifications/duplicates/:duplicatedId
- * @description Delete a duplicate lot report by its ID.
+ * @route DELETE /report/notifications/duplicates/:status/:duplicatedId
+ * @description Delete a duplicate lot report by its ID and status.
  * @access Public
  */
-router.delete('/notifications/duplicates/:duplicatedId', async (req, res) => {
+router.delete('/notifications/duplicates/:status/:duplicatedId', async (req, res) => {
   try {
-    const { duplicatedId } = req.params;
-    console.log(`[Router] DELETE /notifications/duplicates/${duplicatedId} hit.`);
+    const { duplicatedId, status } = req.params;
+    console.log(`[Router] DELETE /notifications/duplicates/${status}/${duplicatedId} hit.`);
 
     const success = await deleteDuplicateReportById(duplicatedId);
 
@@ -142,6 +138,5 @@ router.delete('/notifications/duplicates/:duplicatedId', async (req, res) => {
   }
 });
 
-// +++ END: NEW DELETE ROUTES +++
-
 module.exports = router;
+
