@@ -49,7 +49,6 @@ const getReportsByStatus = async (status = 'pending') => {
 };
 
 /**
- * +++ UPDATED FUNCTION +++
  * Fetches job discrepancy reports from the job_reports table.
  * @param {string} status - The status of the reports to fetch ('pending', 'accepted', 'declined').
  * @returns {Promise<Array<Object>>} A promise that resolves to an array of job report objects.
@@ -58,19 +57,14 @@ const getJobReportsByStatus = async (status = 'pending') => {
   try {
     console.log(`[Model] Fetching JOB reports with status: ${status}`);
 
-    // --- START: FIX ---
-    // This logic ensures that when the "Approved" tab requests data,
-    // we fetch reports that are either 'accepted' or 'resolved'.
     let statusFilterClause;
     const replacements = { status };
 
     if (status === 'accepted') {
       statusFilterClause = `jr."reportStatus" IN ('accepted', 'resolved')`;
     } else {
-      // For 'pending' and 'declined', the logic remains the same.
       statusFilterClause = `jr."reportStatus" = :status`;
     }
-    // --- END: FIX ---
     
     const query = `
       SELECT 
@@ -187,9 +181,79 @@ const getReportsByLotId = async (lotId) => {
   }
 };
 
+// +++ START: NEW DELETE FUNCTIONS +++
+
+/**
+ * Deletes a discrepancy report by its ID.
+ * It tries deleting from both job_reports and lot_reports tables.
+ * @param {number} reportId - The ID of the report to delete.
+ * @returns {Promise<boolean>} A promise that resolves to true if a report was deleted, otherwise false.
+ */
+const deleteDiscrepancyReportById = async (reportId) => {
+  try {
+    // First, attempt to delete from the job_reports table.
+    const jobDeleteQuery = `DELETE FROM public.job_reports WHERE "jobReportId" = :reportId`;
+    const [jobResults, jobMetadata] = await db.sequelize.query(jobDeleteQuery, {
+      replacements: { reportId },
+    });
+    
+    // sequelize.query with DELETE might not provide rowCount, so check the result differently or assume success
+    if (jobMetadata && jobMetadata.rowCount > 0) {
+      console.log(`[Model] Deleted 1 row from job_reports with ID: ${reportId}`);
+      return true;
+    }
+
+    // If not found (or no rowCount), attempt to delete from the lot_reports table.
+    const lotDeleteQuery = `DELETE FROM public.lot_reports WHERE "reportId" = :reportId`;
+    const [lotResults, lotMetadata] = await db.sequelize.query(lotDeleteQuery, {
+      replacements: { reportId },
+    });
+
+    if (lotMetadata && lotMetadata.rowCount > 0) {
+      console.log(`[Model] Deleted 1 row from lot_reports with ID: ${reportId}`);
+      return true;
+    }
+
+    console.log(`[Model] No discrepancy report found with ID: ${reportId} in any table.`);
+    return false;
+  } catch (error) {
+    console.error("Error deleting discrepancy report:", error);
+    throw error;
+  }
+};
+
+/**
+ * Deletes a duplicate report by its ID from the lot_duplicate table.
+ * @param {number} duplicatedId - The ID of the duplicate report to delete.
+ * @returns {Promise<boolean>} A promise that resolves to true if a report was deleted, otherwise false.
+ */
+const deleteDuplicateReportById = async (duplicatedId) => {
+  try {
+    const query = `DELETE FROM public.lot_duplicate WHERE "duplicatedId" = :duplicatedId`;
+    const [results, metadata] = await db.sequelize.query(query, {
+      replacements: { duplicatedId },
+    });
+
+    if (metadata && metadata.rowCount > 0) {
+      console.log(`[Model] Deleted 1 row from lot_duplicate with ID: ${duplicatedId}`);
+      return true;
+    }
+    
+    console.log(`[Model] No duplicate report found with ID: ${duplicatedId}.`);
+    return false;
+  } catch (error) {
+    console.error("Error deleting duplicate report:", error);
+    throw error;
+  }
+};
+
+// +++ END: NEW DELETE FUNCTIONS +++
+
 module.exports = {
   getReportsByStatus,
   getReportsByLotId,
   getDuplicateReportsByStatus,
-  getJobReportsByStatus, // <-- Make sure to export the new function
+  getJobReportsByStatus,
+  deleteDiscrepancyReportById,
+  deleteDuplicateReportById,
 };
