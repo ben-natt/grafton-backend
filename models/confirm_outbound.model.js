@@ -453,10 +453,14 @@ const createGrnAndTransactions = async (formData) => {
 
     await confirmSelectedInbounds(selectedInboundIds, t);
 
-    // Prepare replacements for the insert query, ensuring jobIdentifier is correct
+    const tareWeightValue = formData.tareWeight
+      ? parseFloat(formData.tareWeight)
+      : null;
+    formData.tareWeight = isNaN(tareWeightValue) ? null : tareWeightValue;
+
     const outboundInsertReplacements = {
       ...formData,
-      jobIdentifier: outboundJobNo, // Use outboundJobNo for the jobIdentifier
+      jobIdentifier: outboundJobNo,
     };
 
     const outboundInsertQuery = `
@@ -467,7 +471,7 @@ const createGrnAndTransactions = async (formData) => {
           "tareWeight", uom,
           "createdAt", "updatedAt"
       ) VALUES (
-          NOW(), :driverName, :driverIdentityNo, :truckPlateNo,
+          :releaseDate, :driverName, :driverIdentityNo, :truckPlateNo,
           :warehouseStaff, :warehouseSupervisor, :userId, :grnNo, :jobIdentifier,
           :driverSignature, :warehouseStaffSignature, :warehouseSupervisorSignature,
           :tareWeight, :uom,

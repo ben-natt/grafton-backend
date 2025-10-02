@@ -506,7 +506,9 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
 
     const parsedLots = JSON.parse(selectedLots);
 
-    const outboundType = stuffingDate ? "container" : "flatbed";
+    // FIX START: Determine outboundType based on presence of container info
+    const outboundType = containerNo ? "container" : "flatbed";
+    // FIX END
 
     const scheduleInsertQuery = `
      INSERT INTO public.scheduleoutbounds (
@@ -531,11 +533,13 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
         userId,
         lotReleaseWeight: parseFloat(lotReleaseWeight),
         outboundType,
-        exportDate,
+        // FIX START: Ensure all optional fields default to null if not provided
+        exportDate: exportDate || null,
         stuffingDate: stuffingDate || null,
         containerNo: containerNo || null,
         sealNo: sealNo || null,
         deliveryDate: deliveryDate || null,
+        // FIX END
         storageReleaseLocation,
         releaseWarehouse,
         transportVendor,
@@ -617,8 +621,10 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
             jobNo,
             releaseDate: releaseStartDate,
             releaseEndDate: releaseEndDate || null,
+            // FIX START: Ensure exportDate and deliveryDate are handled here too
             exportDate: exportDate || null,
             deliveryDate: deliveryDate || null,
+            // FIX END
             storageReleaseLocation:
               lot.storageReleaseLocation || storageReleaseLocation,
           },

@@ -5,7 +5,6 @@ const pdfService = require("../pdf.services");
 
 const grnModel = {
   async getAllGrns(filters = {}) {
-    console.log("MODEL (getAllGrns): Fetching GRNs with filters:", filters);
     try {
       const page = parseInt(filters.page) || 1;
       const pageSize = parseInt(filters.pageSize) || 25;
@@ -31,7 +30,7 @@ const grnModel = {
 
       if (filters.startDate && filters.endDate) {
         whereClauses.push(
-          `(o."createdAt" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
+          `(o."releaseDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
         );
         replacements.startDate = filters.startDate;
         replacements.endDate = filters.endDate;
@@ -64,12 +63,12 @@ const grnModel = {
       const totalCount = countResult.count || 0;
 
       const sortColumnMap = {
-        Date: 'o."createdAt"',
+        Date: 'o."releaseDate"',
         "GRN No.": 'o."grnNo"',
         "File Name": 'o."grnImage"',
       };
 
-      let orderByClause = 'ORDER BY o."createdAt" DESC, o."grnNo" DESC';
+      let orderByClause = 'ORDER BY o."releaseDate" DESC, o."grnNo" DESC';
 
       if (filters.sortBy && sortColumnMap[filters.sortBy]) {
         const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
@@ -81,7 +80,7 @@ const grnModel = {
       const dataQuery = `
         SELECT
           o."outboundId",
-          TO_CHAR(o."createdAt" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
+          TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
           o."grnNo",
           o."grnImage",
           o."grnPreviewImage",
@@ -190,7 +189,7 @@ const grnModel = {
             o."jobIdentifier" as "ourReference",
             o."driverName", o."driverIdentityNo", o."truckPlateNo",
             o."warehouseStaff", o."warehouseSupervisor",
-            o."releaseDate",
+           TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "releaseDate",
             o."uom",
             (SELECT ot."outboundType" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "outboundType",
             (SELECT STRING_AGG(DISTINCT ot.commodity, ', ') FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId") as commodities,
@@ -282,13 +281,12 @@ const grnModel = {
       const pdfData = await this._gatherDataForPdfRegeneration(outboundId, t);
 
       if (oldData.driverSignature)
-        pdfData.driverSignature = oldData.driverSignature.toString("base64");
+        pdfData.driverSignature = oldData.driverSignature;
       if (oldData.warehouseStaffSignature)
-        pdfData.warehouseStaffSignature =
-          oldData.warehouseStaffSignature.toString("base64");
+        pdfData.warehouseStaffSignature = oldData.warehouseStaffSignature;
       if (oldData.warehouseSupervisorSignature)
         pdfData.warehouseSupervisorSignature =
-          oldData.warehouseSupervisorSignature.toString("base64");
+          oldData.warehouseSupervisorSignature;
       pdfData.isWeightVisible = true;
 
       if (oldData && oldData.grnImage) {
@@ -296,10 +294,10 @@ const grnModel = {
           oldData.grnImage,
           path.extname(oldData.grnImage)
         );
-        pdfData.fileName = oldBaseName.replace(/^GRN_/, "").replace(/_/, "/");
+        pdfData.fileName = oldBaseName.replace(/^GRN_/, "").replace(/_/g, "/");
       } else {
         const grnParts = pdfData.grnNo.split("-");
-        const sequence = grnParts.length > 1 ? grnParts[1] : "1";
+        const sequence = grnParts.length > 1 ? grnParts.pop() : "1";
         pdfData.fileName = `${pdfData.ourReference}/${sequence.padStart(
           2,
           "0"
@@ -432,6 +430,19 @@ const grnModel = {
       replacements: { outboundId },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
+      transaction,
+    });
+
+    const lotsQuery = `
+        SELECT 
+          "jobNo", "lotNo", "noOfBundle", "grossWeight", "netWeight", "actualWeight",
+          commodity, shape, brands, "transportVendor", "releaseWarehouse", "containerNo", "sealNo"
+        FROM public.outboundtransactions
+        WHERE "outboundId" = :outboundId;
+      `;
+    const lots = await db.sequelize.query(lotsQuery, {
+      replacements: { outboundId },
+      type: db.sequelize.QueryTypes.SELECT,
       transaction,
     });
 

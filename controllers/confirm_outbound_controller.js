@@ -159,6 +159,8 @@ const createGrnAndTransactions = async (req, res) => {
     const {
       stuffingPhotos,
       userId,
+      driverSignature,
+      warehouseStaffSignature,
       warehouseSupervisorSignature,
       scheduleOutboundId,
     } = grnDataFromRequest;
@@ -192,6 +194,26 @@ const createGrnAndTransactions = async (req, res) => {
         );
         await outboundModel.updateUserSignature(userId, signatureBuffer);
       }
+    }
+
+    // Convert all signatures from base64 to Buffer before passing to the model
+    if (driverSignature) {
+      grnDataFromRequest.driverSignature = Buffer.from(
+        driverSignature,
+        "base64"
+      );
+    }
+    if (warehouseStaffSignature) {
+      grnDataFromRequest.warehouseStaffSignature = Buffer.from(
+        warehouseStaffSignature,
+        "base64"
+      );
+    }
+    if (warehouseSupervisorSignature) {
+      grnDataFromRequest.warehouseSupervisorSignature = Buffer.from(
+        warehouseSupervisorSignature,
+        "base64"
+      );
     }
 
     // --- Image Handling Logic --- (rest of the function continues as before)
@@ -246,12 +268,15 @@ const createGrnAndTransactions = async (req, res) => {
       return !isNaN(num) ? num.toFixed(decimals) : (0).toFixed(decimals);
     };
 
+    // FIX: Use the releaseDate from the request for the PDF, don't use new Date().
+    const releaseDateForPdf = new Date(grnDataFromRequest.releaseDate);
+
     const pdfData = {
       ...grnDataFromRequest,
       isWeightVisible: grnDataFromRequest.isWeightVisible,
       ourReference: grnDataFromRequest.outboundJobNo,
       grnNo: createdOutbound.grnNo,
-      releaseDate: new Date().toLocaleDateString("en-GB", {
+      releaseDate: releaseDateForPdf.toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "short",
         year: "numeric",
@@ -349,7 +374,6 @@ module.exports = {
   getUserSignature,
   createGrnAndTransactions,
 };
-
 
 // const getOperators = async (req, res) => {
 //   try {
