@@ -5,7 +5,6 @@ const pdfService = require("../pdf.services");
 
 const grnModel = {
   async getAllGrns(filters = {}) {
-    console.log("MODEL (getAllGrns): Fetching GRNs with filters:", filters);
     try {
       const page = parseInt(filters.page) || 1;
       const pageSize = parseInt(filters.pageSize) || 25;
@@ -31,7 +30,7 @@ const grnModel = {
 
       if (filters.startDate && filters.endDate) {
         whereClauses.push(
-          `(o."createdAt" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
+          `(o."releaseDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate::date AND :endDate::date`
         );
         replacements.startDate = filters.startDate;
         replacements.endDate = filters.endDate;
@@ -64,12 +63,12 @@ const grnModel = {
       const totalCount = countResult.count || 0;
 
       const sortColumnMap = {
-        Date: 'o."createdAt"',
+        Date: 'o."releaseDate"',
         "GRN No.": 'o."grnNo"',
         "File Name": 'o."grnImage"',
       };
 
-      let orderByClause = 'ORDER BY o."createdAt" DESC, o."grnNo" DESC';
+      let orderByClause = 'ORDER BY o."releaseDate" DESC, o."grnNo" DESC';
 
       if (filters.sortBy && sortColumnMap[filters.sortBy]) {
         const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
@@ -81,7 +80,7 @@ const grnModel = {
       const dataQuery = `
         SELECT
           o."outboundId",
-          TO_CHAR(o."createdAt" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
+          TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
           o."grnNo",
           o."grnImage",
           o."grnPreviewImage",
@@ -190,7 +189,7 @@ const grnModel = {
             o."jobIdentifier" as "ourReference",
             o."driverName", o."driverIdentityNo", o."truckPlateNo",
             o."warehouseStaff", o."warehouseSupervisor",
-            o."releaseDate",
+           TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "releaseDate",
             o."uom",
             (SELECT ot."outboundType" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "outboundType",
             (SELECT STRING_AGG(DISTINCT ot.commodity, ', ') FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId") as commodities,
@@ -221,11 +220,11 @@ const grnModel = {
   async updateAndRegenerateGrn(outboundId, data) {
     const t = await db.sequelize.transaction();
     try {
-      const signatureQuery = `
-        SELECT "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature"
-        FROM public.outbounds WHERE "outboundId" = :outboundId;
-      `;
-      const signatures = await db.sequelize.query(signatureQuery, {
+      const oldDataQuery = `
+          SELECT "grnImage", "grnPreviewImage", "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature"
+          FROM public.outbounds WHERE "outboundId" = :outboundId;
+        `;
+      const oldData = await db.sequelize.query(oldDataQuery, {
         replacements: { outboundId },
         type: db.sequelize.QueryTypes.SELECT,
         plain: true,
@@ -233,12 +232,12 @@ const grnModel = {
       });
 
       const outboundUpdateQuery = `
-        UPDATE public.outbounds SET
-          "releaseDate" = :releaseDate,
-          "uom" = :uom,
-          "updatedAt" = NOW()
-        WHERE "outboundId" = :outboundId;
-      `;
+          UPDATE public.outbounds SET
+            "releaseDate" = :releaseDate,
+            "uom" = :uom,
+            "updatedAt" = NOW()
+          WHERE "outboundId" = :outboundId;
+        `;
       await db.sequelize.query(outboundUpdateQuery, {
         replacements: {
           releaseDate: data.releaseDate,
@@ -258,21 +257,21 @@ const grnModel = {
       });
 
       const transactionUpdateQuery = `
-        UPDATE public.outboundtransactions SET
-          "releaseWarehouse" = :releaseWarehouse,
-          "transportVendor" = :transportVendor,
-          "commodity" = :commodities,
-          "shape" = :shapes,
-          "brands" = :brands,
-          "containerNo" = :containerNo,
-          "sealNo" = :sealNo,
-          "releaseDate" = :releaseDate,
-          "deliveryDate" = :deliveryDate,
-          "exportDate" = :exportDate,
-          "stuffingDate" = :stuffingDate,
-          "updatedAt" = NOW()
-        WHERE "outboundId" = :outboundId;
-      `;
+          UPDATE public.outboundtransactions SET
+            "releaseWarehouse" = :releaseWarehouse,
+            "transportVendor" = :transportVendor,
+            "commodity" = :commodities,
+            "shape" = :shapes,
+            "brands" = :brands,
+            "containerNo" = :containerNo,
+            "sealNo" = :sealNo,
+            "releaseDate" = :releaseDate,
+            "deliveryDate" = :deliveryDate,
+            "exportDate" = :exportDate,
+            "stuffingDate" = :stuffingDate,
+            "updatedAt" = NOW()
+          WHERE "outboundId" = :outboundId;
+        `;
       await db.sequelize.query(transactionUpdateQuery, {
         replacements: { ...sanitizedData, outboundId },
         type: db.sequelize.QueryTypes.UPDATE,
@@ -281,29 +280,39 @@ const grnModel = {
 
       const pdfData = await this._gatherDataForPdfRegeneration(outboundId, t);
 
-      pdfData.driverSignature = signatures.driverSignature;
-      pdfData.warehouseStaffSignature = signatures.warehouseStaffSignature;
-      pdfData.warehouseSupervisorSignature =
-        signatures.warehouseSupervisorSignature;
+      if (oldData.driverSignature)
+        pdfData.driverSignature = oldData.driverSignature;
+      if (oldData.warehouseStaffSignature)
+        pdfData.warehouseStaffSignature = oldData.warehouseStaffSignature;
+      if (oldData.warehouseSupervisorSignature)
+        pdfData.warehouseSupervisorSignature =
+          oldData.warehouseSupervisorSignature;
       pdfData.isWeightVisible = true;
 
-      const oldFilesQuery = `SELECT "grnImage", "grnPreviewImage" FROM public.outbounds WHERE "outboundId" = :outboundId;`;
-      const oldFiles = await db.sequelize.query(oldFilesQuery, {
-        replacements: { outboundId },
-        type: db.sequelize.QueryTypes.SELECT,
-        plain: true,
-        transaction: t,
-      });
+      if (oldData && oldData.grnImage) {
+        const oldBaseName = path.basename(
+          oldData.grnImage,
+          path.extname(oldData.grnImage)
+        );
+        pdfData.fileName = oldBaseName.replace(/^GRN_/, "").replace(/_/g, "/");
+      } else {
+        const grnParts = pdfData.grnNo.split("-");
+        const sequence = grnParts.length > 1 ? grnParts.pop() : "1";
+        pdfData.fileName = `${pdfData.ourReference}/${sequence.padStart(
+          2,
+          "0"
+        )}`;
+      }
 
-      if (oldFiles) {
-        if (oldFiles.grnImage) {
+      if (oldData) {
+        if (oldData.grnImage) {
           await fs
-            .unlink(path.join(__dirname, "..", oldFiles.grnImage))
+            .unlink(path.join(__dirname, "..", oldData.grnImage))
             .catch((err) => console.error("Error deleting old PDF:", err));
         }
-        if (oldFiles.grnPreviewImage) {
+        if (oldData.grnPreviewImage) {
           await fs
-            .unlink(path.join(__dirname, "..", oldFiles.grnPreviewImage))
+            .unlink(path.join(__dirname, "..", oldData.grnPreviewImage))
             .catch((err) => console.error("Error deleting old preview:", err));
         }
       }
@@ -324,13 +333,13 @@ const grnModel = {
       );
 
       const fileUpdateQuery = `
-        UPDATE public.outbounds SET
-          "grnImage" = :grnImage,
-          "grnPreviewImage" = :grnPreviewImage,
-          "fileSize" = :fileSize,
-          "updatedAt" = NOW()
-        WHERE "outboundId" = :outboundId;
-      `;
+          UPDATE public.outbounds SET
+            "grnImage" = :grnImage,
+            "grnPreviewImage" = :grnPreviewImage,
+            "fileSize" = :fileSize,
+            "updatedAt" = NOW()
+          WHERE "outboundId" = :outboundId;
+        `;
       await db.sequelize.query(fileUpdateQuery, {
         replacements: {
           grnImage: relativePdfPath,
@@ -412,11 +421,11 @@ const grnModel = {
 
   async _gatherDataForPdfRegeneration(outboundId, transaction) {
     const outboundDetailsQuery = `
-      SELECT "grnNo", "jobIdentifier", "releaseDate", "driverName", 
-             "driverIdentityNo", "truckPlateNo", "warehouseStaff", "warehouseSupervisor", uom
-      FROM public.outbounds
-      WHERE "outboundId" = :outboundId;
-    `;
+        SELECT "grnNo", "jobIdentifier", "releaseDate", "driverName", 
+              "driverIdentityNo", "truckPlateNo", "warehouseStaff", "warehouseSupervisor", uom
+        FROM public.outbounds
+        WHERE "outboundId" = :outboundId;
+      `;
     const outboundDetails = await db.sequelize.query(outboundDetailsQuery, {
       replacements: { outboundId },
       type: db.sequelize.QueryTypes.SELECT,
@@ -425,12 +434,12 @@ const grnModel = {
     });
 
     const lotsQuery = `
-      SELECT 
-        "jobNo", "lotNo", "noOfBundle", "grossWeight", "netWeight", "actualWeight",
-        commodity, shape, brands, "transportVendor", "releaseWarehouse", "containerNo", "sealNo"
-      FROM public.outboundtransactions
-      WHERE "outboundId" = :outboundId;
-    `;
+        SELECT 
+          "jobNo", "lotNo", "noOfBundle", "grossWeight", "netWeight", "actualWeight",
+          commodity, shape, brands, "transportVendor", "releaseWarehouse", "containerNo", "sealNo"
+        FROM public.outboundtransactions
+        WHERE "outboundId" = :outboundId;
+      `;
     const lots = await db.sequelize.query(lotsQuery, {
       replacements: { outboundId },
       type: db.sequelize.QueryTypes.SELECT,
@@ -448,10 +457,6 @@ const grnModel = {
     return {
       ourReference: outboundDetails.jobIdentifier,
       grnNo: outboundDetails.grnNo,
-      fileName: `${outboundDetails.jobIdentifier}/${outboundDetails.grnNo
-        .split("-")
-        .pop()
-        .padStart(2, "0")}`,
       releaseDate: new Date(outboundDetails.releaseDate).toLocaleDateString(
         "en-GB",
         { day: "2-digit", month: "short", year: "numeric" }
