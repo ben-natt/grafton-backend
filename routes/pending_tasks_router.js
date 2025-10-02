@@ -29,18 +29,22 @@ router.get("/tasks-jobNo", async (req, res) => {
 
 router.post("/report-job-discrepancy", async (req, res) => {
   try {
-    const { jobNo, reportedBy, discrepancyType } = req.body; // Accept discrepancyType
+    const { jobNo, reportedBy, discrepancyType } = req.body;
+    // +++ CONSOLE LOG: What the router received +++
+    console.log(`[Router] POST /report-job-discrepancy received:`, { jobNo, reportedBy, discrepancyType });
+
     if (!jobNo || !reportedBy || !discrepancyType) {
       return res.status(400).json({ error: "jobNo, reportedBy, and discrepancyType are required." });
     }
 
-    // Validate the discrepancyType value
     if (!['lack', 'extra'].includes(discrepancyType)) {
       return res.status(400).json({ error: "Invalid discrepancyType. Must be 'lack' or 'extra'." });
     }
 
-    // Pass all required data to the model function
     const reportedCount = await pendingTasksModel.reportJobDiscrepancy(jobNo, reportedBy, discrepancyType);
+
+    // +++ CONSOLE LOG: What the model function returned +++
+    console.log(`[Router] Model reported ${reportedCount} lots. Sending response.`);
 
     if (reportedCount > 0) {
       res.status(200).json({
@@ -50,9 +54,11 @@ router.post("/report-job-discrepancy", async (req, res) => {
       res.status(404).json({ message: "No pending, unreported lots found for the specified job." });
     }
   } catch (error) {
-    console.error("Error reporting job discrepancy:", error);
+    // +++ CONSOLE LOG: Log any router-level errors +++
+    console.error("[Router] Error in /report-job-discrepancy:", error);
     res.status(500).json({ error: "Failed to report job discrepancy." });
-
+  }
+});
 router.post("/reverse-inbound/:inboundId", async (req, res) => {
   try {
     const { inboundId } = req.params;

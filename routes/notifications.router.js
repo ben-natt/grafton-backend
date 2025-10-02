@@ -2,30 +2,49 @@ const express = require("express");
 const {
   getReportsByStatus, 
   getReportsByLotId,
-  getDuplicateReportsByStatus
+  getDuplicateReportsByStatus,
+  getJobReportsByStatus // <-- IMPORT THE NEW FUNCTION
 } = require('../models/notifications.model');
 const router = express.Router();
 
 /**
  * @route GET /report/notifications/:status
- * @description Get discrepancy report notifications by status.
+ * @description Get discrepancy report notifications by status (both lot and job level).
  * @access Public
  */
 router.get('/notifications/:status', async (req, res) => {
   try {
     const { status } = req.params;
+    // +++ CONSOLE LOG: Track when the endpoint is hit +++
+    console.log(`[Router] GET /notifications/${status} hit.`);
     
     if (!['pending', 'accepted', 'declined'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status. Must be pending, accepted, or declined' });
     }
 
-    const reports = await getReportsByStatus(status);
+    // +++ MODIFICATION: Fetch both lot-level and job-level reports in parallel +++
+    const [lotReports, jobReports] = await Promise.all([
+      getReportsByStatus(status),
+      getJobReportsByStatus(status)
+    ]);
+
+    // +++ CONSOLE LOG: See how many of each were found +++
+    console.log(`[Router] Fetched ${lotReports.length} lot-level reports and ${jobReports.length} job-level reports.`);
+
+    const combinedReports = [...lotReports, ...jobReports];
+
+    // Sort combined list by timestamp DESC so newest appear first
+    combinedReports.sort((a, b) => new Date(b.reportedOn) - new Date(a.reportedOn));
+    
+    // +++ CONSOLE LOG: Confirm the total count being sent +++
+    console.log(`[Router] Responding with a total of ${combinedReports.length} discrepancy reports.`);
 
     res.status(200).json({
       message: `${status} reports retrieved successfully`,
-      reports,
+      reports: combinedReports, // <-- Send the combined array
     });
   } catch (error) {
+    // +++ CONSOLE LOG: Catch any errors during the process +++
     console.error('Error fetching notifications:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
