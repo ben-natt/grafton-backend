@@ -31,6 +31,7 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "exportDate",
     TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "deliveryDate",
     TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "stuffingDate",
+    TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "releaseDate",
     so."containerNo",
     so."sealNo",
     so."tareWeight",
@@ -241,10 +242,8 @@ const getGrnDetailsForSelection = async (
 
       const parsedDates = filteredDates
         .map((dateString) => {
-          // Fix the timezone format: +00 -> +00:00
-          const fixedDateString = dateString.replace(/\\+00$/, "+00:00");
-
-          const date = new Date(fixedDateString);
+          // FIX: Remove the faulty replace function. The date string from the database is a valid ISO string.
+          const date = new Date(dateString);
           return isNaN(date.getTime()) ? null : date;
         })
         .filter((date) => date !== null);
@@ -288,11 +287,11 @@ const getGrnDetailsForSelection = async (
     const firstLot = lots[0];
 
     const result = {
-      releaseDate: new Date().toISOString(), // Use ISO string for consistency
-      deliveryDate: firstLot.deliveryDate,
+      releaseDate: formatMultipleDates(lots, "scheduledReleaseDate"),
+      deliveryDate: formatMultipleDates(lots, "deliveryDate"),
       outboundType: firstLot.outboundType,
-      exportDate: firstLot.exportDate,
-      stuffingDate: firstLot.stuffingDate,
+      exportDate: formatMultipleDates(lots, "exportDate"),
+      stuffingDate: formatMultipleDates(lots, "stuffingDate"),
       containerNo: firstLot.containerNo,
       sealNo: firstLot.sealNo,
       ourReference: outboundJobNo,
@@ -547,7 +546,8 @@ const createGrnAndTransactions = async (formData) => {
           i."exWarehouseLot", i."exWarehouseWarrant",
           w."exLmeWarehouseName" AS "exLmeWarehouse",
           s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
-          so."releaseDate" as "scheduledReleaseDate", so."releaseWarehouse", si."storageReleaseLocation", so."transportVendor",
+          TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "scheduledReleaseDate", 
+          so."releaseWarehouse", si."storageReleaseLocation", so."transportVendor",
           so."outboundType", so."stuffingDate", so."containerNo", so."sealNo",
           so."lotReleaseWeight",
           so."userId" AS "scheduledBy",
@@ -580,7 +580,7 @@ const createGrnAndTransactions = async (formData) => {
             "deliveryDate"
         ) VALUES (
             :outboundId, :inboundId, :jobNo, :lotNo, :shape, :commodity, :brand,
-            :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, NOW(), :storageReleaseLocation,
+            :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, :scheduledReleaseDate, :storageReleaseLocation,
             :noOfBundle, :scheduleOutboundId, :releaseWarehouse, :lotReleaseWeight,
             :transportVendor, :outboundType, :exportDate, :stuffingDate, :containerNo, :sealNo,
             :driverName, :driverIdentityNo, :truckPlateNo, :warehouseStaff, :warehouseSupervisor,
