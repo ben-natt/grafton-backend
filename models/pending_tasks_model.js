@@ -26,9 +26,11 @@ const getPendingInboundTasks = async (
     ];
     const replacements = {};
 
+    // **MODIFICATION: Improve search to ignore special characters**
     if (exWarehouseLot) {
-      baseWhere.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
-      replacements.exWarehouseLot = `%${exWarehouseLot}%`;
+      const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
+      baseWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      replacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
 
     const baseWhereString = baseWhere.join(" AND ");
@@ -100,7 +102,25 @@ const getPendingInboundTasks = async (
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // fetch lot details for those jobs (keep your existing visibility filters)
+    // **MODIFICATION: Build a separate WHERE clause for lot-level filtering**
+    const detailsWhere = [
+      `l."jobNo" IN (:paginatedJobNos)`,
+      `l.status = 'Pending'`,
+      `l.report = false`,
+      `(l."reportDuplicate" = false OR l."isDuplicated" = true)`,
+    ];
+    const detailsReplacements = { paginatedJobNos };
+
+    // Apply the same flexible search logic for precise lot filtering
+    if (exWarehouseLot) {
+        const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
+        detailsWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+        detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
+    }
+    const detailsWhereString = detailsWhere.join(" AND ");
+
+
+    // fetch lot details for those jobs
     const detailsQuery = `
       SELECT
         l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
@@ -110,15 +130,12 @@ const getPendingInboundTasks = async (
       FROM public.lot l
       JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
       JOIN public.users u ON s."userId" = u.userid
-      WHERE l."jobNo" IN (:paginatedJobNos)
-        AND l.status = 'Pending'
-        AND l.report = false
-        AND (l."reportDuplicate" = false OR l."isDuplicated" = true)
+      WHERE ${detailsWhereString}
       ORDER BY l."inbounddate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
-      replacements: { paginatedJobNos },
+      replacements: detailsReplacements,
       type: db.sequelize.QueryTypes.SELECT,
     });
 
@@ -236,11 +253,17 @@ const getPendingOutboundTasks = async (
     const replacements = {};
 
     if (jobNo) {
-      baseWhere.push(
-        `(i."jobNo" ILIKE :jobNo OR COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))) ILIKE :jobNo)`
-      );
-      replacements.jobNo = `%${jobNo}%`;
+      const sanitizedSearchTerm = jobNo.replace(/[-/]/g, "");
+      const jobNoFilterClause = `
+        (
+          REPLACE(REPLACE(i."jobNo", '-', ''), '/', '') ILIKE :jobNo 
+          OR 
+          REPLACE(REPLACE(COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))), '-', ''), '/', '') ILIKE :jobNo
+        )`;
+      baseWhere.push(jobNoFilterClause);
+      replacements.jobNo = `%${sanitizedSearchTerm}%`;
     }
+    // **MODIFICATION END**
 
     const baseWhereString = baseWhere.join(" AND ");
 
@@ -318,6 +341,29 @@ const getPendingOutboundTasks = async (
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
+    // Build a separate WHERE clause for the details query to precisely filter lots.
+    const detailsWhere = [
+      `so."scheduleOutboundId" IN (:paginatedScheduleIds)`,
+      `si."isOutbounded" = false`,
+    ];
+    const detailsReplacements = { paginatedScheduleIds };
+
+    // **MODIFICATION START**
+    // Apply the same improved search logic to the details query.
+    if (jobNo) {
+      const sanitizedSearchTerm = jobNo.replace(/[-/]/g, "");
+      const jobNoFilterClause = `
+        (
+          REPLACE(REPLACE(i."jobNo", '-', ''), '/', '') ILIKE :jobNo 
+          OR 
+          REPLACE(REPLACE(COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))), '-', ''), '/', '') ILIKE :jobNo
+        )`;
+      detailsWhere.push(jobNoFilterClause);
+      detailsReplacements.jobNo = `%${sanitizedSearchTerm}%`;
+    }
+    // **MODIFICATION END**
+    const detailsWhereString = detailsWhere.join(" AND ");
+
     // Fetch details for the paginated schedule IDs
     const detailsQuery = `
       SELECT
@@ -347,13 +393,12 @@ const getPendingOutboundTasks = async (
       LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
       LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
       LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
-      WHERE so."scheduleOutboundId" IN (:paginatedScheduleIds) 
-        AND si."isOutbounded" = false
+      WHERE ${detailsWhereString} -- Use the new, more precise WHERE clause
       ORDER BY si."releaseDate" ASC, i."jobNo" ASC, i."lotNo" ASC;
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
-      replacements: { paginatedScheduleIds },
+      replacements: detailsReplacements, // Use the new replacements object
       type: db.sequelize.QueryTypes.SELECT,
     });
 

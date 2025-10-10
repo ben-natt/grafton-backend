@@ -196,4 +196,5 @@ router.get("/inventory1", async (req, res) => {
 });
 
 router.get("/export", stockController.exportStocksToExcel);
+router.get("/export/bundle-sheet", stockController.exportBundleSheetToExcel);
 module.exports = router;
