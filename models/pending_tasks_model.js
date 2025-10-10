@@ -512,7 +512,9 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
 const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
   const transaction = await db.sequelize.transaction();
   try {
-    // Check if there are any lots to report
+    // +++ CONSOLE LOG: Track the start of the DB operation +++
+    console.log(`[Model] Starting transaction to report job discrepancy for jobNo: ${jobNo}`);
+    
     const lotsToUpdate = await db.sequelize.query(
       `SELECT "lotId" FROM public.lot 
        WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
@@ -524,11 +526,14 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
     );
 
     if (lotsToUpdate.length === 0) {
+      // +++ CONSOLE LOG: Track if no lots were found +++
+      console.log(`[Model] No lots found to report for jobNo: ${jobNo}. Rolling back.`);
       await transaction.rollback();
-      return 0; // No lots were found to update
+      return 0;
     }
 
-    // Create the report entry
+    // +++ CONSOLE LOG: Confirm insertion into the correct table +++
+    console.log(`[Model] Inserting into job_reports table for jobNo: ${jobNo}`);
     await db.sequelize.query(
       `INSERT INTO public.job_reports ("jobNo", "reportedById", "discrepancyType") 
        VALUES (:jobNo, :reportedById, :discrepancyType)`,
@@ -543,7 +548,8 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
       }
     );
 
-    // Mark all associated lots as reported
+    // +++ CONSOLE LOG: Confirm update of the 'lot' table +++
+    console.log(`[Model] Updating 'report' flag for ${lotsToUpdate.length} lots.`);
     const [updateResult, updateCount] = await db.sequelize.query(
       `UPDATE public.lot SET report = true 
        WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
@@ -554,11 +560,16 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
       }
     );
 
+    // +++ CONSOLE LOG: Track successful commit +++
+    console.log(`[Model] Committing transaction. Updated ${updateCount} lots.`);
     await transaction.commit();
-    return updateCount; // Return the number of lots that were updated
+    return updateCount;
   } catch (error) {
     await transaction.rollback();
-    console.error("Error reporting job discrepancy:", error);
+    // +++ CONSOLE LOG: Track any errors and rollback +++
+    console.error("[Model] Error in reportJobDiscrepancy, rolling back:", error);
+    throw error;
+
   }
 };
 
