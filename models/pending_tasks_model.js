@@ -29,7 +29,9 @@ const getPendingInboundTasks = async (
     // **MODIFICATION: Improve search to ignore special characters**
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
-      baseWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      baseWhere.push(
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+      );
       replacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
 
@@ -109,16 +111,16 @@ const getPendingInboundTasks = async (
       `l.report = false`,
       `(l."reportDuplicate" = false OR l."isDuplicated" = true)`,
     ];
-    const detailsReplacements = { paginatedJobNos };
 
     // Apply the same flexible search logic for precise lot filtering
     if (exWarehouseLot) {
-        const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
-        detailsWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
-        detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
+      const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
+      detailsWhere.push(
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+      );
+      detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
     const detailsWhereString = detailsWhere.join(" AND ");
-
 
     // fetch lot details for those jobs
     const detailsQuery = `
@@ -518,8 +520,10 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
   const transaction = await db.sequelize.transaction();
   try {
     // +++ CONSOLE LOG: Track the start of the DB operation +++
-    console.log(`[Model] Starting transaction to report job discrepancy for jobNo: ${jobNo}`);
-    
+    console.log(
+      `[Model] Starting transaction to report job discrepancy for jobNo: ${jobNo}`
+    );
+
     const lotsToUpdate = await db.sequelize.query(
       `SELECT "lotId" FROM public.lot 
        WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
@@ -532,7 +536,9 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
 
     if (lotsToUpdate.length === 0) {
       // +++ CONSOLE LOG: Track if no lots were found +++
-      console.log(`[Model] No lots found to report for jobNo: ${jobNo}. Rolling back.`);
+      console.log(
+        `[Model] No lots found to report for jobNo: ${jobNo}. Rolling back.`
+      );
       await transaction.rollback();
       return 0;
     }
@@ -554,7 +560,9 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
     );
 
     // +++ CONSOLE LOG: Confirm update of the 'lot' table +++
-    console.log(`[Model] Updating 'report' flag for ${lotsToUpdate.length} lots.`);
+    console.log(
+      `[Model] Updating 'report' flag for ${lotsToUpdate.length} lots.`
+    );
     const [updateResult, updateCount] = await db.sequelize.query(
       `UPDATE public.lot SET report = true 
        WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
@@ -572,9 +580,11 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
   } catch (error) {
     await transaction.rollback();
     // +++ CONSOLE LOG: Track any errors and rollback +++
-    console.error("[Model] Error in reportJobDiscrepancy, rolling back:", error);
+    console.error(
+      "[Model] Error in reportJobDiscrepancy, rolling back:",
+      error
+    );
     throw error;
-
   }
 };
 
