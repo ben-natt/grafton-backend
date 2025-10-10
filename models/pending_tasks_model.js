@@ -100,6 +100,10 @@ const getPendingInboundTasks = async (
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
+    const lotFilterClause = exWarehouseLot
+      ? `AND l."exWarehouseLot" ILIKE :exWarehouseLot`
+      : "";
+
     // fetch lot details for those jobs (keep your existing visibility filters)
     const detailsQuery = `
       SELECT
@@ -114,11 +118,17 @@ const getPendingInboundTasks = async (
         AND l.status = 'Pending'
         AND l.report = false
         AND (l."reportDuplicate" = false OR l."isDuplicated" = true)
+        ${lotFilterClause}
       ORDER BY l."inbounddate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
+    const detailsReplacements = { paginatedJobNos };
+    if (exWarehouseLot) {
+      detailsReplacements.exWarehouseLot = `%${exWarehouseLot}%`;
+    }
+
     const detailsForPage = await db.sequelize.query(detailsQuery, {
-      replacements: { paginatedJobNos },
+      replacements: detailsReplacements,
       type: db.sequelize.QueryTypes.SELECT,
     });
 
