@@ -208,11 +208,11 @@ const findOutboundTasksOffice = async (
 ) => {
   try {
     const offset = (page - 1) * pageSize;
-    let whereClauses = 'si."isOutbounded" = false';
+    let whereClauses = `si."isOutbounded" = false`;
     const replacements = {};
 
     if (filters.startDate && filters.endDate) {
-      // Changed to use releaseDate from selectedinbounds table
+
       whereClauses += ` AND (si."releaseDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`;
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
@@ -258,7 +258,7 @@ const findOutboundTasksOffice = async (
       LEFT JOIN public.brands b ON i."brandId" = b."brandId"
     `;
 
-    const countQuery = `SELECT COUNT(DISTINCT so."scheduleOutboundId")::int ${baseQuery} WHERE ${whereClauses};`
+    const countQuery = `SELECT COUNT(DISTINCT so."scheduleOutboundId")::int ${baseQuery} WHERE ${whereClauses}`;
     const countResult = await db.sequelize.query(countQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
@@ -285,22 +285,22 @@ const findOutboundTasksOffice = async (
     }
 
     const tasksQuery = `
-SELECT
-  so."scheduleOutboundId",
-  si."selectedInboundId",
-  i."jobNo",
-  i."lotNo"::text AS "lotNo",
-  sh."shapeName" AS shape,
-  i."noOfBundle" AS "expectedBundleCount",
-  b."brandName" AS brand,
-  c."commodityName" AS commodity,
-  i."exWarehouseLot" AS "exWLot",
-  u.username AS "scheduledBy",
-  TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "releaseDate",
-  TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "releaseEndDate",
-  TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "exportDate",
-  TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "deliveryDate",
-  so."outboundType"
+      SELECT
+        so."outboundJobNo",
+        si."selectedInboundId",
+        i."jobNo",
+        i."lotNo"::text AS "lotNo",
+        sh."shapeName" AS shape,
+        i."noOfBundle" AS "expectedBundleCount",
+        b."brandName" AS brand,
+        c."commodityName" AS commodity,
+        i."exWarehouseLot" AS "exWLot",
+        u.username AS "scheduledBy",
+        TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "releaseDate",
+        TO_CHAR(si."releaseEndDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "releaseEndDate",
+        TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "exportDate",
+        TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "deliveryDate",
+        so."outboundType"
 
       ${baseQuery}
       WHERE so."scheduleOutboundId" IN (:scheduleIds) AND ${whereClauses}
@@ -313,7 +313,7 @@ SELECT
 
     const tasksMap = {};
     for (const task of tasksResult) {
-      const scheduleId = task.scheduleOutboundId.toString();
+      const scheduleId = task.outboundJobNo;
       if (!tasksMap[scheduleId]) {
         tasksMap[scheduleId] = [];
       }

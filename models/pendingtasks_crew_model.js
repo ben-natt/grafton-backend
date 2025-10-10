@@ -196,7 +196,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
         GROUP BY ib."inboundId"
       ) bundle_stats ON bundle_stats."inboundId" = i."inboundId"
       WHERE ${detailsWhereString} 
-      ORDER BY i."crewLotNo", l."jobNo";
+      ORDER BY l."exWarehouseLot";
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {

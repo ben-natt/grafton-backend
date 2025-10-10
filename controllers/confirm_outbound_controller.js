@@ -96,6 +96,41 @@ const getGrnDetails = async (req, res) => {
   }
 };
 
+const updateOutboundDetails = async (req, res) => {
+  try {
+    const { scheduleOutboundId } = req.params;
+    const {
+      selectedInboundId,
+      releaseDate,
+      containerNo,
+      sealNo,
+      tareWeight,
+      uom,
+    } = req.body;
+
+    if (!selectedInboundId) {
+      return res.status(400).json({ error: "selectedInboundId is required." });
+    }
+
+    await outboundModel.updateOutboundDetails(
+      parseInt(scheduleOutboundId),
+      selectedInboundId,
+      {
+        releaseDate,
+        containerNo,
+        sealNo,
+        tareWeight,
+        uom,
+      }
+    );
+
+    res.status(200).json({ message: "Outbound details updated successfully." });
+  } catch (error) {
+    console.error("Error updating outbound details:", error);
+    res.status(500).json({ error: "Failed to update outbound details." });
+  }
+};
+
 const getUserSignature = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -124,6 +159,8 @@ const createGrnAndTransactions = async (req, res) => {
     const {
       stuffingPhotos,
       userId,
+      driverSignature,
+      warehouseStaffSignature,
       warehouseSupervisorSignature,
       scheduleOutboundId,
     } = grnDataFromRequest;
@@ -157,6 +194,26 @@ const createGrnAndTransactions = async (req, res) => {
         );
         await outboundModel.updateUserSignature(userId, signatureBuffer);
       }
+    }
+
+    // Convert all signatures from base64 to Buffer before passing to the model
+    if (driverSignature) {
+      grnDataFromRequest.driverSignature = Buffer.from(
+        driverSignature,
+        "base64"
+      );
+    }
+    if (warehouseStaffSignature) {
+      grnDataFromRequest.warehouseStaffSignature = Buffer.from(
+        warehouseStaffSignature,
+        "base64"
+      );
+    }
+    if (warehouseSupervisorSignature) {
+      grnDataFromRequest.warehouseSupervisorSignature = Buffer.from(
+        warehouseSupervisorSignature,
+        "base64"
+      );
     }
 
     // --- Image Handling Logic --- (rest of the function continues as before)
@@ -211,12 +268,15 @@ const createGrnAndTransactions = async (req, res) => {
       return !isNaN(num) ? num.toFixed(decimals) : (0).toFixed(decimals);
     };
 
+    // FIX: Use the releaseDate from the request for the PDF, don't use new Date().
+    const releaseDateForPdf = new Date(grnDataFromRequest.releaseDate);
+
     const pdfData = {
       ...grnDataFromRequest,
       isWeightVisible: grnDataFromRequest.isWeightVisible,
       ourReference: grnDataFromRequest.outboundJobNo,
       grnNo: createdOutbound.grnNo,
-      releaseDate: new Date().toLocaleDateString("en-GB", {
+      releaseDate: releaseDateForPdf.toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "short",
         year: "numeric",
@@ -305,6 +365,16 @@ const createGrnAndTransactions = async (req, res) => {
   }
 };
 
+module.exports = {
+  getConfirmationDetails,
+  getStuffingPhotos,
+  confirmOutbound,
+  updateOutboundDetails,
+  getGrnDetails,
+  getUserSignature,
+  createGrnAndTransactions,
+};
+
 // const getOperators = async (req, res) => {
 //   try {
 //     const users = await outboundModel.getOperators();
@@ -316,13 +386,3 @@ const createGrnAndTransactions = async (req, res) => {
 //     res.status(500).json({ error: "Failed to fetch operators." });
 //   }
 // };
-
-module.exports = {
-  getConfirmationDetails,
-  getStuffingPhotos,
-  confirmOutbound,
-  getGrnDetails,
-  getUserSignature,
-  createGrnAndTransactions,
-  // getOperators,
-};

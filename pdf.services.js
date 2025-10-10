@@ -48,34 +48,82 @@ async function generateGrnPdf(data) {
     };
 
     const embedSignature = async (
-      base64,
+      signatureData,
       x,
       y,
       width,
       height,
       signatureName
     ) => {
-      if (!base64 || typeof base64 !== "string" || base64.trim() === "") {
+      if (!signatureData) {
         return;
       }
 
       try {
-        const pngImage = await pdfDoc.embedPng(Buffer.from(base64, "base64"));
+        let signatureBuffer;
+        // Check if the data is a string (base64) or a buffer
+        if (typeof signatureData === "string") {
+          signatureBuffer = Buffer.from(signatureData, "base64");
+        } else if (Buffer.isBuffer(signatureData)) {
+          // It's a buffer. It might be a valid PNG, or it might be a buffer of a base64 string.
+          // A simple check: if it doesn't start with the PNG header, assume it's a base64 string buffer.
+          const isPng =
+            signatureData.length > 8 &&
+            signatureData.toString("hex", 0, 8) === "89504e470d0a1a0a";
+          if (isPng) {
+            signatureBuffer = signatureData;
+          } else {
+            // It's likely a buffer containing a UTF-8 encoded base64 string.
+            // Convert buffer to string, then decode from base64.
+            signatureBuffer = Buffer.from(
+              signatureData.toString("utf-8"),
+              "base64"
+            );
+          }
+        } else {
+          // Not a string or buffer, let it fail below to catch unexpected types
+          signatureBuffer = signatureData;
+        }
+        const pngImage = await pdfDoc.embedPng(signatureBuffer);
         page.drawImage(pngImage, { x, y, width, height });
       } catch (e) {
+        console.error(`Error embedding ${signatureName} signature:`, e);
         throw new Error(`Failed to embed Signature`);
       }
     };
 
     drawText(data.ourReference, 115, 526, boldFont);
     drawText(data.grnNo, 300, 527, boldFont);
-    drawText(formatDate(data.releaseDate), 300, 509, boldFont);
+    drawText(data.releaseDate, 300, 509, boldFont);
     drawText(data.warehouse, 300, 492, boldFont);
     drawText(data.transportVendor, 224, 450, boldFont);
     drawText(data.cargoDetails.commodity, 80, 421, boldFont);
     drawText(data.cargoDetails.shape, 198, 421, boldFont);
     drawText(data.cargoDetails.brand, 300, 421, boldFont);
     drawText(data.containerAndSealNo, 300, 465, boldFont);
+
+    if (data.containerAndSealNo && data.containerAndSealNo == "N/A") {
+      // drawText("√", 117, 465, boldFont, 10);
+      // A manual tick mark
+      const tickX = 117;
+      const tickY = 456;
+      const tickColor = rgb(0, 0, 0);
+      const tickThickness = 1.5; // Adjust for a thicker line like bold text
+
+      // The two lines that form the tick
+      page.drawLine({
+        start: { x: tickX, y: tickY },
+        end: { x: tickX + 4, y: tickY - 5 }, // Short part of the tick
+        color: tickColor,
+        thickness: tickThickness,
+      });
+      page.drawLine({
+        start: { x: tickX + 4, y: tickY - 5 },
+        end: { x: tickX + 10, y: tickY + 3 }, // Long part of the tick
+        color: tickColor,
+        thickness: tickThickness,
+      });
+    }
 
     if (data.containerAndSealNo && data.containerAndSealNo !== "N/A") {
       // drawText("√", 117, 465, boldFont, 10);
