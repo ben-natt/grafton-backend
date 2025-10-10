@@ -141,22 +141,24 @@ const grnModel = {
 
   async getFilterOptions() {
     try {
+      // This query now correctly extracts the unique job number (the prefix)
+      // from the "grnNo" column to be used in the dropdown filter.
       const query = `
-        SELECT DISTINCT
-          o."grnNo"
+        SELECT DISTINCT split_part(o."grnNo", '/', 1) as "jobNo"
         FROM public.outbounds o
         INNER JOIN public.outboundtransactions ot ON o."outboundId" = ot."outboundId"
         WHERE o."grnNo" IS NOT NULL AND o."grnNo" LIKE '%/%'
-        ORDER BY o."grnNo" ASC;
+        ORDER BY "jobNo" ASC;
       `;
 
       const results = await db.sequelize.query(query, {
         type: db.sequelize.QueryTypes.SELECT,
       });
 
-      const allGrnNos = results.map((item) => item.grnNo);
+      const jobNos = results.map((item) => item.jobNo);
 
-      return { grnNos: allGrnNos };
+      // Return the list of job numbers.
+      return { jobNos: jobNos };
     } catch (error) {
       console.error("MODEL ERROR in getFilterOptions:", error);
       throw error;
