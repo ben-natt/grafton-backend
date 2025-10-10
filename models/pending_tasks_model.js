@@ -26,9 +26,11 @@ const getPendingInboundTasks = async (
     ];
     const replacements = {};
 
+    // **MODIFICATION: Improve search to ignore special characters**
     if (exWarehouseLot) {
-      baseWhere.push(`l."exWarehouseLot" ILIKE :exWarehouseLot`);
-      replacements.exWarehouseLot = `%${exWarehouseLot}%`;
+      const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
+      baseWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      replacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
 
     const baseWhereString = baseWhere.join(" AND ");
@@ -100,11 +102,25 @@ const getPendingInboundTasks = async (
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    const lotFilterClause = exWarehouseLot
-      ? `AND l."exWarehouseLot" ILIKE :exWarehouseLot`
-      : "";
+    // **MODIFICATION: Build a separate WHERE clause for lot-level filtering**
+    const detailsWhere = [
+      `l."jobNo" IN (:paginatedJobNos)`,
+      `l.status = 'Pending'`,
+      `l.report = false`,
+      `(l."reportDuplicate" = false OR l."isDuplicated" = true)`,
+    ];
+    const detailsReplacements = { paginatedJobNos };
 
-    // fetch lot details for those jobs (keep your existing visibility filters)
+    // Apply the same flexible search logic for precise lot filtering
+    if (exWarehouseLot) {
+        const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
+        detailsWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+        detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
+    }
+    const detailsWhereString = detailsWhere.join(" AND ");
+
+
+    // fetch lot details for those jobs
     const detailsQuery = `
       SELECT
         l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
@@ -114,11 +130,7 @@ const getPendingInboundTasks = async (
       FROM public.lot l
       JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
       JOIN public.users u ON s."userId" = u.userid
-      WHERE l."jobNo" IN (:paginatedJobNos)
-        AND l.status = 'Pending'
-        AND l.report = false
-        AND (l."reportDuplicate" = false OR l."isDuplicated" = true)
-        ${lotFilterClause}
+      WHERE ${detailsWhereString}
       ORDER BY l."inbounddate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
 
@@ -246,11 +258,17 @@ const getPendingOutboundTasks = async (
     const replacements = {};
 
     if (jobNo) {
-      baseWhere.push(
-        `(i."jobNo" ILIKE :jobNo OR COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))) ILIKE :jobNo)`
-      );
-      replacements.jobNo = `%${jobNo}%`;
+      const sanitizedSearchTerm = jobNo.replace(/[-/]/g, "");
+      const jobNoFilterClause = `
+        (
+          REPLACE(REPLACE(i."jobNo", '-', ''), '/', '') ILIKE :jobNo 
+          OR 
+          REPLACE(REPLACE(COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))), '-', ''), '/', '') ILIKE :jobNo
+        )`;
+      baseWhere.push(jobNoFilterClause);
+      replacements.jobNo = `%${sanitizedSearchTerm}%`;
     }
+    // **MODIFICATION END**
 
     const baseWhereString = baseWhere.join(" AND ");
 
@@ -328,6 +346,29 @@ const getPendingOutboundTasks = async (
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
+    // Build a separate WHERE clause for the details query to precisely filter lots.
+    const detailsWhere = [
+      `so."scheduleOutboundId" IN (:paginatedScheduleIds)`,
+      `si."isOutbounded" = false`,
+    ];
+    const detailsReplacements = { paginatedScheduleIds };
+
+    // **MODIFICATION START**
+    // Apply the same improved search logic to the details query.
+    if (jobNo) {
+      const sanitizedSearchTerm = jobNo.replace(/[-/]/g, "");
+      const jobNoFilterClause = `
+        (
+          REPLACE(REPLACE(i."jobNo", '-', ''), '/', '') ILIKE :jobNo 
+          OR 
+          REPLACE(REPLACE(COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))), '-', ''), '/', '') ILIKE :jobNo
+        )`;
+      detailsWhere.push(jobNoFilterClause);
+      detailsReplacements.jobNo = `%${sanitizedSearchTerm}%`;
+    }
+    // **MODIFICATION END**
+    const detailsWhereString = detailsWhere.join(" AND ");
+
     // Fetch details for the paginated schedule IDs
     const detailsQuery = `
       SELECT
@@ -357,13 +398,12 @@ const getPendingOutboundTasks = async (
       LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
       LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
       LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
-      WHERE so."scheduleOutboundId" IN (:paginatedScheduleIds) 
-        AND si."isOutbounded" = false
+      WHERE ${detailsWhereString} -- Use the new, more precise WHERE clause
       ORDER BY si."releaseDate" ASC, i."jobNo" ASC, i."lotNo" ASC;
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
-      replacements: { paginatedScheduleIds },
+      replacements: detailsReplacements, // Use the new replacements object
       type: db.sequelize.QueryTypes.SELECT,
     });
 
@@ -477,7 +517,9 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
 const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
   const transaction = await db.sequelize.transaction();
   try {
-    // Check if there are any lots to report
+    // +++ CONSOLE LOG: Track the start of the DB operation +++
+    console.log(`[Model] Starting transaction to report job discrepancy for jobNo: ${jobNo}`);
+    
     const lotsToUpdate = await db.sequelize.query(
       `SELECT "lotId" FROM public.lot 
        WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
@@ -489,11 +531,14 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
     );
 
     if (lotsToUpdate.length === 0) {
+      // +++ CONSOLE LOG: Track if no lots were found +++
+      console.log(`[Model] No lots found to report for jobNo: ${jobNo}. Rolling back.`);
       await transaction.rollback();
-      return 0; // No lots were found to update
+      return 0;
     }
 
-    // Create the report entry
+    // +++ CONSOLE LOG: Confirm insertion into the correct table +++
+    console.log(`[Model] Inserting into job_reports table for jobNo: ${jobNo}`);
     await db.sequelize.query(
       `INSERT INTO public.job_reports ("jobNo", "reportedById", "discrepancyType") 
        VALUES (:jobNo, :reportedById, :discrepancyType)`,
@@ -508,7 +553,8 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
       }
     );
 
-    // Mark all associated lots as reported
+    // +++ CONSOLE LOG: Confirm update of the 'lot' table +++
+    console.log(`[Model] Updating 'report' flag for ${lotsToUpdate.length} lots.`);
     const [updateResult, updateCount] = await db.sequelize.query(
       `UPDATE public.lot SET report = true 
        WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
@@ -519,11 +565,16 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
       }
     );
 
+    // +++ CONSOLE LOG: Track successful commit +++
+    console.log(`[Model] Committing transaction. Updated ${updateCount} lots.`);
     await transaction.commit();
-    return updateCount; // Return the number of lots that were updated
+    return updateCount;
   } catch (error) {
     await transaction.rollback();
-    console.error("Error reporting job discrepancy:", error);
+    // +++ CONSOLE LOG: Track any errors and rollback +++
+    console.error("[Model] Error in reportJobDiscrepancy, rolling back:", error);
+    throw error;
+
   }
 };
 
