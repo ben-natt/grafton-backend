@@ -371,32 +371,51 @@ const getLotDetails = async (filters) => {
       replacements.exWarehouseLot = `%${filters.exWarehouseLot}%`;
     }
     if (filters.search) {
-      whereClauses.push(`(
-                i."jobNo" ILIKE :search OR
-                i."exWarehouseLot" ILIKE :search OR
-                c."commodityName" ILIKE :search OR
-                b."brandName" ILIKE :search OR
-                s."shapeName" ILIKE :search OR
-                CAST(i."lotNo" AS TEXT) ILIKE :search OR
-                CAST(i."netWeight" AS TEXT) ILIKE :search OR
-                CAST(i."noOfBundle" AS TEXT) ILIKE :search OR
-                CAST(i."grossWeight" AS TEXT) ILIKE :search OR
-                CAST(i."actualWeight" AS TEXT) ILIKE :search OR
-                elme."exLmeWarehouseName" ILIKE :search OR
-                exwhl."exWarehouseLocationName" ILIKE :search OR
-                i."exWarehouseWarrant" ILIKE :search OR
-                iw."inboundWarehouseName" ILIKE :search OR
-                u1."username" ILIKE :search OR
-                u2."username" ILIKE :search
-            )`);
-      replacements.search = `%${filters.search}%`;
+      const comboMatch = filters.search.match(/^(.*?)[\s_-]+(\d+)$/i);
+
+      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== '') {
+        const [_, jobNoPart, lotNoPart] = comboMatch;
+        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, '');
+
+        replacements.jobNoSearch = `%${normalizedJobNo}%`;
+        replacements.lotNoSearch = lotNoPart;
+
+        whereClauses.push(`(
+            REGEXP_REPLACE(i."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :jobNoSearch
+            AND CAST(i."lotNo" AS TEXT) = :lotNoSearch
+        )`);
+
+      } else {
+        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, '');
+        replacements.normalizedSearch = `%${normalizedSearch}%`;
+        replacements.search = `%${filters.search}%`;
+
+        whereClauses.push(`(
+          i."jobNo" ILIKE :search OR
+          REGEXP_REPLACE(i."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :normalizedSearch OR
+          i."exWarehouseLot" ILIKE :search OR
+          c."commodityName" ILIKE :search OR
+          b."brandName" ILIKE :search OR
+          s."shapeName" ILIKE :search OR
+          CAST(i."lotNo" AS TEXT) ILIKE :search OR
+          CAST(i."netWeight" AS TEXT) ILIKE :search OR
+          CAST(i."noOfBundle" AS TEXT) ILIKE :search OR
+          CAST(i."grossWeight" AS TEXT) ILIKE :search OR
+          CAST(i."actualWeight" AS TEXT) ILIKE :search OR
+          elme."exLmeWarehouseName" ILIKE :search OR
+          exwhl."exWarehouseLocationName" ILIKE :search OR
+          i."exWarehouseWarrant" ILIKE :search OR
+          iw."inboundWarehouseName" ILIKE :search OR
+          u1."username" ILIKE :search OR
+          u2."username" ILIKE :search
+        )`);
+      }
     }
 
     const whereString = " WHERE " + whereClauses.join(" AND ");
 
-    // --- START: Sorting Logic for getLotDetails ---
     const sortableColumns = {
-      "Lot No": 'i."jobNo" ASC, i."lotNo"',
+      "LotNo": 'i."jobNo" ASC, i."lotNo"',
       "Ex-Whse Lot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
@@ -404,36 +423,32 @@ const getLotDetails = async (filters) => {
       Bundles: 'i."noOfBundle"',
       Weight: '"Weight"',
     };
-    let orderByClause = 'ORDER BY i."inboundId" ASC'; // Default sort
+    let orderByClause = 'ORDER BY i."inboundId" ASC';
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortOrder = filters.sortOrder === "desc" ? "DESC" : "ASC";
       if (filters.sortBy === "Lot No") {
         orderByClause = `ORDER BY i."jobNo" ${sortOrder}, i."lotNo" ${sortOrder}`;
       } else {
-        orderByClause = `ORDER BY ${
-          sortableColumns[filters.sortBy]
-        } ${sortOrder}`;
+        orderByClause = `ORDER BY ${sortableColumns[filters.sortBy]} ${sortOrder}`;
       }
     }
 
     const baseQuery = `
-            FROM public.inbounds i
-            LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
-            LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
-            JOIN public.commodities c ON i."commodityId" = c."commodityId"
-            JOIN public.shapes s ON i."shapeId" = s."shapeId"
-            LEFT JOIN public.brands b ON i."brandId" = b."brandId"
-            LEFT JOIN public.exlmewarehouses elme ON elme."exLmeWarehouseId" = i."exLmeWarehouseId"
-            LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
-            LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
-            LEFT JOIN public.users u1 ON u1.userid = i."userId"
-            LEFT JOIN public.users u2 ON u2.userid = i."processedId"
-            ${whereString}
-        `;
+      FROM public.inbounds i
+      LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
+      LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
+      JOIN public.commodities c ON i."commodityId" = c."commodityId"
+      JOIN public.shapes s ON i."shapeId" = s."shapeId"
+      LEFT JOIN public.brands b ON i."brandId" = b."brandId"
+      LEFT JOIN public.exlmewarehouses elme ON elme."exLmeWarehouseId" = i."exLmeWarehouseId"
+      LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
+      LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
+      LEFT JOIN public.users u1 ON u1.userid = i."userId"
+      LEFT JOIN public.users u2 ON u2.userid = i."processedId"
+      ${whereString}
+    `;
 
-    const countQuery = `SELECT COUNT(i."inboundId")::int AS "totalItems" ${
-      baseQuery.split("GROUP BY")[0]
-    }`;
+    const countQuery = `SELECT COUNT(DISTINCT i."inboundId")::int AS "totalItems" ${baseQuery}`;
 
     const countResult = await db.sequelize.query(countQuery, {
       type: db.sequelize.QueryTypes.SELECT,
@@ -447,24 +462,25 @@ const getLotDetails = async (filters) => {
     replacements.pageSize = pageSize;
     replacements.offset = offset;
 
-    let dataQuery = `
-            SELECT
-                i."inboundId" as id, i."jobNo" AS "JobNo", i."lotNo" AS "LotNo",
-                i."exWarehouseLot" AS "Ex-WarehouseLot", elme."exLmeWarehouseName" AS "ExLMEWarehouse",
-                c."commodityName" AS "Metal", b."brandName" AS "Brand", s."shapeName" AS "Shape",
-                i."noOfBundle" AS "Qty", SUM(CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END) AS "Weight",
-                i."grossWeight" AS "GrossWeight", i."actualWeight" AS "ActualWeight",
-                exwhl."exWarehouseLocationName" AS "ExWarehouseLocation", iw."inboundWarehouseName" AS "InboundWarehouse",
-                i."exWarehouseWarrant" AS "ExWarehouseWarrant", u1."username" AS "ScheduledBy", u2."username" AS "ProcessedBy"
-            ${baseQuery}
-            GROUP BY
-                i."inboundId", i."jobNo", i."lotNo", i."exWarehouseLot", elme."exLmeWarehouseName",
-                c."commodityName", b."brandName", s."shapeName", i."noOfBundle", i."grossWeight",
-                i."actualWeight", exwhl."exWarehouseLocationName", iw."inboundWarehouseName",
-                i."exWarehouseWarrant", u1."username", u2."username"
-            ${orderByClause}
-            LIMIT :pageSize OFFSET :offset;
-        `;
+    const dataQuery = `
+      SELECT
+        i."inboundId" as id, i."jobNo" AS "JobNo", i."lotNo" AS "LotNo",
+        i."exWarehouseLot" AS "Ex-WarehouseLot", elme."exLmeWarehouseName" AS "ExLMEWarehouse",
+        c."commodityName" AS "Metal", b."brandName" AS "Brand", s."shapeName" AS "Shape",
+        i."noOfBundle" AS "Qty", 
+        CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END AS "Weight",
+        i."grossWeight" AS "GrossWeight", i."actualWeight" AS "ActualWeight",
+        exwhl."exWarehouseLocationName" AS "ExWarehouseLocation",
+        iw."inboundWarehouseName" AS "InboundWarehouse",
+        i."exWarehouseWarrant" AS "ExWarehouseWarrant",
+        u1."username" AS "ScheduledBy", u2."username" AS "ProcessedBy"
+      ${baseQuery}
+      GROUP BY
+        i."inboundId", elme."exLmeWarehouseName", c."commodityName", b."brandName", s."shapeName",
+        exwhl."exWarehouseLocationName", iw."inboundWarehouseName", u1."username", u2."username"
+      ${orderByClause}
+      LIMIT :pageSize OFFSET :offset;
+    `;
 
     const items = await db.sequelize.query(dataQuery, {
       type: db.sequelize.QueryTypes.SELECT,
@@ -995,9 +1011,10 @@ const getAllLotsForExport = async () => {
  * @description Retrieves all bundle details for a specific lot for the individual bundle sheet export.
  * @param {string} jobNo - The job number of the lot.
  * @param {number} lotNo - The lot number.
+ * @param {string} exWarehouseLot - The ex-warehouse lot identifier.
  * @returns {Promise<Array<Object>>} A promise that resolves to an array of bundle objects for the specified lot.
  */
-async function getIndividualBundleSheet(jobNo, lotNo) {
+async function getIndividualBundleSheet(jobNo, exWarehouseLot) {
 
   const query = `
     SELECT 
@@ -1020,12 +1037,13 @@ async function getIndividualBundleSheet(jobNo, lotNo) {
     JOIN brands b ON i."brandId" = b."brandId"
     JOIN inboundwarehouses w ON i."inboundWarehouseId" = w."inboundWarehouseId"
     JOIN inboundbundles ib ON i."inboundId" = ib."inboundId"
-    WHERE i."jobNo" = $1 AND i."lotNo" = $2
+    WHERE i."exWarehouseLot" = $1 AND i."jobNo" = $2
     ORDER BY ib."bundleNo" ASC;
   `;
-   const replacements = [jobNo, lotNo];
+   const replacements = [exWarehouseLot, jobNo];
 
   try {
+    
     const bundles = await db.sequelize
       .query(query, {
         type: db.sequelize.QueryTypes.SELECT,
@@ -1038,6 +1056,46 @@ async function getIndividualBundleSheet(jobNo, lotNo) {
   }
 }
 
+const getUniqueExWarehouseLotsByJobNo = async (jobNo) => {
+  try {
+    const query = `
+      SELECT DISTINCT i."exWarehouseLot",
+       i."lotNo",
+       s."shapeName",
+       c."commodityName",
+       b."brandName",
+       w."inboundWarehouseName"
+FROM public.inbounds i
+LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
+LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
+JOIN public.shapes s ON s."shapeId" = i."shapeId"
+JOIN public.commodities c ON c."commodityId" = i."commodityId"
+JOIN public.brands b ON b."brandId" = i."brandId"
+JOIN public.inboundwarehouses w ON w."inboundWarehouseId" = i."inboundWarehouseId"
+WHERE i."jobNo" = :jobNo
+  AND o."inboundId" IS NULL
+  AND ot."inboundId" IS NULL
+  AND i."exWarehouseLot" IS NOT NULL
+ORDER BY i."lotNo" ASC;
+
+    `;
+    const results = await db.sequelize.query(query, {
+      replacements: { jobNo },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    return results.map(result => ({
+      exWarehouseLot: result.exWarehouseLot,
+      lotNo: result.lotNo,
+      shapeName: result.shapeName,
+      commodityName: result.commodityName,
+      brandName: result.brandName,
+      inboundWarehouseName: result.inboundWarehouseName
+    }));
+  } catch (error) {
+    console.error("Error fetching unique exWarehouseLots:", error);
+    throw error;
+  }
+};
 module.exports = {
   getAllStock,
   getLotDetails,
@@ -1049,5 +1107,6 @@ module.exports = {
   getLotsByJobNo,
   getInventory1,
   getAllLotsForExport,
-  getIndividualBundleSheet
+  getIndividualBundleSheet,
+  getUniqueExWarehouseLotsByJobNo
 };
