@@ -13,15 +13,22 @@ async function getAllStocks() {
 /**
  * @description Fetches and processes bundle sheet data for a specific lot.
  * @param {string} jobNo - The job number.
- * @param {string} lotNo - The lot number.
+ * @param {string} exWarehouseLot - The ex-warehouse lot identifier.
  * @returns {Promise<Object>} A promise that resolves to an object containing mainDetails and bundles list.
  */
-async function getIndividualBundleSheetData(jobNo, lotNo) {
-  // Fetch data dynamically from the model instead of using mock data
+async function getIndividualBundleSheetData(jobNo, exWarehouseLot) {
+  const lotNo = exWarehouseLot.exWarehouseLot;
   const dbRows = await stockModel.getIndividualBundleSheet(jobNo, lotNo);
-
   if (!dbRows || dbRows.length === 0) {
-    throw new Error('No data found for the specified job and lot number.');
+    console.log(`No data found for jobNo: ${jobNo}, exWarehouseLot: ${lotNo}`);
+    return {
+      mainDetails: {
+        ourReference: jobNo,
+      },
+      bundles: [
+        { bundleNo:'01'} 
+      ],
+    };
   }
 
   // The main details are the same for every row, so we take them from the first row.
@@ -33,13 +40,13 @@ async function getIndividualBundleSheetData(jobNo, lotNo) {
     shape: firstRow.shapeName,
     warehouse: firstRow.inboundWarehouseName,
     brand: firstRow.brandName,
-    lotNoWarrantNo: firstRow.lotNoWarrantNo,
+    lotNoWarrantNo: firstRow.lotNoWarrantNo
   };
 
   // The bundles list is created by mapping over all returned rows.
   const bundles = dbRows.map(row => ({
-    bundleNo: row.bundleNo,
-    containerNo: row.exWarehouseLot || 'N/A', // Using exWarehouseLot for containerNo as an example
+    bundleNo: String(row.bundleNo).padStart(2, '0'), 
+    containerNo: row.exWarehouseLot || 'N/A', 
     heatCastNo: row.heatCastNo,
     batchNo: row.batchNo,
     producerGW: row.producerGW,
@@ -51,8 +58,17 @@ async function getIndividualBundleSheetData(jobNo, lotNo) {
   return { mainDetails, bundles };
 }
 
+/**
+ * @description Fetches all unique ex-warehouse lots for a given job number.
+ * @param {string} jobNo - The job number.
+ * @returns {Promise<Array<string>>} A promise that resolves to an array of ex-warehouse lot strings.
+ */
+async function getExWarehouseLotsForJob(jobNo) {
+  return stockModel.getUniqueExWarehouseLotsByJobNo(jobNo);
+}
 
 module.exports = {
   getAllStocks,
   getIndividualBundleSheetData,
+  getExWarehouseLotsForJob,
 };

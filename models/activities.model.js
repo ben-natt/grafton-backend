@@ -63,10 +63,9 @@ const getOutboundSummary = async () => {
 const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
   try {
     const offset = (page - 1) * pageSize;
-    let whereClauses = ['i."inboundDate" IS NOT NULL']; // Base condition
+    let whereClauses = ['i."inboundDate" IS NOT NULL'];
     const replacements = { limit: pageSize, offset };
 
-    // Build WHERE clause from filters
     if (filters.commodity) {
       whereClauses.push(`c."commodityName" ILIKE :commodity`);
       replacements.commodity = `%${filters.commodity}%`;
@@ -115,29 +114,54 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       replacements.exLmeWarehouse = `%${filters.exLmeWarehouse}%`;
     }
 
+    // --- SMART SEARCH (handles SINI-231 - 20 / SINI231-20 / SINI_231_20) ---
     if (filters.search) {
-      whereClauses.push(`(
-        CAST(i."inboundId" AS TEXT) ILIKE :searchQuery OR
-        i."jobNo" ILIKE :searchQuery OR
-        CAST(i."lotNo" AS TEXT) ILIKE :searchQuery OR
-        CAST(i."noOfBundle" AS TEXT) ILIKE :searchQuery OR
-        c."commodityName" ILIKE :searchQuery OR
-        b."brandName" ILIKE :searchQuery OR
-        s."shapeName" ILIKE :searchQuery OR
-        CAST(i."grossWeight" AS TEXT) ILIKE :searchQuery OR
-        CAST(i."netWeight" AS TEXT) ILIKE :searchQuery OR
-        CAST(i."actualWeight" AS TEXT) ILIKE :searchQuery OR
-        exlme."exLmeWarehouseName" ILIKE :searchQuery OR
-        i."exWarehouseLot" ILIKE :searchQuery OR
-        i."exWarehouseWarrant" ILIKE :searchQuery OR
-        exwhl."exWarehouseLocationName" ILIKE :searchQuery OR
-        iw."inboundWarehouseName" ILIKE :searchQuery OR
-        u_scheduled."username" ILIKE :searchQuery OR
-        u_processed."username" ILIKE :searchQuery
-      )`);
-      replacements.searchQuery = `%${filters.search}%`;
+      // Normalize the input: remove spaces, dashes, underscores
+      const normalizedSearch = filters.search.replace(/[-_\s]/g, '');
+      replacements.normalizedSearch = `%${normalizedSearch}%`;
+
+      // Regex to detect combo search (e.g. SINI231-20 → jobNo + lotNo)
+      const comboMatch = normalizedSearch.match(/^([A-Za-z]+[0-9]+)0*([0-9]+)$/);
+
+      if (comboMatch) {
+        const [_, jobNoPart, lotNoPart] = comboMatch;
+        replacements.jobNoPart = `%${jobNoPart}%`;
+        replacements.lotNoPart = `%${lotNoPart}%`;
+
+        whereClauses.push(`
+          (
+            REPLACE(REPLACE(REPLACE(i."jobNo", '-', ''), ' ', ''), '_', '') ILIKE :jobNoPart
+            AND (
+              LPAD(CAST(i."lotNo" AS TEXT), 2, '0') ILIKE :lotNoPart
+              OR CAST(i."lotNo" AS TEXT) ILIKE :lotNoPart
+            )
+          )
+        `);
+      } else {
+        // fallback: normal search across all relevant columns
+        whereClauses.push(`(
+          REPLACE(REPLACE(REPLACE(i."jobNo", '-', ''), ' ', ''), '_', '') ILIKE :normalizedSearch OR
+          REPLACE(REPLACE(REPLACE(i."jobNo" || '-' || LPAD(CAST(i."lotNo" AS TEXT), 2, '0'), '-', ''), ' ', ''), '_', '') ILIKE :normalizedSearch OR
+          CAST(i."lotNo" AS TEXT) ILIKE :normalizedSearch OR
+          i."exWarehouseLot" ILIKE :normalizedSearch OR
+          c."commodityName" ILIKE :normalizedSearch OR
+          b."brandName" ILIKE :normalizedSearch OR
+          s."shapeName" ILIKE :normalizedSearch OR
+          CAST(i."noOfBundle" AS TEXT) ILIKE :normalizedSearch OR
+          CAST(i."grossWeight" AS TEXT) ILIKE :normalizedSearch OR
+          CAST(i."netWeight" AS TEXT) ILIKE :normalizedSearch OR
+          CAST(i."actualWeight" AS TEXT) ILIKE :normalizedSearch OR
+          exlme."exLmeWarehouseName" ILIKE :normalizedSearch OR
+          exwhl."exWarehouseLocationName" ILIKE :normalizedSearch OR
+          iw."inboundWarehouseName" ILIKE :normalizedSearch OR
+          i."exWarehouseWarrant" ILIKE :normalizedSearch OR
+          u_scheduled."username" ILIKE :normalizedSearch OR
+          u_processed."username" ILIKE :normalizedSearch
+        )`);
+      }
     }
 
+    // --- WHERE & SORT ---
     const whereString =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
@@ -160,26 +184,21 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
     }
 
-    const baseQuery = `FROM 
-        public.inbounds i 
-      LEFT JOIN 
-        public.brands b ON b."brandId" = i."brandId"
-      LEFT JOIN 
-        public.commodities c ON c."commodityId" = i."commodityId"
-      LEFT JOIN 
-        public.shapes s ON s."shapeId" = i."shapeId"
-      LEFT JOIN 
-        public.users u_scheduled ON u_scheduled.userid = i."userId"
-      LEFT JOIN
-        public.users u_processed ON u_processed.userid = i."processedId"
-      LEFT JOIN 
-        public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
-      LEFT JOIN 
-        public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
-      LEFT JOIN 
-        public.exlmewarehouses exlme ON exlme."exLmeWarehouseId" = i."exLmeWarehouseId"
-      ${whereString}`;
+    // --- BASE QUERY ---
+    const baseQuery = `
+      FROM public.inbounds i
+      LEFT JOIN public.brands b ON b."brandId" = i."brandId"
+      LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
+      LEFT JOIN public.shapes s ON s."shapeId" = i."shapeId"
+      LEFT JOIN public.users u_scheduled ON u_scheduled.userid = i."userId"
+      LEFT JOIN public.users u_processed ON u_processed.userid = i."processedId"
+      LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
+      LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
+      LEFT JOIN public.exlmewarehouses exlme ON exlme."exLmeWarehouseId" = i."exLmeWarehouseId"
+      ${whereString}
+    `;
 
+    // --- COUNT QUERY ---
     const countQuery = `SELECT COUNT(i."inboundId")::int ${baseQuery}`;
     const countResult = await db.sequelize.query(countQuery, {
       replacements,
@@ -188,7 +207,9 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
     });
     const totalCount = countResult.count;
 
-    const dataQuery = `SELECT 
+    // --- DATA QUERY ---
+    const dataQuery = `
+      SELECT 
         i."inboundId" as id,
         TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
         i."jobNo" AS "Job No",
@@ -202,7 +223,9 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
         u_processed."username" AS "Processed By"
       ${baseQuery}
       ${orderByClause}
-      LIMIT :limit OFFSET :offset;`;
+      LIMIT :limit OFFSET :offset;
+    `;
+
     const data = await db.sequelize.query(dataQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
@@ -214,6 +237,7 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
     throw error;
   }
 };
+
 
 const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
   try {
