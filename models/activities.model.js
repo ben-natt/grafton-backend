@@ -315,25 +315,26 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
     const sortableColumns = {
-      Date: 'o."releaseDate"',
-      "Job No": 'o."jobNo"',
-      "Lot No": 'o."lotNo"',
-      "Ex-W Lot": 'o."exWarehouseLot"',
-      "Outbound Job No": 'so."outboundJobNo"',
-      Metal: 'o."commodity"',
-      Brand: 'o."brands"',
-      Shape: 'o."shape"',
-      BDL: 'o."noOfBundle"',
-      "Scheduled By": 'u_scheduled."username"',
-    };
+  Date: 'si."releaseDate"',
+  "Job No.": 'i."jobNo"',
+  "IB Lot No.": 'i."jobNo", i."lotNo"', // This key MUST match the frontend header title
+  "OB Job No": 'o."outboundJobNo"',
+  "Ex-Whse Lot": 'i."exWarehouseLot"',
+  Metal: 'c."commodityName"',
+  Brand: 'b."brandName"',
+  Shape: 's."shapeName"',
+  BDL: 'i."noOfBundle"',
+  "Scheduled By": 'u1."username"',
+};
 
-    let orderByClause = 'ORDER BY o."releaseDate" DESC NULLS LAST';
-    if (filters.sortBy && sortableColumns[filters.sortBy]) {
-      const sortColumn = sortableColumns[filters.sortBy];
-      const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
-      orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
-    }
-
+// This logic is correct and does not need to be changed.
+let orderByClause = 'ORDER BY si."releaseDate" DESC NULLS LAST';
+if (filters.sortBy && sortableColumns[filters.sortBy]) {
+  const sortColumns = sortableColumns[filters.sortBy].split(',').map(col => col.trim());
+  const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
+  const orderedColumns = sortColumns.map(col => `${col} ${sortOrder} NULLS LAST`).join(', ');
+  orderByClause = `ORDER BY ${orderedColumns}`;
+}
     const baseQuery = `FROM 
           public.outboundtransactions o
         LEFT JOIN
@@ -818,6 +819,7 @@ const getAllScheduleOutbound = async ({
     let whereClauses = ['si."isOutbounded" = false'];
     const replacements = {};
 
+    // ... (all filter logic for WHERE clauses remains unchanged) ...
     if (filters.commodity) {
       whereClauses.push(`c."commodityName" ILIKE :commodity`);
       replacements.commodity = `%${filters.commodity}%`;
@@ -867,7 +869,6 @@ const getAllScheduleOutbound = async ({
       whereClauses.push(`exlme."exLmeWarehouseName" ILIKE :exLmeWarehouse`);
       replacements.exLmeWarehouse = `%${filters.exLmeWarehouse}%`;
     }
-
     if (filters.search) {
       whereClauses.push(`(
         i."jobNo" ILIKE :searchQuery OR
@@ -894,8 +895,8 @@ const getAllScheduleOutbound = async ({
 
     const sortableColumns = {
       Date: 'si."releaseDate"',
-      "Job No.": 'i."jobNo"', // FIX: Added sort key for Job No.
-      "IB Lot No.": 'i."jobNo", i."lotNo"', // Added sort key for Lot No.
+      "Job No.": 'i."jobNo"',
+      "IB Lot No.": 'i."jobNo", i."lotNo"',
       "OB Job No": 'o."outboundJobNo"',
       "Ex-Whse Lot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
@@ -905,12 +906,29 @@ const getAllScheduleOutbound = async ({
       "Scheduled By": 'u1."username"',
     };
 
+    // --- START: MODIFIED AND CORRECTED SORTING LOGIC ---
     let orderByClause = 'ORDER BY si."releaseDate" DESC NULLS LAST'; // Default sort
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
-      const sortColumn = sortableColumns[filters.sortBy];
       const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
-      orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
+
+      if (filters.sortBy === "IB Lot No.") {
+        // This special logic forces a "natural sort" on the combined job and lot number.
+        // It splits 'SINI082' into 'SINI' and '82' to sort them correctly.
+        orderByClause = `
+          ORDER BY
+              SUBSTRING(i."jobNo" FROM '[A-Za-z]+') ${sortOrder} NULLS LAST,
+              CAST(NULLIF(SUBSTRING(i."jobNo" FROM '[0-9]+'), '') AS INTEGER) ${sortOrder} NULLS LAST,
+              CAST(NULLIF(i."lotNo", '') AS INTEGER) ${sortOrder} NULLS LAST
+        `;
+      } else {
+        // Original logic for all other single-column sorts
+        const sortColumns = sortableColumns[filters.sortBy].split(',').map(col => col.trim());
+        const orderedColumns = sortColumns.map(col => `${col} ${sortOrder} NULLS LAST`).join(', ');
+        orderByClause = `ORDER BY ${orderedColumns}`;
+      }
     }
+    // --- END: MODIFIED AND CORRECTED SORTING LOGIC ---
+
 
     const limit = parseInt(pageSize, 10);
     const offset = (page - 1) * limit;
@@ -933,7 +951,7 @@ const getAllScheduleOutbound = async ({
     const countQuery = `SELECT COUNT(DISTINCT si."inboundId") ${fromAndJoins} ${whereString}`;
 
     const totalResult = await db.sequelize.query(countQuery, {
-      replacements: { ...replacements }, // Use a copy to avoid mutation by sequelize
+      replacements: { ...replacements }, 
       type: db.sequelize.QueryTypes.SELECT,
     });
     const total = parseInt(totalResult[0].count, 10);
@@ -969,7 +987,6 @@ const getAllScheduleOutbound = async ({
     throw error;
   }
 };
-
 ////////////////////////////////////////////////////////////////////////////////
 ////////////      Scheduled Inbound Activities Details Page    ////////////////
 ////////////////////////////////////////////////////////////////////////////////

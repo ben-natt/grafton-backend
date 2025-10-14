@@ -45,13 +45,21 @@ const findInboundTasksOffice = async (
       replacements.scheduledBy = filters.scheduledBy;
     }
 
+    // --- START OF MODIFICATION ---
+    // Updated the filter logic to handle specific discrepancy types.
     if (filters.type) {
-      if (filters.type === "Discrepancies") {
-        whereClauses += ` AND l.report = true`;
-      } else if (filters.type === "Duplicated") {
-        whereClauses += ` AND l."reportDuplicate" = true`;
+      if (filters.type === "Job Discrepancy") {
+        // This filters for jobs that have a pending report in the `job_reports` table.
+        whereClauses += ` AND EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
+      } else if (filters.type === "Lot Discrepancy") {
+        // This finds lots with an individual report flag (l.report = true)
+        // BUT excludes lots that are part of a job with a pending job-level report.
+        // This isolates true lot-level discrepancies.
+        whereClauses += ` AND l.report = true AND NOT EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
       }
+      // "Duplicated" filter is removed.
     }
+    // --- END OF MODIFICATION ---
 
     const countQuery = `
       SELECT COUNT(DISTINCT l."jobNo")::int
@@ -153,7 +161,6 @@ const findInboundTasksOffice = async (
     throw error;
   }
 };
-
 // Update lot inbounddate (updated to work with lot table) (edit functionality)
 const getLotInboundDate = async (jobNo, lotNo) => {
   try {

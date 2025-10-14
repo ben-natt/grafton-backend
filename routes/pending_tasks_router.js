@@ -341,11 +341,17 @@ router.post("/lot-inbound/get", async (req, res) => {
   }
 });
 
-// Update inbound date for a specific lot (edit functionality )
 router.post("/lot-inbound/update", async (req, res) => {
-  const { jobNo, lotNo, inboundDate, userId } = req.body; // Added userId
+  // +++ ADD THIS LOG +++
+  console.log("--- BACKEND LOG ---");
+  console.log("Received request for /lot-inbound/update");
+  console.log("REQUEST BODY:", req.body);
+  // +++ END OF LOG +++
+
+  const { jobNo, lotNo, inboundDate, userId } = req.body;
 
   if (!jobNo || !lotNo || !inboundDate || !userId) {
+    // This part is currently being triggered
     return res.status(400).json({
       error: "jobNo, lotNo, inboundDate, and userId are required.",
     });
