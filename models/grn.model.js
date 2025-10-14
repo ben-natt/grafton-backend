@@ -17,8 +17,8 @@ const grnModel = {
         whereClauses.push(`o."grnNo" = :grnNo`);
         replacements.grnNo = filters.grnNo;
       } else if (filters.jobNo) {
-        whereClauses.push(`o."grnNo" LIKE :jobNo`);
-        replacements.jobNo = `${filters.jobNo}/%`;
+        whereClauses.push(`o."jobIdentifier" = :jobNo`);
+        replacements.jobNo = filters.jobNo;
       }
 
       if (filters.searchQuery) {
@@ -141,22 +141,22 @@ const grnModel = {
 
   async getFilterOptions() {
     try {
+      // This query now correctly fetches the unique jobIdentifier.
       const query = `
-        SELECT DISTINCT
-          o."grnNo"
+        SELECT DISTINCT o."jobIdentifier" as "jobNo"
         FROM public.outbounds o
-        INNER JOIN public.outboundtransactions ot ON o."outboundId" = ot."outboundId"
-        WHERE o."grnNo" IS NOT NULL AND o."grnNo" LIKE '%/%'
-        ORDER BY o."grnNo" ASC;
+        WHERE o."grnNo" IS NOT NULL AND o."jobIdentifier" IS NOT NULL
+        ORDER BY "jobNo" ASC;
       `;
 
       const results = await db.sequelize.query(query, {
         type: db.sequelize.QueryTypes.SELECT,
       });
 
-      const allGrnNos = results.map((item) => item.grnNo);
+      const jobNos = results.map((item) => item.jobNo);
 
-      return { grnNos: allGrnNos };
+      // Return the list of job numbers.
+      return { jobNos: jobNos };
     } catch (error) {
       console.error("MODEL ERROR in getFilterOptions:", error);
       throw error;

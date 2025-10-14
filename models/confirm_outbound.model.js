@@ -146,7 +146,6 @@ const getGrnDetailsForSelection = async (
   selectedInboundIds
 ) => {
   try {
-    // First, get the details for one lot to determine outboundJobNo and outboundType
     const preliminaryLotQuery = `
       SELECT so."outboundJobNo", so."outboundType"
       FROM public.selectedinbounds si
@@ -164,7 +163,6 @@ const getGrnDetailsForSelection = async (
       prelimLot?.outboundJobNo ||
       `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
 
-    // FIX: Get outboundType from the preliminary query result
     const outboundType = prelimLot?.outboundType;
 
     const grnCountQuery = `
@@ -179,16 +177,13 @@ const getGrnDetailsForSelection = async (
     });
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
 
-    // FIX: Declare grnNo and fileName variables
     let grnNo;
     let fileName;
 
     if (outboundType && outboundType.toLowerCase() === "flatbed") {
-      // For Flatbed, append an auto-incrementing number to grnNo.
       grnNo = `${outboundJobNo}-${grnIndex}`;
       fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
     } else {
-      // For Container (or any other type), grnNo is just the job number without a suffix.
       grnNo = outboundJobNo;
       fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
     }
@@ -231,29 +226,25 @@ const getGrnDetailsForSelection = async (
     const aggregateDetails = (key) =>
       [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
 
-    const formatMultipleDates = (dates, dateField) => {
-      // Debug: Print all date values for the field
-      const rawDates = dates.map((lot) => lot[dateField]);
+    const formatMultipleDates = (lots, dateField) => {
+      // Extract all date strings for the given field.
+      const rawDates = lots.map((lot) => lot[dateField]);
 
-      // Extract unique valid dates
-      const filteredDates = rawDates.filter(
-        (dateString) => dateString && dateString !== "Invalid Date"
-      );
+      // Parse strings into Date objects, filtering out any null or invalid dates.
+      const parsedDates = rawDates
+        .map((dateString) => (dateString ? new Date(dateString) : null))
+        .filter((date) => date && !isNaN(date.getTime()));
 
-      const parsedDates = filteredDates
-        .map((dateString) => {
-          // FIX: Remove the faulty replace function. The date string from the database is a valid ISO string.
-          const date = new Date(dateString);
-          return isNaN(date.getTime()) ? null : date;
-        })
-        .filter((date) => date !== null);
-
+      // If no valid dates exist after parsing, return 'N/A'.
       if (parsedDates.length === 0) {
         return "N/A";
       }
 
-      // Create unique dates by comparing date strings instead of Date objects
-      const uniqueDateStrings = [
+      // Sort the valid Date objects chronologically. This is the correct way to sort.
+      parsedDates.sort((a, b) => a.getTime() - b.getTime());
+
+      // Format the sorted dates into "10 October 2025" and create a unique list.
+      const uniqueFormattedDates = [
         ...new Set(
           parsedDates.map((date) =>
             date.toLocaleDateString("en-GB", {
@@ -265,23 +256,8 @@ const getGrnDetailsForSelection = async (
         ),
       ];
 
-      if (uniqueDateStrings.length === 1) {
-        return uniqueDateStrings[0];
-      }
-
-      // Sort the formatted date strings by converting back to dates for sorting
-      const sortedFormattedDates = uniqueDateStrings.sort((a, b) => {
-        const dateA = new Date(
-          a.replace(/(\\d{1,2}) (\\w+) (\\d{4})/, "$2 $1, $3")
-        );
-        const dateB = new Date(
-          b.replace(/(\\d{1,2}) (\\w+) (\\d{4})/, "$2 $1, $3")
-        );
-        return dateA - dateB;
-      });
-
-      const result = sortedFormattedDates.join(", ");
-      return result;
+      // Join the unique, sorted dates with a comma if there are multiple.
+      return uniqueFormattedDates.join(", ");
     };
 
     const firstLot = lots[0];
@@ -325,35 +301,12 @@ const getGrnDetailsForSelection = async (
   }
 };
 
-// const getOperators = async () => {
-//   try {
-//     const query = `
-//       SELECT
-//         userid AS "userId",
-//         username AS "fullName",
-//         roleid AS "roleId"
-//       FROM public.users
-//       WHERE roleid IN (1, 2)
-//       ORDER BY username;
-//     `;
-//     const users = await db.sequelize.query(query, {
-//       type: db.sequelize.QueryTypes.SELECT,
-//     });
-//     return users;
-//   } catch (error) {
-//     throw error;
-//   }
-// };
-
 const checkForDuplicateLots = async (lots, transaction) => {
   try {
     if (!lots || lots.length === 0) {
       return false;
     }
 
-    // Dynamically construct the WHERE clause to check for multiple (jobNo, lotNo) pairs.
-    // This creates a series of OR conditions like:
-    // WHERE ("jobNo" = :jobNo0 AND "lotNo" = :lotNo0) OR ("jobNo" = :jobNo1 AND "lotNo" = :lotNo1) ...
     const whereConditions = lots
       .map(
         (_, index) => `("jobNo" = :jobNo${index} AND "lotNo" = :lotNo${index})`
