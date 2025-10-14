@@ -17,8 +17,8 @@ const grnModel = {
         whereClauses.push(`o."grnNo" = :grnNo`);
         replacements.grnNo = filters.grnNo;
       } else if (filters.jobNo) {
-        whereClauses.push(`o."grnNo" LIKE :jobNo`);
-        replacements.jobNo = `${filters.jobNo}/%`;
+        whereClauses.push(`o."jobIdentifier" = :jobNo`);
+        replacements.jobNo = filters.jobNo;
       }
 
       if (filters.searchQuery) {
@@ -141,13 +141,11 @@ const grnModel = {
 
   async getFilterOptions() {
     try {
-      // This query now correctly extracts the unique job number (the prefix)
-      // from the "grnNo" column to be used in the dropdown filter.
+      // This query now correctly fetches the unique jobIdentifier.
       const query = `
-        SELECT DISTINCT split_part(o."grnNo", '/', 1) as "jobNo"
+        SELECT DISTINCT o."jobIdentifier" as "jobNo"
         FROM public.outbounds o
-        INNER JOIN public.outboundtransactions ot ON o."outboundId" = ot."outboundId"
-        WHERE o."grnNo" IS NOT NULL AND o."grnNo" LIKE '%/%'
+        WHERE o."grnNo" IS NOT NULL AND o."jobIdentifier" IS NOT NULL
         ORDER BY "jobNo" ASC;
       `;
 
