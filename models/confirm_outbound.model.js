@@ -83,14 +83,71 @@ const getStuffingPhotosByScheduleId = async (scheduleOutboundId) => {
   }
 };
 
+const updateOutboundDetails = async (
+  scheduleOutboundId,
+  selectedInboundId,
+  details
+) => {
+  const t = await db.sequelize.transaction();
+  try {
+    const { releaseDate, containerNo, sealNo, tareWeight, uom } = details;
+
+    // Update the release date on the specific selected inbound record
+    if (releaseDate) {
+      const updateSelectedInboundQuery = `
+        UPDATE public.selectedinbounds
+        SET "releaseDate" = :releaseDate, "updatedAt" = NOW()
+        WHERE "selectedInboundId" = :selectedInboundId;
+      `;
+      await db.sequelize.query(updateSelectedInboundQuery, {
+        replacements: {
+          releaseDate,
+          selectedInboundId,
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      });
+    }
+
+    // Update the container details on the parent schedule record
+    const updateScheduleQuery = `
+      UPDATE public.scheduleoutbounds
+      SET 
+        "containerNo" = :containerNo, 
+        "sealNo" = :sealNo, 
+        "tareWeight" = :tareWeight, 
+        "uom" = :uom, 
+        "updatedAt" = NOW()
+      WHERE "scheduleOutboundId" = :scheduleOutboundId;
+    `;
+    await db.sequelize.query(updateScheduleQuery, {
+      replacements: {
+        containerNo,
+        sealNo,
+        tareWeight: tareWeight ? parseFloat(tareWeight) : null,
+        uom,
+        scheduleOutboundId,
+      },
+      type: db.sequelize.QueryTypes.UPDATE,
+      transaction: t,
+    });
+
+    await t.commit();
+  } catch (error) {
+    await t.rollback();
+    console.error("Error in updateOutboundDetails model:", error);
+    throw error;
+  }
+};
+
 const getGrnDetailsForSelection = async (
   scheduleOutboundId,
   selectedInboundIds
 ) => {
   try {
-    // First, get the details for one lot to determine the outboundJobNo
+    // First, get the details for one lot to determine outboundJobNo and outboundType
     const preliminaryLotQuery = `
-      SELECT so."outboundJobNo"
+      SELECT so."outboundJobNo", so."outboundType"
       FROM public.selectedinbounds si
       JOIN public.scheduleoutbounds so ON si."scheduleOutboundId" = so."scheduleOutboundId"
       WHERE si."selectedInboundId" = :selectedInboundId
@@ -106,6 +163,9 @@ const getGrnDetailsForSelection = async (
       prelimLot?.outboundJobNo ||
       `SINO${String(scheduleOutboundId).padStart(3, "0")}`;
 
+    // FIX: Get outboundType from the preliminary query result
+    const outboundType = prelimLot?.outboundType;
+
     const grnCountQuery = `
       SELECT COUNT(*) as grn_count
       FROM public.outbounds
@@ -117,12 +177,24 @@ const getGrnDetailsForSelection = async (
       plain: true,
     });
     const grnIndex = parseInt(grnCountResult.grn_count, 10) + 1;
-    const fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
-    const grnNo = outboundJobNo;
+
+    // FIX: Declare grnNo and fileName variables
+    let grnNo;
+    let fileName;
+
+    if (outboundType && outboundType.toLowerCase() === "flatbed") {
+      // For Flatbed, append an auto-incrementing number to grnNo.
+      grnNo = `${outboundJobNo}-${grnIndex}`;
+      fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    } else {
+      // For Container (or any other type), grnNo is just the job number without a suffix.
+      grnNo = outboundJobNo;
+      fileName = `${outboundJobNo}/${String(grnIndex).padStart(2, "0")}`;
+    }
 
     const lotsQuery = `
   SELECT
-      si."inboundId", si."scheduleOutboundId",
+      si."selectedInboundId", si."inboundId", si."scheduleOutboundId",
       i."jobNo", COALESCE(i."crewLotNo", i."lotNo") as "lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
       i."exWarehouseLot", i."exWarehouseWarrant",
       w."exLmeWarehouseName" AS "exLmeWarehouse",
@@ -170,7 +242,7 @@ const getGrnDetailsForSelection = async (
       const parsedDates = filteredDates
         .map((dateString) => {
           // Fix the timezone format: +00 -> +00:00
-          const fixedDateString = dateString.replace(/\+00$/, "+00:00");
+          const fixedDateString = dateString.replace(/\\+00$/, "+00:00");
 
           const date = new Date(fixedDateString);
           return isNaN(date.getTime()) ? null : date;
@@ -201,10 +273,10 @@ const getGrnDetailsForSelection = async (
       // Sort the formatted date strings by converting back to dates for sorting
       const sortedFormattedDates = uniqueDateStrings.sort((a, b) => {
         const dateA = new Date(
-          a.replace(/(\d{1,2}) (\w+) (\d{4})/, "$2 $1, $3")
+          a.replace(/(\\d{1,2}) (\\w+) (\\d{4})/, "$2 $1, $3")
         );
         const dateB = new Date(
-          b.replace(/(\d{1,2}) (\w+) (\d{4})/, "$2 $1, $3")
+          b.replace(/(\\d{1,2}) (\\w+) (\\d{4})/, "$2 $1, $3")
         );
         return dateA - dateB;
       });
@@ -216,12 +288,8 @@ const getGrnDetailsForSelection = async (
     const firstLot = lots[0];
 
     const result = {
-      releaseDate: new Date().toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-      }), // Current date as "12 August 2025"
-      deliveryDate: formatMultipleDates(lots, "deliveryDate"),
+      releaseDate: new Date().toISOString(), // Use ISO string for consistency
+      deliveryDate: firstLot.deliveryDate,
       outboundType: firstLot.outboundType,
       exportDate: firstLot.exportDate,
       stuffingDate: firstLot.stuffingDate,
@@ -253,6 +321,7 @@ const getGrnDetailsForSelection = async (
     };
     return result;
   } catch (error) {
+    console.error("Error in getGrnDetailsForSelection:", error);
     throw error;
   }
 };
@@ -384,10 +453,14 @@ const createGrnAndTransactions = async (formData) => {
 
     await confirmSelectedInbounds(selectedInboundIds, t);
 
-    // Prepare replacements for the insert query, ensuring jobIdentifier is correct
+    const tareWeightValue = formData.tareWeight
+      ? parseFloat(formData.tareWeight)
+      : null;
+    formData.tareWeight = isNaN(tareWeightValue) ? null : tareWeightValue;
+
     const outboundInsertReplacements = {
       ...formData,
-      jobIdentifier: outboundJobNo, // Use outboundJobNo for the jobIdentifier
+      jobIdentifier: outboundJobNo,
     };
 
     const outboundInsertQuery = `
@@ -398,7 +471,7 @@ const createGrnAndTransactions = async (formData) => {
           "tareWeight", uom,
           "createdAt", "updatedAt"
       ) VALUES (
-          NOW(), :driverName, :driverIdentityNo, :truckPlateNo,
+          :releaseDate, :driverName, :driverIdentityNo, :truckPlateNo,
           :warehouseStaff, :warehouseSupervisor, :userId, :grnNo, :jobIdentifier,
           :driverSignature, :warehouseStaffSignature, :warehouseSupervisorSignature,
           :tareWeight, :uom,
@@ -605,6 +678,7 @@ module.exports = {
   getGrnDetailsForSelection,
   getStuffingPhotosByScheduleId,
   countStuffingPhotosByScheduleId,
+  updateOutboundDetails,
   createGrnAndTransactions,
   getUserSignature,
   updateUserSignature,

@@ -506,7 +506,9 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
 
     const parsedLots = JSON.parse(selectedLots);
 
-    const outboundType = stuffingDate ? "container" : "flatbed";
+    // FIX START: Determine outboundType based on presence of container info
+    const outboundType = containerNo ? "container" : "flatbed";
+    // FIX END
 
     const scheduleInsertQuery = `
      INSERT INTO public.scheduleoutbounds (
@@ -531,11 +533,13 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
         userId,
         lotReleaseWeight: parseFloat(lotReleaseWeight),
         outboundType,
-        exportDate,
+        // FIX START: Ensure all optional fields default to null if not provided
+        exportDate: exportDate || null,
         stuffingDate: stuffingDate || null,
         containerNo: containerNo || null,
         sealNo: sealNo || null,
         deliveryDate: deliveryDate || null,
+        // FIX END
         storageReleaseLocation,
         releaseWarehouse,
         transportVendor,
@@ -617,8 +621,10 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
             jobNo,
             releaseDate: releaseStartDate,
             releaseEndDate: releaseEndDate || null,
+            // FIX START: Ensure exportDate and deliveryDate are handled here too
             exportDate: exportDate || null,
             deliveryDate: deliveryDate || null,
+            // FIX END
             storageReleaseLocation:
               lot.storageReleaseLocation || storageReleaseLocation,
           },
@@ -985,6 +991,53 @@ const getAllLotsForExport = async () => {
   }
 };
 
+/**
+ * @description Retrieves all bundle details for a specific lot for the individual bundle sheet export.
+ * @param {string} jobNo - The job number of the lot.
+ * @param {number} lotNo - The lot number.
+ * @returns {Promise<Array<Object>>} A promise that resolves to an array of bundle objects for the specified lot.
+ */
+async function getIndividualBundleSheet(jobNo, lotNo) {
+
+  const query = `
+    SELECT 
+      i."jobNo" As "ourReference", 
+      c."commodityName", 
+      s."shapeName", 
+      b."brandName", 
+      w."inboundWarehouseName",
+      i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') AS "lotNoWarrantNo", 
+      i."exWarehouseLot",
+      ib."bundleNo" AS "bundleNo", 
+      ib."meltNo" AS "heatCastNo",
+      i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') || '-' || LPAD(ib."bundleNo"::text, 2, '0') AS "batchNo",
+      ib."stickerWeight" AS "producerGW", 
+      ib."stickerWeight" AS "producerNW", 
+      ib."weight" AS "weighedGW"
+    FROM inbounds i
+    JOIN commodities c ON i."commodityId" = c."commodityId"
+    JOIN shapes s ON i."shapeId" = s."shapeId"
+    JOIN brands b ON i."brandId" = b."brandId"
+    JOIN inboundwarehouses w ON i."inboundWarehouseId" = w."inboundWarehouseId"
+    JOIN inboundbundles ib ON i."inboundId" = ib."inboundId"
+    WHERE i."jobNo" = $1 AND i."lotNo" = $2
+    ORDER BY ib."bundleNo" ASC;
+  `;
+   const replacements = [jobNo, lotNo];
+
+  try {
+    const bundles = await db.sequelize
+      .query(query, {
+        type: db.sequelize.QueryTypes.SELECT,
+        bind: replacements,
+      });
+    return bundles;
+  } catch (error) {
+    console.error("Error fetching individual bundle sheet:", error);
+    throw error;
+  }
+}
+
 module.exports = {
   getAllStock,
   getLotDetails,
@@ -996,4 +1049,5 @@ module.exports = {
   getLotsByJobNo,
   getInventory1,
   getAllLotsForExport,
+  getIndividualBundleSheet
 };

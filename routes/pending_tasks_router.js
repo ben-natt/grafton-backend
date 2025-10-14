@@ -541,5 +541,5 @@ router.delete("/lot/:lotId", async (req, res) => {
     res.status(500).json({ error: "Failed to delete lot." });
   }
 });
-
+  
 module.exports = router;

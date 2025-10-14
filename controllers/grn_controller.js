@@ -1,6 +1,7 @@
 const grnModel = require("../models/grn.model");
 const path = require("path");
 const fs = require("fs");
+const { PDFDocument } = require("pdf-lib");
 
 const grnController = {
   async listGrns(req, res) {
@@ -95,6 +96,164 @@ const grnController = {
     } catch (error) {
       console.error("CONTROLLER ERROR in getGrnFilters:", error);
       res.status(500).json({ error: "Failed to fetch filter options." });
+    }
+  },
+
+  async downloadMultiplePdfs(req, res) {
+    console.log("CONTROLLER: Entering downloadMultiplePdfs");
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "An array of outbound IDs is required." });
+    }
+
+    try {
+      const grnRecords = await grnModel.getGrnDetailsForMultipleIds(ids);
+
+      const foundIds = grnRecords.map((r) => r.outboundId);
+      const missingDbRecords = ids.filter((id) => !foundIds.includes(id));
+
+      if (missingDbRecords.length > 0) {
+        return res.status(404).json({
+          error: "Database records not found.",
+          details: `Could not find GRNs for the following internal IDs: ${missingDbRecords.join(
+            ", "
+          )}`,
+        });
+      }
+
+      const missingFiles = [];
+      const pdfBuffers = [];
+
+      for (const record of grnRecords) {
+        if (!record.grnImage) {
+          missingFiles.push(record.grnNo);
+          continue;
+        }
+        const pdfPath = path.join(__dirname, "..", record.grnImage);
+        if (fs.existsSync(pdfPath)) {
+          pdfBuffers.push(fs.readFileSync(pdfPath));
+        } else {
+          missingFiles.push(record.grnNo);
+        }
+      }
+
+      if (missingFiles.length > 0) {
+        const missingGrnsString = missingFiles.join(", ");
+        const userFriendlyMessage = `The GRN: ${missingGrnsString} not found in the system. Please try again by removing these GRNs.`;
+
+        return res.status(404).json({
+          error: "One or more PDF files could not be found on the server.",
+          details: userFriendlyMessage,
+        });
+      }
+
+      // Merge all found PDFs into one
+      const mergedPdf = await PDFDocument.create();
+      for (const pdfBytes of pdfBuffers) {
+        const pdf = await PDFDocument.load(pdfBytes);
+        const copiedPages = await mergedPdf.copyPages(
+          pdf,
+          pdf.getPageIndices()
+        );
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      }
+
+      const mergedPdfBytes = await mergedPdf.save();
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        'attachment; filename="GRN_Compilation.pdf"'
+      );
+      res.send(Buffer.from(mergedPdfBytes));
+    } catch (error) {
+      console.error("CONTROLLER ERROR in downloadMultiplePdfs:", error);
+      res.status(500).json({ error: "Failed to generate combined PDF." });
+    }
+  },
+
+  async getDropdownOptions(req, res) {
+    try {
+      const options = await grnModel.getDropdownOptions();
+      res.status(200).json(options);
+    } catch (error) {
+      console.error("CONTROLLER ERROR in getDropdownOptions:", error);
+      res.status(500).json({ error: "Failed to fetch dropdown options." });
+    }
+  },
+
+  async getGrnForEdit(req, res) {
+    try {
+      const { outboundId } = req.params;
+      const details = await grnModel.getGrnDetailsForEdit(outboundId);
+      if (!details) {
+        return res
+          .status(404)
+          .json({ error: "GRN details not found for editing." });
+      }
+      // Convert signature buffers to base64 for the client
+      if (details.driverSignature) {
+        details.driverSignature = details.driverSignature.toString("base64");
+      }
+      if (details.warehouseStaffSignature) {
+        details.warehouseStaffSignature =
+          details.warehouseStaffSignature.toString("base64");
+      }
+      if (details.warehouseSupervisorSignature) {
+        details.warehouseSupervisorSignature =
+          details.warehouseSupervisorSignature.toString("base64");
+      }
+
+      res.status(200).json(details);
+    } catch (error) {
+      console.error("CONTROLLER ERROR in getGrnForEdit:", error);
+      res.status(500).json({ error: "Failed to fetch GRN details for edit." });
+    }
+  },
+
+  async updateGrn(req, res) {
+    try {
+      const { outboundId } = req.params;
+      const formData = req.body;
+
+      // Convert base64 signatures back to buffers before sending to model
+      if (formData.driverSignature) {
+        formData.driverSignature = Buffer.from(
+          formData.driverSignature,
+          "base64"
+        );
+      }
+      if (formData.warehouseStaffSignature) {
+        formData.warehouseStaffSignature = Buffer.from(
+          formData.warehouseStaffSignature,
+          "base64"
+        );
+      }
+      if (formData.warehouseSupervisorSignature) {
+        formData.warehouseSupervisorSignature = Buffer.from(
+          formData.warehouseSupervisorSignature,
+          "base64"
+        );
+      }
+
+      const { pdf, previewImage } = await grnModel.updateAndRegenerateGrn(
+        outboundId,
+        formData
+      );
+
+      res.status(200).json({
+        message: "GRN updated successfully.",
+        pdf,
+        previewImage,
+      });
+    } catch (error) {
+      console.error("CONTROLLER ERROR in updateGrn:", error);
+      res
+        .status(500)
+        .json({ error: "Failed to update GRN.", details: error.message });
     }
   },
 };
