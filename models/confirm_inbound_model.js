@@ -209,14 +209,14 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       // --- Insert into inbounds ---
       const insertQuery = `
         INSERT INTO public.inbounds (
-          "jobNo", "lotNo", "noOfBundle", "barcodeNo", "commodityId", "shapeId",
+          "jobNo", "noOfBundle", "barcodeNo", "commodityId", "shapeId",
           "exLmeWarehouseId", "exWarehouseWarrant", "inboundWarehouseId",
           "grossWeight", "netWeight", "actualWeight", "isWeighted", "isRelabelled",
           "isRebundled", "noOfMetalStraps", "isRepackProvided", "repackDescription",
           "userId", "processedId", "createdAt", "updatedAt", "brandId", "inboundDate",
           "exWarehouseLot", "scheduleInboundDate", "exWarehouseLocationId"
         ) VALUES (
-          :jobNo, :lotNo, :noOfBundle, :barcodeNo, :commodityId, :shapeId,
+          :jobNo,:noOfBundle, :barcodeNo, :commodityId, :shapeId,
           :exLmeWarehouseId, :exWarehouseWarrant, :inboundWarehouseId,
           :grossWeight, :netWeight, :actualWeight, false, false,
           false, 0, false, '', :userId, :processedId, 

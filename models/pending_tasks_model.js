@@ -341,8 +341,8 @@ const getPendingOutboundTasks = async (
         so."sealNo",
         so."outboundType",
         u.username,
-        i."jobNo", 
-        COALESCE(i."crewLotNo", i."lotNo") as "lotNo", 
+        si."jobNo", 
+        si."lotNo" as "lotNo", 
         i."noOfBundle" as "expectedBundleCount",
         i."exWarehouseLot", 
         w."exLmeWarehouseName" as "exLmeWarehouse",
@@ -549,7 +549,9 @@ const reverseInbound = async (inboundId) => {
 
     // Step 2: Update the corresponding lot's status back to 'Pending' using both identifiers.
     await db.sequelize.query(
-      `UPDATE public."lot" SET status = 'Pending' WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot`,
+      `UPDATE public."lot" SET status = 'Pending', "isConfirm" = false , "crewLotNo" = null, "updatedAt" = NOW(),
+      "actualWeight" = NULL , "isWeighted" = null , "stickerWeight" = null
+       WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot`,
       {
         replacements: { jobNo, exWarehouseLot },
         type: db.sequelize.QueryTypes.UPDATE,

@@ -239,7 +239,7 @@ const getLotSummary = async (jobNo, lotNo) => {
       LEFT JOIN public.selectedInbounds o ON o."inboundId" = i."inboundId"
       -- MODIFICATION: Join with outboundtransactions to filter out processed lots
       LEFT JOIN public.outboundtransactions ot ON ot."inboundId" = i."inboundId"
-      LEFT JOIN public.lot l on l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+      LEFT JOIN public.lot l on l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
       LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
       LEFT JOIN public.brands b ON b."brandId" = i."brandId"
       LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
@@ -253,7 +253,7 @@ const getLotSummary = async (jobNo, lotNo) => {
         -- MODIFICATION: Ensure the lot is not in outboundtransactions
         AND ot."inboundId" IS NULL
         AND i."jobNo" = :jobNo
-        AND i."lotNo" = :lotNo
+        AND i."exWarehouseLot" = :lotNo
       LIMIT 1;
     `;
 
@@ -317,7 +317,7 @@ const getLotSummary = async (jobNo, lotNo) => {
   }
 };
 
-const getLotDetails = async (filters) => {
+const getLotDetails = async (filters) => { 
   try {
     const replacements = {};
     let whereClauses = ['o."inboundId" IS NULL', 'ot."inboundId" IS NULL'];
@@ -376,15 +376,15 @@ const getLotDetails = async (filters) => {
       if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== '') {
         const [_, jobNoPart, lotNoPart] = comboMatch;
         const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, '');
+        const normalizedLotNo = parseInt(lotNoPart, 10); // remove leading zeros
 
         replacements.jobNoSearch = `%${normalizedJobNo}%`;
-        replacements.lotNoSearch = lotNoPart;
+        replacements.lotNoSearch = normalizedLotNo;
 
         whereClauses.push(`(
             REGEXP_REPLACE(i."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :jobNoSearch
-            AND CAST(i."lotNo" AS TEXT) = :lotNoSearch
+            AND i."lotNo" = :lotNoSearch
         )`);
-
       } else {
         const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, '');
         replacements.normalizedSearch = `%${normalizedSearch}%`;
@@ -416,11 +416,11 @@ const getLotDetails = async (filters) => {
 
     const sortableColumns = {
       "LotNo": 'i."jobNo" ASC, i."lotNo"',
-      "Ex-Whse Lot": 'i."exWarehouseLot"',
+      "Ex-WarehouseLot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
-      Bundles: 'i."noOfBundle"',
+      Qty: 'i."noOfBundle"',
       Weight: '"Weight"',
     };
     let orderByClause = 'ORDER BY i."inboundId" ASC';
@@ -1043,7 +1043,6 @@ async function getIndividualBundleSheet(jobNo, exWarehouseLot) {
    const replacements = [exWarehouseLot, jobNo];
 
   try {
-    
     const bundles = await db.sequelize
       .query(query, {
         type: db.sequelize.QueryTypes.SELECT,

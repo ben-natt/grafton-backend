@@ -71,7 +71,6 @@
     try {
       // FIX: Change from req.body to req.query for GET request
       const { jobNo, lotNo } = req.query;
-
       if (!jobNo || !lotNo) {
         return res
           .status(400)

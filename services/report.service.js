@@ -17,16 +17,16 @@ async function getAllStocks() {
  * @returns {Promise<Object>} A promise that resolves to an object containing mainDetails and bundles list.
  */
 async function getIndividualBundleSheetData(jobNo, exWarehouseLot) {
-  const lotNo = exWarehouseLot.exWarehouseLot;
+  const lotNo = exWarehouseLot.exWarehouseLot; 
   const dbRows = await stockModel.getIndividualBundleSheet(jobNo, lotNo);
   if (!dbRows || dbRows.length === 0) {
-    console.log(`No data found for jobNo: ${jobNo}, exWarehouseLot: ${lotNo}`);
+    console.log(`No data found for jobNo: ${jobNo}, exWarehouseLot: ${lotNo}`); 
     return {
       mainDetails: {
         ourReference: jobNo,
       },
       bundles: [
-        { bundleNo:'01'} 
+        { bundleNo:'01'}
       ],
     };
   }
