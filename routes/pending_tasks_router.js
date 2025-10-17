@@ -316,20 +316,19 @@ router.post("/quantity/update", async (req, res) => {
 
 // Router endpoints (add to your existing router file) (edit functionality )
 router.post("/lot-inbound/get", async (req, res) => {
-  const { jobNo, lotNo } = req.body;
-
-  if (!jobNo || !lotNo) {
+  
+  const { jobNo, lotNo, exWLot } = req.body;
+  if (!jobNo || !lotNo || !exWLot) {
     return res.status(400).json({
-      error: "jobNo and lotNo are required in the request body.",
+      error: "jobNo, lotNo, and exWarehouseLot are required in the request body.",
     });
   }
-
   try {
     const result = await pendingTasksOfficeModel.getLotInboundDate(
       jobNo,
-      lotNo
+      lotNo,
+      exWLot
     );
-
     if (!result) {
       return res.status(404).json({ error: "Lot not found" });
     }
@@ -348,17 +347,17 @@ router.post("/lot-inbound/update", async (req, res) => {
   console.log("REQUEST BODY:", req.body);
   // +++ END OF LOG +++
 
-  const { jobNo, lotNo, inboundDate, userId } = req.body;
+  const { jobNo, lotNo, exWarehouseLot, inboundDate, userId } = req.body;
 
-  if (!jobNo || !lotNo || !inboundDate || !userId) {
+  if (!jobNo || !lotNo || !exWarehouseLot || !inboundDate || !userId) {
     // This part is currently being triggered
     return res.status(400).json({
-      error: "jobNo, lotNo, inboundDate, and userId are required.",
+      error: "jobNo, lotNo, exWarehouseLot, inboundDate, and userId are required.",
     });
   }
 
   try {
-    const existingLot = await pendingTasksOfficeModel.getLotInboundDate(jobNo, lotNo);
+    const existingLot = await pendingTasksOfficeModel.getLotInboundDate(jobNo, lotNo, exWarehouseLot);
     if (!existingLot) {
       return res.status(404).json({ error: "Lot not found" });
     }
@@ -367,6 +366,7 @@ router.post("/lot-inbound/update", async (req, res) => {
     const result = await pendingTasksOfficeModel.updateLotInboundDate(
       jobNo,
       lotNo,
+      exWarehouseLot,
       inboundDate,
       userId
     );

@@ -36,8 +36,8 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     so."sealNo",
     so."tareWeight",
     so."uom",
-    i."jobNo",
-    COALESCE(i."crewLotNo", i."lotNo") as "lotNo",
+    si."jobNo",
+    si."lotNo" as "lotNo",
     i."actualWeight",
     i."grossWeight",
     i."noOfBundle" AS "expectedBundleCount",
@@ -191,7 +191,7 @@ const getGrnDetailsForSelection = async (
     const lotsQuery = `
   SELECT
       si."selectedInboundId", si."inboundId", si."scheduleOutboundId",
-      i."jobNo", COALESCE(i."crewLotNo", i."lotNo") as "lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
+      si."jobNo",  si."lotNo" as "lotNo", i."noOfBundle", i."grossWeight", i."netWeight", i."actualWeight",
       i."exWarehouseLot", i."exWarehouseWarrant",
       w."exLmeWarehouseName" AS "exLmeWarehouse",
       s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
@@ -378,7 +378,7 @@ const createGrnAndTransactions = async (formData) => {
   try {
     // Fetch both jobNo and lotNo for the duplicate check
     const lotsDetailsQueryForDuplicateCheck = `
-      SELECT i."jobNo", COALESCE(i."crewLotNo", i."lotNo") as "lotNo"
+      SELECT si."jobNo", si."lotNo" as "lotNo"
       FROM public.selectedinbounds si
       JOIN public.inbounds i ON si."inboundId" = i."inboundId"
       WHERE si."selectedInboundId" IN (:selectedInboundIds);

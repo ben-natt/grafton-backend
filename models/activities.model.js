@@ -1,3 +1,4 @@
+const { DATE } = require("sequelize");
 const db = require("../database");
 
 //Display in inbound summary card
@@ -114,66 +115,62 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       replacements.exLmeWarehouse = `%${filters.exLmeWarehouse}%`;
     }
 
-    // --- SMART SEARCH (handles SINI-231 - 20 / SINI231-20 / SINI_231_20) ---
     if (filters.search) {
-      // Normalize the input: remove spaces, dashes, underscores
-      const normalizedSearch = filters.search.replace(/[-_\s]/g, '');
-      replacements.normalizedSearch = `%${normalizedSearch}%`;
+      // Regex to detect a combo search that has a mandatory separator (space, dash, underscore)
+      const comboMatch = filters.search.match(/^(.*?)[\s_-]+(\d+)$/i);
 
-      // Regex to detect combo search (e.g. SINI231-20 → jobNo + lotNo)
-      const comboMatch = normalizedSearch.match(/^([A-Za-z]+[0-9]+)0*([0-9]+)$/);
-
-      if (comboMatch) {
+      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== '') {
+        // --- Handles Combo Searches like 'SINI231A-1' ---
         const [_, jobNoPart, lotNoPart] = comboMatch;
-        replacements.jobNoPart = `%${jobNoPart}%`;
-        replacements.lotNoPart = `%${lotNoPart}%`;
+        // Normalize by removing all non-alphanumeric characters
+        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, '');
 
-        whereClauses.push(`
-          (
-            REPLACE(REPLACE(REPLACE(i."jobNo", '-', ''), ' ', ''), '_', '') ILIKE :jobNoPart
-            AND (
-              LPAD(CAST(i."lotNo" AS TEXT), 2, '0') ILIKE :lotNoPart
-              OR CAST(i."lotNo" AS TEXT) ILIKE :lotNoPart
-            )
-          )
-        `);
-      } else {
-        // fallback: normal search across all relevant columns
+        replacements.jobNoSearch = `%${normalizedJobNo}%`;
+        replacements.lotNoSearch = lotNoPart; // Exact match for lot number
+
         whereClauses.push(`(
-          REPLACE(REPLACE(REPLACE(i."jobNo", '-', ''), ' ', ''), '_', '') ILIKE :normalizedSearch OR
-          REPLACE(REPLACE(REPLACE(i."jobNo" || '-' || LPAD(CAST(i."lotNo" AS TEXT), 2, '0'), '-', ''), ' ', ''), '_', '') ILIKE :normalizedSearch OR
-          CAST(i."lotNo" AS TEXT) ILIKE :normalizedSearch OR
-          i."exWarehouseLot" ILIKE :normalizedSearch OR
-          c."commodityName" ILIKE :normalizedSearch OR
-          b."brandName" ILIKE :normalizedSearch OR
-          s."shapeName" ILIKE :normalizedSearch OR
-          CAST(i."noOfBundle" AS TEXT) ILIKE :normalizedSearch OR
-          CAST(i."grossWeight" AS TEXT) ILIKE :normalizedSearch OR
-          CAST(i."netWeight" AS TEXT) ILIKE :normalizedSearch OR
-          CAST(i."actualWeight" AS TEXT) ILIKE :normalizedSearch OR
-          exlme."exLmeWarehouseName" ILIKE :normalizedSearch OR
-          exwhl."exWarehouseLocationName" ILIKE :normalizedSearch OR
-          iw."inboundWarehouseName" ILIKE :normalizedSearch OR
-          i."exWarehouseWarrant" ILIKE :normalizedSearch OR
-          u_scheduled."username" ILIKE :normalizedSearch OR
-          u_processed."username" ILIKE :normalizedSearch
+            REGEXP_REPLACE(i."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :jobNoSearch
+            AND CAST(i."lotNo" AS TEXT) = :lotNoSearch
+        )`);
+
+      } else {
+        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, '');
+        replacements.normalizedSearch = `%${normalizedSearch}%`;
+        replacements.search = `%${filters.search}%`;
+
+        whereClauses.push(`(
+          i."jobNo" ILIKE :search OR
+          REGEXP_REPLACE(i."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :normalizedSearch OR
+          i."exWarehouseLot" ILIKE :search OR
+          c."commodityName" ILIKE :search OR
+          b."brandName" ILIKE :search OR
+          s."shapeName" ILIKE :search OR
+          CAST(i."lotNo" AS TEXT) ILIKE :search OR
+          CAST(i."noOfBundle" AS TEXT) ILIKE :search OR
+          CAST(i."grossWeight" AS TEXT) ILIKE :search OR
+          CAST(i."netWeight" AS TEXT) ILIKE :search OR
+          CAST(i."actualWeight" AS TEXT) ILIKE :search OR
+          exlme."exLmeWarehouseName" ILIKE :search OR
+          exwhl."exWarehouseLocationName" ILIKE :search OR
+          iw."inboundWarehouseName" ILIKE :search OR
+          i."exWarehouseWarrant" ILIKE :search OR
+          u_scheduled."username" ILIKE :search OR
+          u_processed."username" ILIKE :search
         )`);
       }
     }
-
-    // --- WHERE & SORT ---
     const whereString =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
     const sortableColumns = {
-      Date: 'i."inboundDate"',
+      DATE: 'i."inboundDate"',
       "Job No": 'i."jobNo"',
-      "Lot No": 'i."lotNo"',
+      "Lot No": 'i."jobNo", i."lotNo"',
       "Ex-W Lot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
       Shape: 's."shapeName"',
-      BDL: 'i."noOfBundle"',
+      Bdl: 'i."noOfBundle"',
       "Scheduled By": 'u_scheduled."username"',
     };
 
@@ -184,7 +181,6 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
     }
 
-    // --- BASE QUERY ---
     const baseQuery = `
       FROM public.inbounds i
       LEFT JOIN public.brands b ON b."brandId" = i."brandId"
@@ -198,7 +194,6 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       ${whereString}
     `;
 
-    // --- COUNT QUERY ---
     const countQuery = `SELECT COUNT(i."inboundId")::int ${baseQuery}`;
     const countResult = await db.sequelize.query(countQuery, {
       replacements,
@@ -207,14 +202,14 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
     });
     const totalCount = countResult.count;
 
-    // --- DATA QUERY ---
     const dataQuery = `
       SELECT 
         i."inboundId" as id,
-        TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+        TO_CHAR(i."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
         i."jobNo" AS "Job No",
         i."lotNo" AS "Lot No",
         i."exWarehouseLot" AS "Ex-W Lot",
+        exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
         c."commodityName" AS "Metal",
         b."brandName" AS "Brand",
         s."shapeName" AS "Shape",
@@ -237,7 +232,6 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
     throw error;
   }
 };
-
 
 const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
   try {
@@ -290,62 +284,91 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       replacements.exLmeWarehouse = `%${filters.exLmeWarehouse}%`;
     }
 
+    // --- START: New Powerful Search Logic ---
     if (filters.search) {
-      whereClauses.push(`(
-        so."outboundJobNo" ILIKE :searchQuery OR
-        o."jobNo" ILIKE :searchQuery OR
-        CAST(o."lotNo" AS TEXT) ILIKE :searchQuery OR
-        CAST(o."noOfBundle" AS TEXT) ILIKE :searchQuery OR
-        o."commodity" ILIKE :searchQuery OR
-        o."brands" ILIKE :searchQuery OR
-        o."shape" ILIKE :searchQuery OR
-        CAST(o."actualWeight" AS TEXT) ILIKE :searchQuery OR
-        o."exLmeWarehouse" ILIKE :searchQuery OR
-        o."exWarehouseLot" ILIKE :searchQuery OR
-        o."releaseWarehouse" ILIKE :searchQuery OR
-        o."storageReleaseLocation" ILIKE :searchQuery OR
-        o."transportVendor" ILIKE :searchQuery OR
-        u_scheduled."username" ILIKE :searchQuery OR
-        u_processed."username" ILIKE :searchQuery
-      )`);
-      replacements.searchQuery = `%${filters.search}%`;
+      // Regex to detect a combo search with a mandatory separator
+      const comboMatch = filters.search.match(/^(.*?)[\s_-]+(\d+)$/i);
+
+      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== '') {
+        // --- Handles Combo Searches like 'SINI231A-1' ---
+        const [_, jobNoPart, lotNoPart] = comboMatch;
+        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, '');
+
+        replacements.jobNoSearch = `%${normalizedJobNo}%`;
+        replacements.lotNoSearch = lotNoPart;
+
+        // Apply combo search to the inbound job/lot numbers
+        whereClauses.push(`(
+            REGEXP_REPLACE(o."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :jobNoSearch
+            AND CAST(o."lotNo" AS TEXT) = :lotNoSearch
+        )`);
+
+      } else {
+        // --- Handles Generic and JobNo-only searches ---
+        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, '');
+        replacements.normalizedSearch = `%${normalizedSearch}%`;
+        replacements.search = `%${filters.search}%`;
+
+        whereClauses.push(`(
+            o."jobNo" ILIKE :search OR
+            REGEXP_REPLACE(o."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :normalizedSearch OR
+            so."outboundJobNo" ILIKE :search OR
+            REGEXP_REPLACE(so."outboundJobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :normalizedSearch OR
+            CAST(o."lotNo" AS TEXT) ILIKE :search OR
+            CAST(o."noOfBundle" AS TEXT) ILIKE :search OR
+            o."commodity" ILIKE :search OR
+            o."brands" ILIKE :search OR
+            o."shape" ILIKE :search OR
+            CAST(o."actualWeight" AS TEXT) ILIKE :search OR
+            o."exLmeWarehouse" ILIKE :search OR
+            o."exWarehouseLot" ILIKE :search OR
+            o."releaseWarehouse" ILIKE :search OR
+            o."storageReleaseLocation" ILIKE :search OR
+            o."transportVendor" ILIKE :search OR
+            u_scheduled."username" ILIKE :search OR
+            u_processed."username" ILIKE :search
+        )`);
+      }
     }
+    // --- END: New Powerful Search Logic ---
 
     const whereString =
       whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
     const sortableColumns = {
-  Date: 'si."releaseDate"',
-  "Job No.": 'i."jobNo"',
-  "IB Lot No.": 'i."jobNo", i."lotNo"', // This key MUST match the frontend header title
-  "OB Job No": 'o."outboundJobNo"',
-  "Ex-Whse Lot": 'i."exWarehouseLot"',
-  Metal: 'c."commodityName"',
-  Brand: 'b."brandName"',
-  Shape: 's."shapeName"',
-  BDL: 'i."noOfBundle"',
-  "Scheduled By": 'u1."username"',
-};
+      DATE: 'o."createdAt"',
+      "Job No.": 'i."jobNo"',
+      "IB Lot No.": 'i."jobNo", i."lotNo"',
+      "Outbound Job No": 'so."outboundJobNo"',
+      "Ex-W Lot": 'i."exWarehouseLot"',
+      Metal: 'c."commodityName"',
+      Brand: 'o."brands"',
+      Shape: 's."shapeName"',
+      BDL: 'i."noOfBundle"',
+      "Scheduled By": 'u_scheduled."username"',
+    };
 
-// This logic is correct and does not need to be changed.
-let orderByClause = 'ORDER BY si."releaseDate" DESC NULLS LAST';
-if (filters.sortBy && sortableColumns[filters.sortBy]) {
-  const sortColumns = sortableColumns[filters.sortBy].split(',').map(col => col.trim());
-  const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
-  const orderedColumns = sortColumns.map(col => `${col} ${sortOrder} NULLS LAST`).join(', ');
-  orderByClause = `ORDER BY ${orderedColumns}`;
-}
+    let orderByClause = 'ORDER BY si."releaseDate" DESC NULLS LAST';
+    if (filters.sortBy && sortableColumns[filters.sortBy]) {
+      const sortColumns = sortableColumns[filters.sortBy].split(',').map(col => col.trim());
+      const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
+      const orderedColumns = sortColumns.map(col => `${col} ${sortOrder} NULLS LAST`).join(', ');
+      orderByClause = `ORDER BY ${orderedColumns}`;
+    }
+
     const baseQuery = `FROM 
-          public.outboundtransactions o
-        LEFT JOIN
-          public.users u_scheduled ON u_scheduled.userid = o."scheduledBy"
-        LEFT JOIN
-          public.users u_processed ON u_processed.userid = o."outboundedBy"
-        LEFT JOIN 
-          public.selectedinbounds si ON si."inboundId" = o."inboundId"
-        LEFT JOIN 
-          public.scheduleoutbounds so ON so."scheduleOutboundId" = si."scheduleOutboundId"
-        ${whereString}`;
+        public.outboundtransactions o
+      LEFT JOIN
+        public.users u_scheduled ON u_scheduled.userid = o."scheduledBy"
+      LEFT JOIN
+        public.inbounds i ON o."inboundId" = i."inboundId"
+      LEFT JOIN
+        public.users u_processed ON u_processed.userid = o."outboundedBy" 
+      LEFT JOIN 
+        public.selectedinbounds si ON si."inboundId" = o."inboundId"
+      LEFT JOIN 
+        public.scheduleoutbounds so ON so."scheduleOutboundId" = si."scheduleOutboundId"
+      ${whereString}`;
 
     const countQuery = `SELECT COUNT(o."outboundTransactionId")::int ${baseQuery}`;
     const countResult = await db.sequelize.query(countQuery, {
@@ -357,7 +380,7 @@ if (filters.sortBy && sortableColumns[filters.sortBy]) {
 
     const dataQuery = `SELECT 
         o."outboundTransactionId" AS id,
-        TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+        TO_CHAR(o."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
         o."jobNo" AS "Job No",
         so."outboundJobNo" AS "Outbound Job No",
         o."lotNo" AS "Lot No",
@@ -371,6 +394,7 @@ if (filters.sortBy && sortableColumns[filters.sortBy]) {
       ${baseQuery}
       ${orderByClause}
       LIMIT :limit OFFSET :offset;`;
+
     const data = await db.sequelize.query(dataQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
@@ -549,7 +573,7 @@ const getInboundRecordByInboundId = async (inboundId) => {
           u_processor."username" AS "ProcessedBy",
           i."updatedAt" AS "UpdatedAt"
         FROM public.inbounds i
-        LEFT JOIN public.lot l ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+        LEFT JOIN public.lot l ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
         LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
         LEFT JOIN public.brands b ON b."brandId" = i."brandId"
         LEFT JOIN public.commodities c ON c."commodityId" = i."commodityId"
@@ -992,39 +1016,38 @@ const getAllScheduleOutbound = async ({
 ////////////////////////////////////////////////////////////////////////////////
 const getScheduleInboundRecordByLotId = async (lotId) => {
   try {
-    const query = `SELECT
-          l."jobNo" AS "JobNo",
-          l."lotNo" AS "LotNo",
-          l."expectedBundleCount" AS "NoOfBundle",
-          l."lotId",
-          l."commodity" AS "Commodity",
-          l."brand" AS "Brand",
-          l."shape" AS "Shape",
-          l."exLmeWarehouse" AS "ExLMEWarehouse",
-          l."exWarehouseLot" AS "ExWarehouseLot",
-          l."exWarehouseWarrant" AS "ExWarehouseWarrant",
-          l."exWarehouseLocation" AS "ExWarehouseLocation",
-          l."inboundWarehouse" AS "InboundWarehouse",
-          i."createdAt" AS "InboundDate",
-          si."createdAt" AS "ScheduleInboundDate",
-          l."grossWeight" AS "GrossWeight",
-          l."netWeight" AS "NetWeight",
-          l."actualWeight" AS "ActualWeight",
-          l."isRepackProvided" AS "IsRepackProvided", 
-          l."isRebundled" AS "IsRebundled",
-          u1."username" AS "ScheduledBy",
-          u2."username" AS "ProcessedBy",
-          TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
-          TO_CHAR(i."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
-          TO_CHAR(si."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2"
-        FROM public.lot l
-        LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
-        LEFT JOIN public.inbounds i on i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
-        LEFT JOIN public.users u1 ON u1.userid = si."userId"
-        LEFT JOIN public.users u2 ON u2.userid = i."processedId"
-        WHERE l."lotId" = :lotId
+      const query = `SELECT
+            l."jobNo" AS "JobNo",
+            l."lotNo" AS "LotNo",
+            l."expectedBundleCount" AS "NoOfBundle",
+            l."lotId",
+            l."commodity" AS "Commodity",
+            l."brand" AS "Brand",
+            l."shape" AS "Shape",
+            l."exLmeWarehouse" AS "ExLMEWarehouse",
+            l."exWarehouseLot" AS "ExWarehouseLot",
+            l."exWarehouseWarrant" AS "ExWarehouseWarrant",
+            l."exWarehouseLocation" AS "ExWarehouseLocation",
+            l."inboundWarehouse" AS "InboundWarehouse",
+            i."createdAt" AS "InboundDate",
+            si."createdAt" AS "ScheduleInboundDate",
+            l."grossWeight" AS "GrossWeight",
+            l."netWeight" AS "NetWeight",
+            l."actualWeight" AS "ActualWeight",
+            l."isRepackProvided" AS "IsRepackProvided", 
+            l."isRebundled" AS "IsRebundled",
+            u1."username" AS "ScheduledBy",
+            u2."username" AS "ProcessedBy",
+            TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
+            TO_CHAR(i."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
+            TO_CHAR(l."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2"
+          FROM public.lot l
+          LEFT JOIN public.scheduleinbounds si ON si."scheduleInboundId" = l."scheduleInboundId"
+          LEFT JOIN public.inbounds i on i."jobNo" = l."jobNo" AND i."exWarehouseLot" = l."exWarehouseLot"
+          LEFT JOIN public.users u1 ON u1.userid = si."userId"
+          LEFT JOIN public.users u2 ON u2.userid = i."processedId"
+          WHERE l."lotId" = :lotId
         LIMIT 1;`;
-
     const result = await db.sequelize.query(query, {
       replacements: { lotId },
       type: db.sequelize.QueryTypes.SELECT,
@@ -1044,7 +1067,7 @@ const getScheduleOutboundRecordById = async (id) => {
   try {
     const query = `SELECT
         i."jobNo" AS "JobNo", 
-        i."lotNo" AS "LotNo", 
+        selin."lotNo" AS "LotNo", 
         i."noOfBundle" AS "NoOfBundle",
         so."lotReleaseWeight" AS "LotReleaseWeight",
         i."inboundId", 
@@ -1072,7 +1095,7 @@ const getScheduleOutboundRecordById = async (id) => {
         processor."username" AS "ProcessedBy",
         TO_CHAR(selin."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
         TO_CHAR(ot."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt1",
-        TO_CHAR(so."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2",
+        TO_CHAR(selin."updatedAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt2",
         so."scheduleOutboundId" AS "ScheduleOutboundId",
         so."outboundType" AS "OutboundType",
         so."tareWeight" AS "TareWeight",

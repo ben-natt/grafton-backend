@@ -162,22 +162,23 @@ const findInboundTasksOffice = async (
   }
 };
 // Update lot inbounddate (updated to work with lot table) (edit functionality)
-const getLotInboundDate = async (jobNo, lotNo) => {
+const getLotInboundDate = async (jobNo, lotNo,exWarehouseLot) => {
   try {
     const query = `
       SELECT 
         TO_CHAR("inbounddate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YYYY') AS "inboundDate"
       FROM public.lot
-      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo AND "exWarehouseLot" = :exWarehouseLot
       ORDER BY "updatedAt" DESC
       LIMIT 1;
     `;
 
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo, lotNo },
+      replacements: { jobNo, lotNo, exWarehouseLot },
       type: db.sequelize.QueryTypes.SELECT,
     });
-
+    console.log("I am result", result);
+    
     return result[0] || null;
   } catch (error) {
     console.error("Error fetching lot inbound date:", error);
@@ -186,17 +187,17 @@ const getLotInboundDate = async (jobNo, lotNo) => {
 };
 
 // Update lot inbounddate (specific to jobNo + lotNo) (edit functionality)
-const updateLotInboundDate = async (jobNo, lotNo, inboundDate) => {
+const updateLotInboundDate = async (jobNo, lotNo, exWarehouseLot, inboundDate) => {
   try {
     const query = `
       UPDATE public.lot
       SET "inbounddate" = :inboundDate, "updatedAt" = NOW()
-      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo AND "exWarehouseLot" = :exWarehouseLot
       RETURNING *;
     `;
 
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo, lotNo, inboundDate },
+      replacements: { jobNo, lotNo, exWarehouseLot, inboundDate },
       type: db.sequelize.QueryTypes.UPDATE,
     });
 
@@ -296,7 +297,7 @@ const findOutboundTasksOffice = async (
         so."outboundJobNo",
         si."selectedInboundId",
         i."jobNo",
-        i."lotNo"::text AS "lotNo",
+        si."lotNo"::text AS "lotNo",
         sh."shapeName" AS shape,
         i."noOfBundle" AS "expectedBundleCount",
         b."brandName" AS brand,

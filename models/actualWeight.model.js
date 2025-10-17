@@ -142,7 +142,6 @@ const checkDuplicateCrewLotNo = async (crewLotNo, jobNo, idValue, transaction = 
     WHERE "jobNo" = :jobNo 
     AND "crewLotNo" = :crewLotNo 
     AND "inboundId" != :idValue
-    AND ("isWeighted" IS NULL OR "isWeighted" = false)
   `;
 
   const [duplicateResult] = await db.sequelize.query(duplicateQuery, {
@@ -159,28 +158,28 @@ const checkDuplicateCrewLotNo = async (crewLotNo, jobNo, idValue, transaction = 
     throw new Error(`Crew Lot No ${crewLotNo} already exists for job ${jobNo} in inbound records.`);
   }
 
-  // 2. Check range based on jobNo's lot numbers from inbound table only
-  const rangeQuery = `
-    SELECT MIN("lotNo") as minLot, MAX("lotNo") as maxLot
-    FROM public.inbounds 
-    WHERE "jobNo" = :jobNo
-    AND ("isWeighted" IS NULL OR "isWeighted" = false)
-  `;
+  // // 2. Check range based on jobNo's lot numbers from inbound table only
+  // const rangeQuery = `
+  //   SELECT MIN("lotNo") as minLot, MAX("lotNo") as maxLot
+  //   FROM public.inbounds 
+  //   WHERE "jobNo" = :jobNo
+  //   AND ("isWeighted" IS NULL OR "isWeighted" = false)
+  // `;
 
-  const [rangeResult] = await db.sequelize.query(rangeQuery, {
-    replacements: { jobNo },
-    type: db.sequelize.QueryTypes.SELECT,
-    ...options,
-  });
+  // const [rangeResult] = await db.sequelize.query(rangeQuery, {
+  //   replacements: { jobNo },
+  //   type: db.sequelize.QueryTypes.SELECT,
+  //   ...options,
+  // });
 
-  const { minlot, maxlot } = rangeResult;
+  // const { minlot, maxlot } = rangeResult;
 
-  // Only validate range if there are existing records for this job
-  if (minlot !== null && maxlot !== null && (crewLotNo < minlot || crewLotNo > maxlot)) {
-    throw new Error(
-      `Crew Lot No ${crewLotNo} is out of valid range for job ${jobNo} (${minlot} - ${maxlot}).`
-    );
-  }
+  // // Only validate range if there are existing records for this job
+  // if (minlot !== null && maxlot !== null && (crewLotNo < minlot || crewLotNo > maxlot)) {
+  //   throw new Error(
+  //     `Crew Lot No ${crewLotNo} is out of valid range for job ${jobNo} (${minlot} - ${maxlot}).`
+  //   );
+  // }
 
   return false; // false means no issues
 };
@@ -189,12 +188,12 @@ const checkDuplicateCrewLotNo = async (crewLotNo, jobNo, idValue, transaction = 
 const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
   const transaction = await db.sequelize.transaction();
   try {
-    let jobNo, lotNo;
+    let jobNo, exWarehouseLot;
     
     if (isInbound) {
       // Find from inbound table with isWeighted condition
       const inboundQuery = `
-        SELECT "jobNo", "lotNo" 
+        SELECT "jobNo", "exWarehouseLot" 
         FROM public.inbounds 
         WHERE "inboundId" = :idValue 
         AND ("isWeighted" IS NULL OR "isWeighted" = false)
@@ -207,7 +206,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
       
       if (!inbound) throw new Error("Inbound record not found or already weighted");
       jobNo = inbound.jobNo;
-      lotNo = inbound.lotNo;
+      exWarehouseLot = inbound.exWarehouseLot;
     } else {
       // For lotId, we still need to find the corresponding inbound record for validation
       const lotQuery = `
@@ -238,7 +237,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
       
       if (!inbound) throw new Error("Corresponding inbound record not found or already weighted");
       jobNo = inbound.jobNo;
-      lotNo = inbound.lotNo;
+      exWarehouseLot = inbound.exWarehouseLot;
     }
 
     // Validate duplicate and range (only checks inbound table)
@@ -249,8 +248,9 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
       UPDATE public.inbounds
       SET 
         "crewLotNo" = :crewLotNo,
+        "lotNo" = :crewLotNo,
         "updatedAt" = NOW()
-      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
       AND ("isWeighted" IS NULL OR "isWeighted" = false)
       RETURNING *
     `;
@@ -260,7 +260,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
       SET 
         "crewLotNo" = :crewLotNo,
         "updatedAt" = NOW()
-      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
       RETURNING *
     `;
 
@@ -268,7 +268,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
       replacements: { 
         crewLotNo: parseInt(newCrewLotNo), 
         jobNo, 
-        lotNo 
+        exWarehouseLot 
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -278,7 +278,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
       replacements: { 
         crewLotNo: parseInt(newCrewLotNo), 
         jobNo, 
-        lotNo 
+        exWarehouseLot 
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
