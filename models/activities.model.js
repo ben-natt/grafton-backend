@@ -679,7 +679,7 @@ const getAllScheduleInbound = async ({
   pageSize = 25,
 }) => {
   try {
-    let whereClauses = [ 'l."isConfirm" = false'];
+      let whereClauses = [ 'l."isConfirm" = false', `l."status" = 'Pending'` ];
     const replacements = {};
 
     if (filters.commodity) {
@@ -782,7 +782,7 @@ const getAllScheduleInbound = async ({
     // NEW: Query for total count
     const countQuery = `SELECT COUNT(*) FROM public.lot l 
                         JOIN public.scheduleinbounds si ON l."scheduleInboundId" = si."scheduleInboundId"
-                        LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
+                        LEFT JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."exWarehouseLot" = l."exWarehouseLot"
                         LEFT JOIN public.users u1 ON si."userId" = u1.userid
                         LEFT JOIN public.users u2 ON u2.userid = i."processedId"
                         ${whereString}`;
