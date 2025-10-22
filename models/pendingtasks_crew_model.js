@@ -68,7 +68,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
           MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
         FROM public.lot l
-        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
         WHERE ${baseWhereString}
         GROUP BY l."jobNo"
       )
@@ -98,7 +98,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
           MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
         FROM public.lot l
-        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
         WHERE ${baseWhereString}
         GROUP BY l."jobNo"
       )
@@ -170,7 +170,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
             ELSE false 
           END as is_incomplete
       FROM public.lot l
-      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
       JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
       JOIN public.users u ON s."userId" = u.userid
       LEFT JOIN (
@@ -309,7 +309,7 @@ const getDetailsPendingTasksCrew = async (jobNo) => {
         l."brand", l."exWarehouseLot", l."exLmeWarehouse", l."shape", l."report",
         i."inboundId", i."netWeight"
       FROM public.lot l
-      JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
+      JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."exWarehouseLot" = l."exWarehouseLot"
       WHERE l."jobNo" = :jobNo
         AND l."status" = 'Received' AND l."report" = false AND l."isConfirm" = true
         AND i."isWeighted" IS NOT TRUE
