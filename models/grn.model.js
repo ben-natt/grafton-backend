@@ -248,14 +248,6 @@ const grnModel = {
         transaction: t,
       });
 
-      // Sanitize date fields before updating to prevent timestamp errors
-      const sanitizedData = { ...data };
-      ["deliveryDate", "exportDate", "stuffingDate"].forEach((key) => {
-        if (sanitizedData[key] === "") {
-          sanitizedData[key] = null;
-        }
-      });
-
       const transactionUpdateQuery = `
           UPDATE public.outboundtransactions SET
             "releaseWarehouse" = :releaseWarehouse,
@@ -266,9 +258,6 @@ const grnModel = {
             "containerNo" = :containerNo,
             "sealNo" = :sealNo,
             "releaseDate" = :releaseDate,
-            "deliveryDate" = :deliveryDate,
-            "exportDate" = :exportDate,
-            "stuffingDate" = :stuffingDate,
             "updatedAt" = NOW()
           WHERE "outboundId" = :outboundId;
         `;

@@ -280,6 +280,7 @@ const createGrnAndTransactions = async (req, res) => {
         day: "2-digit",
         month: "short",
         year: "numeric",
+        timeZone: "Asia/Singapore",
       }),
       warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "N/A",
       transportVendor:
