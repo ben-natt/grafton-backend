@@ -194,14 +194,26 @@ const grnModel = {
             (SELECT ot."outboundType" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "outboundType",
             (SELECT STRING_AGG(DISTINCT ot.commodity, ', ') FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId") as commodities,
             (SELECT STRING_AGG(DISTINCT ot.shape, ', ') FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId") as shapes,
-            (SELECT STRING_AGG(DISTINCT ot.brands, ', ') FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId") as brands,
+            
             (SELECT ot."releaseWarehouse" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "releaseWarehouse",
             (SELECT ot."transportVendor" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "transportVendor",
             (SELECT ot."containerNo" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "containerNo",
             (SELECT ot."sealNo" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "sealNo",
             (SELECT ot."deliveryDate" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "deliveryDate",
             (SELECT ot."exportDate" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "exportDate",
-            (SELECT ot."stuffingDate" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "stuffingDate"
+            (SELECT ot."stuffingDate" FROM public.outboundtransactions ot WHERE ot."outboundId" = o."outboundId" LIMIT 1) as "stuffingDate",
+        
+            (
+              SELECT json_agg(json_build_object(
+                'outboundTransactionId', ot."outboundTransactionId",
+                'jobNo', ot."jobNo",
+                'lotNo', ot."lotNo",
+                'brand', ot.brands
+              ))
+              FROM public.outboundtransactions ot
+              WHERE ot."outboundId" = o."outboundId"
+            ) as lots
+
         FROM public.outbounds o
         WHERE o."outboundId" = :outboundId;
       `;
@@ -221,7 +233,7 @@ const grnModel = {
     const t = await db.sequelize.transaction();
     try {
       const oldDataQuery = `
-          SELECT "grnImage", "grnPreviewImage", "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature"
+          SELECT "grnImage", "grnPreviewImage", "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature", "isWeightVisible"
           FROM public.outbounds WHERE "outboundId" = :outboundId;
         `;
       const oldData = await db.sequelize.query(oldDataQuery, {
@@ -254,7 +266,6 @@ const grnModel = {
             "transportVendor" = :transportVendor,
             "commodity" = :commodities,
             "shape" = :shapes,
-            "brands" = :brands,
             "containerNo" = :containerNo,
             "sealNo" = :sealNo,
             "releaseDate" = :releaseDate,
@@ -262,10 +273,32 @@ const grnModel = {
           WHERE "outboundId" = :outboundId;
         `;
       await db.sequelize.query(transactionUpdateQuery, {
-        replacements: { ...sanitizedData, outboundId },
+        replacements: { ...data, outboundId },
         type: db.sequelize.QueryTypes.UPDATE,
         transaction: t,
       });
+
+      if (data.updatedBrands && Array.isArray(data.updatedBrands)) {
+        for (const brandUpdate of data.updatedBrands) {
+          const { outboundTransactionId, newBrand } = brandUpdate;
+          if (outboundTransactionId) {
+            const brandUpdateQuery = `
+              UPDATE public.outboundtransactions SET
+                brands = :newBrand,
+                "updatedAt" = NOW()
+              WHERE "outboundTransactionId" = :outboundTransactionId;
+            `;
+            await db.sequelize.query(brandUpdateQuery, {
+              replacements: {
+                newBrand: newBrand || null,
+                outboundTransactionId: outboundTransactionId,
+              },
+              type: db.sequelize.QueryTypes.UPDATE,
+              transaction: t,
+            });
+          }
+        }
+      }
 
       const pdfData = await this._gatherDataForPdfRegeneration(outboundId, t);
 
@@ -276,7 +309,7 @@ const grnModel = {
       if (oldData.warehouseSupervisorSignature)
         pdfData.warehouseSupervisorSignature =
           oldData.warehouseSupervisorSignature;
-      pdfData.isWeightVisible = true;
+      pdfData.isWeightVisible = oldData.isWeightVisible;
 
       if (oldData && oldData.grnImage) {
         const oldBaseName = path.basename(
@@ -443,12 +476,24 @@ const grnModel = {
     const aggregateDetails = (key) =>
       [...new Set(lots.map((lot) => lot[key]).filter(Boolean))].join(", ");
 
+    const uniqueBrands = [
+      ...new Set(lots.map((lot) => lot.brands).filter(Boolean)),
+    ];
+    const multipleBrands = uniqueBrands.length > 1;
+    const singleBrandForHeader =
+      uniqueBrands.length === 1 ? uniqueBrands[0] : "";
+
     return {
       ourReference: outboundDetails.jobIdentifier,
       grnNo: outboundDetails.grnNo,
       releaseDate: new Date(outboundDetails.releaseDate).toLocaleDateString(
         "en-GB",
-        { day: "2-digit", month: "short", year: "numeric" }
+        {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          timeZone: "Asia/Singapore",
+        }
       ),
       warehouse: firstLot.releaseWarehouse || "N/A",
       transportVendor: firstLot.transportVendor || "N/A",
@@ -465,8 +510,9 @@ const grnModel = {
       cargoDetails: {
         commodity: aggregateDetails("commodity") || "N/A",
         shape: aggregateDetails("shape") || "N/A",
-        brand: aggregateDetails("brands") || "N/A",
+        brand: singleBrandForHeader, // MODIFIED: Use singleBrandForHeader
       },
+      multipleBrands: multipleBrands, // NEW: Pass multipleBrands flag
       lots: lots.map((lot) => {
         const actualWeight = parseFloat(lot.actualWeight) || 0;
         const grossWeight = parseFloat(lot.grossWeight) || 0;
@@ -477,6 +523,7 @@ const grnModel = {
           bundles: lot.noOfBundle,
           actualWeightMt: displayWeight.toFixed(3),
           netWeightMt: (parseFloat(lot.netWeight) || 0).toFixed(3),
+          brand: lot.brands, // NEW: Pass the lot-specific brand
         };
       }),
     };

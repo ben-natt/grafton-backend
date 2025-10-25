@@ -169,6 +169,10 @@ async function generateGrnPdf(data) {
         drawText(lot.netWeightMt, 266, startY);
       }
 
+      if (data.multipleBrands === true) {
+        drawText(lot.brand, 300, startY);
+      }
+
       totalBundles += Number(lot.bundles || 0);
       startY -= rowHeight;
     }

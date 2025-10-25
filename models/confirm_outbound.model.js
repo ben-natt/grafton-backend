@@ -416,7 +416,7 @@ const createGrnAndTransactions = async (formData) => {
     const outboundInsertReplacements = {
       ...formData,
       // Overwrite the string 'releaseDate' with the Date object
-      releaseDate: releaseDateAsObject, 
+      releaseDate: releaseDateAsObject,
       jobIdentifier: outboundJobNo,
     };
 
@@ -425,13 +425,13 @@ const createGrnAndTransactions = async (formData) => {
           "releaseDate", "driverName", "driverIdentityNo", "truckPlateNo",
           "warehouseStaff", "warehouseSupervisor", "userId", "grnNo", "jobIdentifier",
           "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature",
-          "tareWeight", uom,
+          "tareWeight", uom, "isWeightVisible",
           "createdAt", "updatedAt"
       ) VALUES (
           :releaseDate, :driverName, :driverIdentityNo, :truckPlateNo,
           :warehouseStaff, :warehouseSupervisor, :userId, :grnNo, :jobIdentifier,
           :driverSignature, :warehouseStaffSignature, :warehouseSupervisorSignature,
-          :tareWeight, :uom,
+          :tareWeight, :uom, :isWeightVisible,
           NOW(), NOW()
       ) RETURNING "outboundId", "createdAt" AS "outboundedDate", "jobIdentifier", "grnNo";
     `;
