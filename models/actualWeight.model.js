@@ -196,7 +196,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
         SELECT "jobNo", "exWarehouseLot" 
         FROM public.inbounds 
         WHERE "inboundId" = :idValue 
-        AND ("isWeighted" IS NULL OR "isWeighted" = false)
+
       `;
       const [inbound] = await db.sequelize.query(inboundQuery, {
         replacements: { idValue },
@@ -227,7 +227,6 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
         SELECT "jobNo", "lotNo" 
         FROM public.inbounds 
         WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
-        AND ("isWeighted" IS NULL OR "isWeighted" = false)
       `;
       const [inbound] = await db.sequelize.query(inboundQuery, {
         replacements: { jobNo: lot.jobNo, lotNo: lot.lotNo },
