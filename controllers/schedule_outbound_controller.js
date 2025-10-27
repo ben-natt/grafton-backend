@@ -61,6 +61,7 @@ function toLocalYYYYMMDD(date) {
 function parseLocalDate(d) {
   return d ? new Date(`${d}T00:00:00+08:00`) : null;
 }
+
 exports.uploadExcel = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded." });
@@ -147,10 +148,8 @@ exports.uploadExcel = async (req, res) => {
           continue;
         }
 
-        const releaseDateExcel = excelDateToJSDate(
-          getCellValue("Release Date")
-        );
-        const releaseEndDateExcel = excelDateToJSDate(
+        let releaseDateExcel = excelDateToJSDate(getCellValue("Release Date"));
+        let releaseEndDateExcel = excelDateToJSDate(
           getCellValue("Release End Date")
         );
         const exportDateExcel = excelDateToJSDate(getCellValue("Export Date"));
@@ -160,6 +159,27 @@ exports.uploadExcel = async (req, res) => {
         const deliveryDateExcel = excelDateToJSDate(
           getCellValue("Delivery Date")
         );
+
+        let wasCorrected = false;
+
+        if (releaseDateExcel && releaseEndDateExcel) {
+          if (releaseDateExcel > releaseEndDateExcel) {
+            console.warn(
+              `⚠️ Detected swapped release dates for Job ${jobNoFromExcel}, Lot ${lotNoFromExcel}. Auto-correcting.`
+            );
+            const temp = releaseDateExcel;
+            releaseDateExcel = releaseEndDateExcel;
+            releaseEndDateExcel = temp;
+            wasCorrected = true;
+          }
+        } else if (!releaseDateExcel && releaseEndDateExcel) {
+          console.warn(
+            `⚠️ Missing Release Date but found Release End Date for Job ${jobNoFromExcel}, Lot ${lotNoFromExcel}. Assuming it's the Release Date.`
+          );
+          releaseDateExcel = releaseEndDateExcel;
+          releaseEndDateExcel = null;
+          wasCorrected = true;
+        }
 
         const weightToUse = masterInbound.isWeighted
           ? masterInbound.actualWeight
@@ -195,6 +215,10 @@ exports.uploadExcel = async (req, res) => {
           deliveryDate: toLocalYYYYMMDD(deliveryDateExcel),
         };
 
+        if (wasCorrected) {
+          lotDataForFrontend.autoCorrected = true; 
+        }
+
         processedLots.push(lotDataForFrontend);
         totalLotsFound++;
       } else {
@@ -205,7 +229,6 @@ exports.uploadExcel = async (req, res) => {
       }
     }
 
-    // MODIFICATION: Create a more detailed success message
     let message = `Processed Excel file. Found ${totalLotsFound} available lot(s) for scheduling.`;
     if (alreadyScheduledCount > 0) {
       message += ` Skipped ${alreadyScheduledCount} lot(s) that are already scheduled.`;
@@ -215,7 +238,7 @@ exports.uploadExcel = async (req, res) => {
     }
 
     res.status(200).json({
-      message: message,
+      message,
       lotCount: totalLotsFound,
       data: processedLots,
     });
@@ -235,136 +258,3 @@ exports.uploadExcel = async (req, res) => {
     }
   }
 };
-
-// exports.createScheduleOutbound = async (req, res) => {
-//   const userId = req.user?.userId;
-
-//   const {
-//     jobNumber,
-//     releaseDate,
-//     releaseEndDate,
-//     storageReleaseLocation,
-//     releaseWarehouse,
-//     transportVendor,
-//     exportDate,
-//     stuffingDate,
-//     containerNo,
-//     sealNo,
-//     deliveryDate,
-//     selectedLots,
-//   } = req.body;
-
-//   if (
-//     !releaseDate ||
-//     !storageReleaseLocation ||
-//     !releaseWarehouse ||
-//     !transportVendor ||
-//     !Array.isArray(selectedLots) ||
-//     selectedLots.length === 0
-//   ) {
-//     return res.status(400).json({
-//       message: 'Missing required data for scheduling outbound. Ensure all required fields are provided.',
-//     });
-//   }
-
-//   const totalLotReleaseWeight = selectedLots.reduce((total, lot) => {
-//     const weight = parseFloat(lot.weight);
-//     return total + (isNaN(weight) ? 0 : weight);
-//   }, 0);
-
-//   const outboundType = containerNo?.trim()?.length > 0 ? 'Container' : 'Flatbed';
-//   const transaction = await sequelize.transaction();
-
-//   try {
-//     const result = await sequelize.query(
-//       `
-//       INSERT INTO public.scheduleoutbounds(
-//         "releaseDate", "userId", "lotReleaseWeight", "outboundType",
-//         "exportDate", "stuffingDate", "containerNo", "sealNo",
-//         "createdAt", "updatedAt", "deliveryDate", "storageReleaseLocation",
-//         "releaseWarehouse", "transportVendor", "outboundJobNo"
-//       )
-//       VALUES (
-//         :releaseDate, :userId, :lotReleaseWeight, :outboundType,
-//         :exportDate, :stuffingDate, :containerNo, :sealNo,
-//         NOW(), NOW(), :deliveryDate, :storageReleaseLocation,
-//         :releaseWarehouse, :transportVendor, :outboundJobNo
-//       )
-//       RETURNING "scheduleOutboundId";
-//       `,
-//       {
-//         replacements: {
-//           releaseDate: parseLocalDate(releaseDate),
-//           userId,
-//           lotReleaseWeight: totalLotReleaseWeight,
-//           outboundType,
-//           exportDate: parseLocalDate(exportDate),
-//           stuffingDate: parseLocalDate(stuffingDate),
-//           containerNo: containerNo || null,
-//           sealNo: sealNo || null,
-//           deliveryDate: parseLocalDate(deliveryDate),
-//           storageReleaseLocation,
-//           releaseWarehouse,
-//           transportVendor,
-//           outboundJobNo: jobNumber,
-//         },
-//         type: sequelize.QueryTypes.INSERT,
-//         transaction,
-//       }
-//     );
-
-//     const scheduleOutboundId = result?.[0]?.[0]?.scheduleOutboundId;
-
-//     if (!scheduleOutboundId) {
-//       throw new Error('Failed to retrieve scheduleOutboundId.');
-//     }
-
-//     for (const lot of selectedLots) {
-//       const normalizedJobNo = lot.jobNo.replace(/-/g, '');
-
-//       const inboundRecord = await Inbounds.findOne({
-//         where: {
-//           [Op.and]: [
-//             where(fn('REPLACE', col('jobNo'), '-', ''), normalizedJobNo),
-//             { lotNo: lot.lotNo },
-//           ],
-//         },
-//         attributes: ['inboundId'],
-//         transaction,
-//       });
-
-//       if (!inboundRecord) {
-//         throw new Error(`Inbound record not found: Job No "${lot.jobNo}", Lot No "${lot.lotNo}"`);
-//       }
-
-//       // MODIFIED: Added storageReleaseLocation to the creation payload
-//       await SelectedInbounds.create(
-//         {
-//           scheduleOutboundId,
-//           inboundId: inboundRecord.inboundId,
-//           lotNo: lot.lotNo,
-//           jobNo: lot.jobNo,
-//           isOutbounded: false,
-//           storageReleaseLocation: lot.storageReleaseLocation, // <-- ADDED THIS LINE
-//           releaseDate: parseLocalDate(releaseDate),
-//           releaseEndDate: releaseEndDate ? parseLocalDate(releaseEndDate) : null,
-//           exportDate: parseLocalDate(exportDate),
-//           deliveryDate: parseLocalDate(deliveryDate),
-//         },
-//         { transaction }
-//       );
-//     }
-
-//     await transaction.commit();
-//     res.status(200).json({
-//       message: 'Outbound schedule and selected inbound lots created successfully!',
-//       jobNo: `SINO${jobNumber}`,
-//     });
-//   } catch (error) {
-//     await transaction.rollback();
-//     res.status(500).json({
-//       message: 'Error processing outbound schedule.',
-//       error: error.message,
-//     });
-//   }
-// };

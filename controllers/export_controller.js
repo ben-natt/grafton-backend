@@ -270,9 +270,9 @@ async function exportBundleSheetToExcel(req, res) {
         const row = worksheet.getRow(dataStartRow + index);
         const isEvenRow = index % 2 !== 0;
 
-        const producerGW = parseInt(bundle.producerGW, 10) || 0;
-        const producerNW = parseInt(bundle.producerNW, 10) || 0;
-        const weighedGW = parseInt(bundle.weighedGW, 10) || 0;
+        const producerGW = parseInt(bundle.producerGW, 10) || "-";
+        const producerNW = parseInt(bundle.producerNW, 10) || "-";
+        const weighedGW = parseInt(bundle.weighedGW, 10) || "-";
 
         row.values = [
           , bundle.bundleNo, bundle.containerNo, bundle.heatCastNo, bundle.batchNo,
