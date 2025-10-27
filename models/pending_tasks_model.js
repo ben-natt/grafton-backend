@@ -244,12 +244,40 @@ const getPendingOutboundTasks = async (
 
     let baseWhere = [`si."isOutbounded" = false`];
     const replacements = {};
+    let jobNoFilterWhere = "";
 
     if (jobNo) {
-      baseWhere.push(
-        `(i."jobNo" ILIKE :jobNo OR COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))) ILIKE :jobNo)`
-      );
-      replacements.jobNo = `%${jobNo}%`;
+      // Regex to check if the part after the last dash is purely numeric
+      const lotNoPattern = /-(\d+)$/;
+      const match = jobNo.match(lotNoPattern);
+
+      if (match) {
+        // --- Search by Inbound JobNo + LotNo ---
+        // e.g., "SINI-001-23" or "SINI001-23"
+        const lotNoPart = match[1]; // "23"
+        // Get the part before the last dash
+        const jobNoPart = jobNo.substring(0, match.index); // "SINI-001" or "SINI001"
+
+        // Sanitize the jobNo part by removing all dashes
+        const sanitizedJobNo = jobNoPart.replace(/-/g, ""); // "SINI001"
+
+        jobNoFilterWhere = `(REPLACE(si."jobNo", '-', '') ILIKE :sanitizedJobNo AND si."lotNo"::text ILIKE :lotNoPart)`;
+        replacements.sanitizedJobNo = `%${sanitizedJobNo}%`;
+        replacements.lotNoPart = `%${lotNoPart}%`;
+      } else {
+        // --- Search by OutboundJobNo OR InboundJobNo ---
+        // e.g., "SINO-076A", "SINO001", "SINI-001", "SINI001"
+        // Sanitize the entire input for a broad search
+        const sanitizedJobNo = jobNo.replace(/-/g, ""); // "SINO076A", "SINO001", "SINI001"
+
+        jobNoFilterWhere = `(
+          REPLACE(si."jobNo", '-', '') ILIKE :sanitizedJobNo 
+          OR 
+          REPLACE(COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))), '-', '') ILIKE :sanitizedJobNo
+        )`;
+        replacements.sanitizedJobNo = `%${sanitizedJobNo}%`;
+      }
+      baseWhere.push(jobNoFilterWhere);
     }
 
     const baseWhereString = baseWhere.join(" AND ");
@@ -359,11 +387,12 @@ const getPendingOutboundTasks = async (
       LEFT JOIN public.exlmewarehouses w ON i."exLmeWarehouseId" = w."exLmeWarehouseId"
       WHERE so."scheduleOutboundId" IN (:paginatedScheduleIds) 
         AND si."isOutbounded" = false
+        ${jobNo ? `AND ${jobNoFilterWhere}` : ""}
       ORDER BY si."releaseDate" ASC, i."jobNo" ASC, i."lotNo" ASC;
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
-      replacements: { paginatedScheduleIds },
+      replacements: { ...replacements, paginatedScheduleIds },
       type: db.sequelize.QueryTypes.SELECT,
     });
 
