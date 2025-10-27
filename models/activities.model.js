@@ -346,7 +346,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       "Scheduled By": 'u_scheduled."username"',
     };
 
-    let orderByClause = 'ORDER BY si."releaseDate" DESC NULLS LAST';
+    let orderByClause = 'ORDER BY o."createdAt" DESC NULLS LAST'; 
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortColumns = sortableColumns[filters.sortBy]
         .split(",")

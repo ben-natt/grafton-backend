@@ -152,7 +152,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     // Fetch details for the paginated jobs, now with lot-level filtering
     const detailsQuery = `
       SELECT
-          l."lotId", l."crewLotNo" AS "lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
+          l."lotId", i."crewLotNo" AS "lotNo", i."jobNo", l.commodity, l."expectedBundleCount",
           l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
           l."inbounddate",
           i."inboundId", i."netWeight",
