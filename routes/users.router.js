@@ -275,12 +275,10 @@ router.post("/register", async (req, res) => {
     }
 
     const roles = await usersModel.getAllRoles();
-    // UPDATED: Accessing role.role_name
     const warehouseCrewRole = roles.find(
-      (role) => role.role_name === "Warehouse Crew"
+      (role) => role.rolename === "Warehouse Crew"
     );
-    // UPDATED: Accessing role.user_role_id
-    const defaultRoleId = warehouseCrewRole ? warehouseCrewRole.user_role_id : 1; // Fallback to 1 if not found
+    const defaultRoleId = warehouseCrewRole ? warehouseCrewRole.roleid : 1; // Fallback to 1 if not found
 
     const newUser = await usersModel.createUser(email, password, defaultRoleId);
 
@@ -288,11 +286,10 @@ router.post("/register", async (req, res) => {
     res.status(201).json({
       message: "User created successfully",
       user: {
-        // UPDATED: Return new schema properties
         email: newUser.email,
-        user_role_id: newUser.user_role_id,
-        created_at: newUser.created_at,
-        updated_at: newUser.updated_at,
+        roleid: newUser.roleid,
+        createdAt: newUser.created_at,
+        updatedAt: newUser.updated_at,
       },
     });
   } catch (error) {
@@ -328,11 +325,9 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Invalid Email or Password." });
     }
 
-    // UPDATED: Check for "user_id"
-    if (!user.user_id) {
+    if (!user.userid) {
       console.error(
-        // UPDATED: Error message
-        "User object from DB does not contain 'user_id'. Please ensure your SQL query in users.model.js returns the user_id column."
+        "User object from DB does not contain 'userid'. Please ensure your SQL query in users.model.js returns the userid column."
       );
       return res
         .status(500)
@@ -340,8 +335,7 @@ router.post("/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-      // UPDATED: Use user.user_id for the payload
-      { userid: user.user_id, email: user.email }, // Payload for JWT
+      { userid: user.userid, email: user.email }, // Payload for JWT
       process.env.JWT_SECRET, // Secret key from environment variables
       { expiresIn: "10h" } // Token expires in 10 hours
     );
@@ -350,8 +344,7 @@ router.post("/login", async (req, res) => {
     res.status(200).json({
       message: "Login successful",
       token: token,
-      // UPDATED: Use user.user_id for the response
-      user: { id: user.user_id, email: user.email, username: user.username },
+      user: { id: user.userid, email: user.email, username: user.username },
     });
   } catch (error) {
     console.error("Login Error:", error);
@@ -392,22 +385,19 @@ router.get("/profile", authenticate, async (req, res) => {
 
     const protocol =
       req.headers["x-forwarded-proto"]?.split(",")[0] || req.protocol;
-    // UPDATED: Use user.profile_image_url
-    const fullProfileImageUrl = user.profile_image_url
-      ? `${protocol}://${req.get("host")}/${user.profile_image_url}`
+    const fullProfileImageUrl = user.profileimageurl
+      ? `${protocol}://${req.get("host")}/${user.profileimageurl}`
       : null;
     console.log("Full profile image URL:", fullProfileImageUrl);
 
     res.status(200).json({
       success: true,
       data: {
-        // UPDATED: Response keys and values
         username: user.username,
         email: user.email,
-        user_role_id: user.user_role_id,
-        role_name: user.role_name,
-        profile_image_url: fullProfileImageUrl,
-        whatsapp_id: user.whatsapp_id,
+        roleid: user.roleid,
+        rolename: user.rolename,
+        profileimageurl: fullProfileImageUrl,
       },
     });
   } catch (error) {
@@ -416,6 +406,7 @@ router.get("/profile", authenticate, async (req, res) => {
   }
 });
 
+// Route to update the authenticated user's profile.
 // Route to update the authenticated user's profile.
 router.put("/profile", authenticate, (req, res) => {
   upload(req, res, async (err) => {
@@ -441,9 +432,6 @@ router.put("/profile", authenticate, (req, res) => {
 
       // Handle text fields
       if (req.body.username) updates.username = req.body.username;
-      // UPDATED: Use lowercase whatsapp_id
-      if (req.body.whatsapp_id) updates.whatsapp_id = req.body.whatsapp_id;
-      // 'roleid' is kept as the key from the client, the model will map it
       if (req.body.roleid) updates.roleid = req.body.roleid;
       if (req.body.password) {
         if (req.body.password.length < 8) {
@@ -469,10 +457,8 @@ router.put("/profile", authenticate, (req, res) => {
       // Handle file upload
       if (req.file) {
         const user = await usersModel.getUserById(userId);
-        // UPDATED: Check user.profile_image_url
-        if (user.profile_image_url) {
-          // UPDATED: Get basename from user.profile_image_url
-          const oldFilename = path.basename(user.profile_image_url);
+        if (user.profileimageurl) {
+          const oldFilename = path.basename(user.profileimageurl);
           const oldImagePath = path.join(
             __dirname,
             "../uploads/img/profile", // Point to the correct uploads directory
@@ -487,7 +473,6 @@ router.put("/profile", authenticate, (req, res) => {
             );
           }
         }
-        // 'profileimageurl' is kept as the key, the model will map it
         updates.profileimageurl = `uploads/img/profile/${req.file.filename}`;
       }
 
@@ -503,27 +488,28 @@ router.put("/profile", authenticate, (req, res) => {
 
       const protocol =
         req.headers["x-forwarded-proto"]?.split(",")[0] || req.protocol;
-      // UPDATED: Use userWithUpdatedRole.profile_image_url
-      const fullProfileImageUrl = userWithUpdatedRole.profile_image_url
+      const fullProfileImageUrl = userWithUpdatedRole.profileimageurl
         ? `${protocol}://${req.get("host")}/${
-            userWithUpdatedRole.profile_image_url
+            userWithUpdatedRole.profileimageurl
           }`
         : null;
 
-      // UPDATED: Response object keys and values to snake_case
       const userProfile = {
-        user_id: userWithUpdatedRole.user_id,
+        userid: userWithUpdatedRole.userid,
         email: userWithUpdatedRole.email,
         username: userWithUpdatedRole.username,
-        profile_image_url: fullProfileImageUrl,
-        user_role_id: userWithUpdatedRole.user_role_id,
-        role_name: userWithUpdatedRole.role_name,
-        whatsapp_id: userWithUpdatedRole.whatsapp_id,
+        profileimageurl: fullProfileImageUrl,
+        roleid: userWithUpdatedRole.roleid,
+        rolename: userWithUpdatedRole.rolename,
       };
 
+      // MODIFICATION: Standardize success response
       res.status(200).json({ success: true, data: userProfile });
     } catch (error) {
       console.error("Error updating profile:", error);
+      // MODIFICATION: Catch unique constraint violation for username
+      // The error name can be 'SequelizeUniqueConstraintError'
+      // The postgres error code for unique violation is '23505'
       if (
         error.name === "SequelizeUniqueConstraintError" ||
         (error.original && error.original.code === "23505")

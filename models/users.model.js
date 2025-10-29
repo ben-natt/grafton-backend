@@ -13,7 +13,7 @@ if (!fs.existsSync(uploadDir)) {
 const getUserByEmail = async (email) => {
   try {
     const result = await db.sequelize.query(
-      'SELECT * FROM "Users" WHERE email = :email',
+      "SELECT * FROM users WHERE email = :email",
       {
         replacements: { email },
         type: db.sequelize.QueryTypes.SELECT,
@@ -26,21 +26,20 @@ const getUserByEmail = async (email) => {
   }
 };
 
-// Fetch user by ID
+// Fetch user by ID - This is crucial for the /profile routes
 const getUserById = async (userId) => {
   try {
     const result = await db.sequelize.query(
-
       `SELECT
-        u.user_id,
+        u.userid,
         u.email,
         u.username,
-        u.profile_image_url,
-        u.user_role_id,
-        r.role_name
-       FROM "Users" u
-       JOIN "userRole" r ON u.user_role_id = r.user_role_id
-       WHERE u.user_id = :userId`,
+        u.profileimageurl,
+        u.roleid,
+        r.rolename
+       FROM users u
+       JOIN roles r ON u.roleid = r.roleid
+       WHERE u.userid = :userId`,
       {
         replacements: { userId },
         type: db.sequelize.QueryTypes.SELECT,
@@ -53,12 +52,11 @@ const getUserById = async (userId) => {
   }
 };
 
-// Fetch role by roleId
+// Fetch role by roleId - This function will now be less critical as we'll join roles in getUserById
 const getRoleById = async (roleId) => {
   try {
     const result = await db.sequelize.query(
-      // UPDATED: Column name
-      'SELECT * FROM "userRole" WHERE user_role_id = $1',
+      'SELECT * FROM roles WHERE "roleid" = $1',
       {
         bind: [roleId],
         type: db.sequelize.QueryTypes.SELECT,
@@ -74,7 +72,7 @@ const getRoleById = async (roleId) => {
 // Fetch all roles
 const getAllRoles = async () => {
   try {
-    const result = await db.sequelize.query('SELECT * FROM "userRole"', {
+    const result = await db.sequelize.query("SELECT * FROM roles", {
       type: db.sequelize.QueryTypes.SELECT,
     });
     return result;
@@ -87,7 +85,7 @@ const getAllRoles = async () => {
 // Fetch all users
 const getAllUsers = async () => {
   try {
-    const result = await db.sequelize.query('SELECT * FROM "Users"', {
+    const result = await db.sequelize.query("SELECT * FROM users", {
       type: db.sequelize.QueryTypes.SELECT,
     });
     return result;
@@ -102,7 +100,7 @@ const createUser = async (email, password, roleid) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await db.sequelize.query(
-      'INSERT INTO "Users" (email, password, user_role_id) VALUES ($1, $2, $3) RETURNING *',
+      "INSERT INTO users (email, password, roleid) VALUES ($1, $2, $3) RETURNING *",
       {
         bind: [email, hashedPassword, roleid], // Use the passed roleid
         type: db.sequelize.QueryTypes.INSERT,
@@ -118,22 +116,16 @@ const createUser = async (email, password, roleid) => {
 // Update user profile
 const updateUserProfile = async (userId, updates) => {
   try {
-    // UPDATED: Map keys from router to new snake_case DB columns
-    const columnMap = {
-      username: "username",
-      password: "password",
-      profileimageurl: "profile_image_url",
-      roleid: "user_role_id",
-      whatsapp_id: "whatsapp_id", // UPDATED: Key is now lowercase
-    };
-
-    let query = 'UPDATE "Users" SET ';
-    const fields = [];
-    const replacements = { userId };
+    let query = "UPDATE users SET ";
+    const fields = []; // Array to hold the fields to update
+    const replacements = { userId }; // Object to hold the replacements for the query
 
     Object.keys(updates).forEach((key) => {
-      if (columnMap[key]) {
-        fields.push(`${columnMap[key]} = :${key}`);
+      // Iterate over the updates object
+      // Check if the key is a valid field in the users table
+      if (key !== "userid") {
+        // Exclude userid from updates
+        fields.push(`${key} = :${key}`);
         replacements[key] = updates[key];
       }
     });
@@ -142,47 +134,49 @@ const updateUserProfile = async (userId, updates) => {
       throw new Error("No fields to update");
     }
 
-    // UPDATED: Column names "updated_at" and "user_id"
     query +=
       fields.join(", ") +
-      ", updated_at = CURRENT_TIMESTAMP WHERE user_id = :userId RETURNING *";
+      ", updatedat = CURRENT_TIMESTAMP WHERE userid = :userId RETURNING *"; // Use RETURNING * to get the updated row
 
     const [updatedRows] = await db.sequelize.query(query, {
-      replacements,
-      type: db.sequelize.QueryTypes.UPDATE,
+      replacements, // Use the replacements object
+      // Use the QueryTypes.UPDATE to indicate this is an update operation
+      type: db.sequelize.QueryTypes.UPDATE, // Use QueryTypes.UPDATE to indicate this is an update operation
     });
 
-    return updatedRows[0];
+    return updatedRows[0]; // Return the first updated row
   } catch (error) {
     console.error("Error updating user profile:", error);
     throw error;
   }
 };
 
+//++++++++++++++ NEW FUNCTION ADDED HERE ++++++++++++++
 // Update user password by email
 const updateUserPassword = async (email, newPassword) => {
-  try {
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await db.sequelize.query(
-      'UPDATE "Users" SET password = :hashedPassword, updated_at = CURRENT_TIMESTAMP WHERE email = :email',
-      {
-        replacements: { hashedPassword, email },
-        type: db.sequelize.QueryTypes.UPDATE,
-      }
-    );
-  } catch (error) {
-    console.error("Error updating user password:", error);
-    throw error;
-  }
+    try {
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await db.sequelize.query(
+            "UPDATE users SET password = :hashedPassword, updatedat = CURRENT_TIMESTAMP WHERE email = :email",
+            {
+                replacements: { hashedPassword, email },
+                type: db.sequelize.QueryTypes.UPDATE,
+            }
+        );
+    } catch (error) {
+        console.error("Error updating user password:", error);
+        throw error;
+    }
 };
+//++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 module.exports = {
   getAllUsers,
   getUserByEmail,
   getRoleById,
-  getAllRoles,
+  getAllRoles, // Export the new function
   getUserById,
   createUser,
   updateUserProfile,
-  updateUserPassword,
+  updateUserPassword, // Export the new function
 };
