@@ -119,11 +119,11 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
       // Regex to detect a combo search that has a mandatory separator (space, dash, underscore)
       const comboMatch = filters.search.match(/^(.*?)[\s_-]+(\d+)$/i);
 
-      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== '') {
+      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== "") {
         // --- Handles Combo Searches like 'SINI231A-1' ---
         const [_, jobNoPart, lotNoPart] = comboMatch;
         // Normalize by removing all non-alphanumeric characters
-        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, '');
+        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, "");
 
         replacements.jobNoSearch = `%${normalizedJobNo}%`;
         replacements.lotNoSearch = lotNoPart; // Exact match for lot number
@@ -132,9 +132,8 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
             REGEXP_REPLACE(i."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :jobNoSearch
             AND CAST(i."lotNo" AS TEXT) = :lotNoSearch
         )`);
-
       } else {
-        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, '');
+        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, "");
         replacements.normalizedSearch = `%${normalizedSearch}%`;
         replacements.search = `%${filters.search}%`;
 
@@ -289,10 +288,10 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       // Regex to detect a combo search with a mandatory separator
       const comboMatch = filters.search.match(/^(.*?)[\s_-]+(\d+)$/i);
 
-      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== '') {
+      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== "") {
         // --- Handles Combo Searches like 'SINI231A-1' ---
         const [_, jobNoPart, lotNoPart] = comboMatch;
-        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, '');
+        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, "");
 
         replacements.jobNoSearch = `%${normalizedJobNo}%`;
         replacements.lotNoSearch = lotNoPart;
@@ -302,10 +301,9 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
             REGEXP_REPLACE(o."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :jobNoSearch
             AND CAST(o."lotNo" AS TEXT) = :lotNoSearch
         )`);
-
       } else {
         // --- Handles Generic and JobNo-only searches ---
-        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, '');
+        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, "");
         replacements.normalizedSearch = `%${normalizedSearch}%`;
         replacements.search = `%${filters.search}%`;
 
@@ -350,9 +348,13 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
 
     let orderByClause = 'ORDER BY o."createdAt" DESC NULLS LAST'; 
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
-      const sortColumns = sortableColumns[filters.sortBy].split(',').map(col => col.trim());
+      const sortColumns = sortableColumns[filters.sortBy]
+        .split(",")
+        .map((col) => col.trim());
       const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
-      const orderedColumns = sortColumns.map(col => `${col} ${sortOrder} NULLS LAST`).join(', ');
+      const orderedColumns = sortColumns
+        .map((col) => `${col} ${sortOrder} NULLS LAST`)
+        .join(", ");
       orderByClause = `ORDER BY ${orderedColumns}`;
     }
 
@@ -380,7 +382,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
 
     const dataQuery = `SELECT 
         o."outboundTransactionId" AS id,
-        TO_CHAR(o."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
+        TO_CHAR(o."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
         o."jobNo" AS "Job No",
         so."outboundJobNo" AS "Outbound Job No",
         o."lotNo" AS "Lot No",
@@ -611,11 +613,11 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
           si."releaseEndDate" AS "ReleaseEndDate", 
           so."createdAt" AS "ScheduleOutboundDate",
           so."outboundJobNo" AS "OutboundJobNo",
-          so."containerNo" AS "ContainerNo",
-          so."sealNo" AS "SealNo",
+          o."containerNo" AS "ContainerNo",
+          o."sealNo" AS "SealNo",
           si."exportDate" AS "ExportDate", si."deliveryDate" AS "DeliveryDate",
           o."stuffingDate" AS "StuffingDate",
-          o."createdAt" AS "CreatedAt",
+          o."releaseDate" AS "CreatedAt",
           o."lotReleaseWeight" AS "TotalReleaseWeight",
           o."storageReleaseLocation" AS "StorageReleaseLocation", o."transportVendor" AS "TransportVendor",
           scheduler."username" AS "ScheduledBy",
@@ -679,7 +681,7 @@ const getAllScheduleInbound = async ({
   pageSize = 25,
 }) => {
   try {
-      let whereClauses = [ 'l."isConfirm" = false', `l."status" = 'Pending'` ];
+    let whereClauses = ['l."isConfirm" = false', `l."status" = 'Pending'`];
     const replacements = {};
 
     if (filters.commodity) {
@@ -946,13 +948,16 @@ const getAllScheduleOutbound = async ({
         `;
       } else {
         // Original logic for all other single-column sorts
-        const sortColumns = sortableColumns[filters.sortBy].split(',').map(col => col.trim());
-        const orderedColumns = sortColumns.map(col => `${col} ${sortOrder} NULLS LAST`).join(', ');
+        const sortColumns = sortableColumns[filters.sortBy]
+          .split(",")
+          .map((col) => col.trim());
+        const orderedColumns = sortColumns
+          .map((col) => `${col} ${sortOrder} NULLS LAST`)
+          .join(", ");
         orderByClause = `ORDER BY ${orderedColumns}`;
       }
     }
     // --- END: MODIFIED AND CORRECTED SORTING LOGIC ---
-
 
     const limit = parseInt(pageSize, 10);
     const offset = (page - 1) * limit;
@@ -975,7 +980,7 @@ const getAllScheduleOutbound = async ({
     const countQuery = `SELECT COUNT(DISTINCT si."inboundId") ${fromAndJoins} ${whereString}`;
 
     const totalResult = await db.sequelize.query(countQuery, {
-      replacements: { ...replacements }, 
+      replacements: { ...replacements },
       type: db.sequelize.QueryTypes.SELECT,
     });
     const total = parseInt(totalResult[0].count, 10);
@@ -1016,7 +1021,7 @@ const getAllScheduleOutbound = async ({
 ////////////////////////////////////////////////////////////////////////////////
 const getScheduleInboundRecordByLotId = async (lotId) => {
   try {
-      const query = `SELECT
+    const query = `SELECT
             l."jobNo" AS "JobNo",
             l."lotNo" AS "LotNo",
             l."expectedBundleCount" AS "NoOfBundle",

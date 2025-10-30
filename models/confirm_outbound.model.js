@@ -368,6 +368,7 @@ const createGrnAndTransactions = async (formData) => {
   const {
     selectedInboundIds,
     stuffingPhotos,
+    existingImageUrls,
     containerNo,
     sealNo,
     scheduleOutboundId,
@@ -410,8 +411,12 @@ const createGrnAndTransactions = async (formData) => {
       : null;
     formData.tareWeight = isNaN(tareWeightValue) ? null : tareWeightValue;
 
+    const releaseDateAsObject = new Date(formData.releaseDate);
+
     const outboundInsertReplacements = {
       ...formData,
+      // Overwrite the string 'releaseDate' with the Date object
+      releaseDate: releaseDateAsObject,
       jobIdentifier: outboundJobNo,
     };
 
@@ -420,13 +425,13 @@ const createGrnAndTransactions = async (formData) => {
           "releaseDate", "driverName", "driverIdentityNo", "truckPlateNo",
           "warehouseStaff", "warehouseSupervisor", "userId", "grnNo", "jobIdentifier",
           "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature",
-          "tareWeight", uom,
+          "tareWeight", uom, "isWeightVisible",
           "createdAt", "updatedAt"
       ) VALUES (
           :releaseDate, :driverName, :driverIdentityNo, :truckPlateNo,
           :warehouseStaff, :warehouseSupervisor, :userId, :grnNo, :jobIdentifier,
           :driverSignature, :warehouseStaffSignature, :warehouseSupervisorSignature,
-          :tareWeight, :uom,
+          :tareWeight, :uom, :isWeightVisible,
           NOW(), NOW()
       ) RETURNING "outboundId", "createdAt" AS "outboundedDate", "jobIdentifier", "grnNo";
     `;
@@ -439,19 +444,65 @@ const createGrnAndTransactions = async (formData) => {
     const createdOutbound = outboundResult[0][0];
     const newOutboundId = createdOutbound.outboundId;
 
-    const updateExistingPhotosQuery = `
-      UPDATE public.stuffing_photos
-      SET "outboundId" = :outboundId, "updatedAt" = NOW()
-      WHERE "scheduleoutboundId" = :scheduleOutboundId;
-    `;
-    await db.sequelize.query(updateExistingPhotosQuery, {
-      replacements: {
-        outboundId: newOutboundId,
-        scheduleOutboundId: scheduleOutboundId,
-      },
-      type: db.sequelize.QueryTypes.UPDATE,
-      transaction: t,
-    });
+    // 1. Delete photos that are in the DB for this schedule but NOT in the "keep" list
+    if (
+      existingImageUrls &&
+      Array.isArray(existingImageUrls) &&
+      existingImageUrls.length > 0
+    ) {
+      // User kept *some* photos, so delete the ones *not* in this list
+      const deletePhotosQuery = `
+        DELETE FROM public.stuffing_photos
+        WHERE "scheduleoutboundId" = :scheduleOutboundId
+          AND "outboundId" IS NULL -- Only delete ones not yet processed
+          AND "imageUrl" NOT IN (:existingImageUrls);
+      `;
+      await db.sequelize.query(deletePhotosQuery, {
+        replacements: {
+          scheduleOutboundId: scheduleOutboundId,
+          existingImageUrls: existingImageUrls,
+        },
+        type: db.sequelize.QueryTypes.DELETE,
+        transaction: t,
+      });
+    } else if (
+      existingImageUrls &&
+      Array.isArray(existingImageUrls) &&
+      existingImageUrls.length === 0
+    ) {
+      // User deleted *all* existing photos
+      const deleteAllPhotosQuery = `
+        DELETE FROM public.stuffing_photos
+        WHERE "scheduleoutboundId" = :scheduleOutboundId
+          AND "outboundId" IS NULL; -- Safety check
+      `;
+      await db.sequelize.query(deleteAllPhotosQuery, {
+        replacements: { scheduleOutboundId: scheduleOutboundId },
+        type: db.sequelize.QueryTypes.DELETE,
+        transaction: t,
+      });
+    }
+    // Note: If existingImageUrls is null/undefined, we do nothing (preserves old behavior if something goes wrong)
+
+    // 2. Update the remaining existing photos to link them to the new outboundId
+    // This REPLACES the old `updateExistingPhotosQuery`
+    if (existingImageUrls && existingImageUrls.length > 0) {
+      const updateRemainingPhotosQuery = `
+        UPDATE public.stuffing_photos
+        SET "outboundId" = :outboundId, "updatedAt" = NOW()
+        WHERE "scheduleoutboundId" = :scheduleOutboundId
+          AND "imageUrl" IN (:existingImageUrls);
+      `;
+      await db.sequelize.query(updateRemainingPhotosQuery, {
+        replacements: {
+          outboundId: newOutboundId,
+          scheduleOutboundId: scheduleOutboundId,
+          existingImageUrls: existingImageUrls,
+        },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction: t,
+      });
+    }
 
     if (containerNo !== undefined && sealNo !== undefined) {
       const updateScheduleQuery = `

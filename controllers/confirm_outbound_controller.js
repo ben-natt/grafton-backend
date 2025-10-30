@@ -258,6 +258,15 @@ const createGrnAndTransactions = async (req, res) => {
         ", "
       );
 
+    const uniqueBrands = [
+      ...new Set(lotsForPdf.map((lot) => lot.brand).filter(Boolean)),
+    ];
+
+    const multipleBrands = uniqueBrands.length > 1;
+
+    const singleBrandForHeader =
+      uniqueBrands.length === 1 ? uniqueBrands[0] : "";
+
     const containerAndSealNo =
       scheduleInfo.containerNo && scheduleInfo.sealNo
         ? `${scheduleInfo.containerNo} / ${scheduleInfo.sealNo}`
@@ -280,6 +289,7 @@ const createGrnAndTransactions = async (req, res) => {
         day: "2-digit",
         month: "short",
         year: "numeric",
+        timeZone: "Asia/Singapore",
       }),
       warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "N/A",
       transportVendor:
@@ -292,12 +302,12 @@ const createGrnAndTransactions = async (req, res) => {
           ? aggregateDetails("commodity")
           : "N/A",
         shape: aggregateDetails("shape") ? aggregateDetails("shape") : "N/A",
-        brand: aggregateDetails("brand") ? aggregateDetails("brand") : "N/A",
+        brand: singleBrandForHeader,
       },
+      multipleBrands: multipleBrands,
       lots: lotsForPdf.map((lot) => {
         const actualWeight = parseFloat(lot.actualWeight) || 0;
         const grossWeight = parseFloat(lot.grossWeight) || 0;
-
         const displayWeight = actualWeight !== 0 ? actualWeight : grossWeight;
 
         return {
@@ -306,6 +316,7 @@ const createGrnAndTransactions = async (req, res) => {
           grossWeightMt: parseAndFix(lot.grossWeight, 2), // Not used in PDF but kept for consistency
           netWeightMt: parseAndFix(lot.netWeight, 2),
           actualWeightMt: parseAndFix(displayWeight, 2), // This will be drawn in the Gross Weight space
+          brand: lot.brand,
         };
       }),
     };
