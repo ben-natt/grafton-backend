@@ -503,8 +503,11 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
   }
 };
 
-const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
-  const transaction = await db.sequelize.transaction();
+const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType, options = {}) => {
+  // Get transaction from options, or create a new one if not provided
+  const managedTransaction = !options.transaction;
+  const transaction = options.transaction || (await db.sequelize.transaction());
+
   try {
     // Check if there are any lots to report
     const lotsToUpdate = await db.sequelize.query(
@@ -513,12 +516,12 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
       {
         replacements: { jobNo },
         type: db.sequelize.QueryTypes.SELECT,
-        transaction,
+        transaction, // <-- Pass transaction
       }
     );
 
     if (lotsToUpdate.length === 0) {
-      await transaction.rollback();
+      if (managedTransaction) await transaction.rollback();
       return 0; // No lots were found to update
     }
 
@@ -533,7 +536,7 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
           discrepancyType: discrepancyType,
         },
         type: db.sequelize.QueryTypes.INSERT,
-        transaction,
+        transaction, // <-- Pass transaction
       }
     );
 
@@ -544,15 +547,16 @@ const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType) => {
       {
         replacements: { jobNo },
         type: db.sequelize.QueryTypes.UPDATE,
-        transaction,
+        transaction, // <-- Pass transaction
       }
     );
 
-    await transaction.commit();
+    if (managedTransaction) await transaction.commit(); // Only commit if we started it
     return updateCount; // Return the number of lots that were updated
   } catch (error) {
-    await transaction.rollback();
+    if (managedTransaction) await transaction.rollback(); // Only rollback if we started it
     console.error("Error reporting job discrepancy:", error);
+    throw error; // Re-throw error to be caught by the sync controller
   }
 };
 

@@ -4,9 +4,14 @@ const db = require("../database");
  * Creates discrepancy reports for a list of lot IDs.
  * @param {number[]} lotIds - An array of lot IDs to report.
  * @param {number|null} reportedBy - The ID of the user reporting.
+ * @param {object} [options={}] - Optional database options (e.g., transaction).
  * @returns {Promise<object[]>} - A promise resolving to the created report records.
  */
-const reportConfirmation = async (lotIds, reportedBy = null) => {
+const reportConfirmation = async (lotIds, reportedBy = null, options = {}) => {
+  // Use passed transaction or start a new one
+  const managedTransaction = !options.transaction;
+  const transaction = options.transaction || (await db.sequelize.transaction());
+
   try {
     const results = [];
 
@@ -19,11 +24,9 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
       `;
 
       const insertResult = await db.sequelize.query(insertQuery, {
-        replacements: {
-          lotId,
-          reportedBy,
-        },
+        replacements: { lotId, reportedBy },
         type: db.sequelize.QueryTypes.INSERT,
+        transaction, // <-- Pass transaction
       });
 
       const createdReport = insertResult[0][0];
@@ -38,12 +41,15 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
       await db.sequelize.query(updateQuery, {
         replacements: { lotId },
         type: db.sequelize.QueryTypes.UPDATE,
+        transaction, // <-- Pass transaction
       });
     }
 
+    if (managedTransaction) await transaction.commit(); // Commit only if we started it
     return results;
   } catch (error) {
     console.error("Error creating reports and updating lot table:", error);
+    if (managedTransaction) await transaction.rollback(); // Rollback only if we started it
     throw error;
   }
 };
@@ -52,9 +58,14 @@ const reportConfirmation = async (lotIds, reportedBy = null) => {
  * Creates duplicate lot reports for a list of lot IDs.
  * @param {number[]} lotIds - An array of lot IDs to report as duplicates.
  * @param {number|null} reportedBy - The ID of the user reporting.
+ * @param {object} [options={}] - Optional database options (e.g., transaction).
  * @returns {Promise<object[]>} - A promise resolving to the created duplicate report records.
  */
-const reportDuplication = async (lotIds, reportedBy = null) => {
+const reportDuplication = async (lotIds, reportedBy = null, options = {}) => {
+  // Use passed transaction or start a new one
+  const managedTransaction = !options.transaction;
+  const transaction = options.transaction || (await db.sequelize.transaction());
+
   try {
     const results = [];
 
@@ -67,17 +78,15 @@ const reportDuplication = async (lotIds, reportedBy = null) => {
       `;
 
       const insertResult = await db.sequelize.query(insertQuery, {
-        replacements: {
-          lotId,
-          reportedBy,
-        },
+        replacements: { lotId, reportedBy },
         type: db.sequelize.QueryTypes.INSERT,
+        transaction, // <-- Pass transaction
       });
 
       const createdDuplicateReport = insertResult[0][0];
       results.push(createdDuplicateReport);
 
-       const updateQuery = `
+      const updateQuery = `
         UPDATE public.lot
         SET "reportDuplicate" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
         WHERE "lotId" = :lotId;
@@ -85,25 +94,30 @@ const reportDuplication = async (lotIds, reportedBy = null) => {
       await db.sequelize.query(updateQuery, {
         replacements: { lotId },
         type: db.sequelize.QueryTypes.UPDATE,
+        transaction, // <-- Pass transaction
       });
     }
 
+    if (managedTransaction) await transaction.commit(); // Commit only if we started it
     return results;
   } catch (error) {
     console.error("Error creating duplicate reports:", error);
+    if (managedTransaction) await transaction.rollback(); // Rollback only if we started it
     throw error;
   }
 };
-
 
 /**
  * Changes lot status to 'Received' and inserts records into the inbounds table.
  * @param {Array<Object>} lotsArray - An array of lot objects to process.
  * @param {number} userId - The ID of the user performing the confirmation.
+ * @param {object} [options={}] - Optional database options (e.g., transaction).
  * @returns {Promise<Array<Object>>} - A promise resolving to the created inbound records.
  */
-const insertInboundFromLots = async (lotsArray, userId) => {
-  const transaction = await db.sequelize.transaction();
+const insertInboundFromLots = async (lotsArray, userId, options = {}) => {
+  // Use passed transaction or start a new one
+  const managedTransaction = !options.transaction;
+  const transaction = options.transaction || (await db.sequelize.transaction());
 
   try {
     const insertedInbounds = [];
@@ -118,7 +132,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       const result = await db.sequelize.query(query, {
         replacements: { value },
         type: db.sequelize.QueryTypes.SELECT,
-        transaction,
+        transaction, // <-- Pass transaction
       });
 
       if (result.length === 0) {
@@ -138,7 +152,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       const lots = await db.sequelize.query(lotQuery, {
         replacements: { lotId },
         type: db.sequelize.QueryTypes.SELECT,
-        transaction,
+        transaction, // <-- Pass transaction
       });
 
       if (lots.length === 0) {
@@ -150,6 +164,8 @@ const insertInboundFromLots = async (lotsArray, userId) => {
 
       const lot = lots[0];
 
+      // ... (rest of the logic is the same, just ensure 'transaction' is passed)
+
       const scheduleInboundQuery = `
         SELECT "userId" FROM public.scheduleinbounds WHERE "scheduleInboundId" = :scheduleInboundId
       `;
@@ -158,7 +174,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         {
           replacements: { scheduleInboundId: lot.scheduleInboundId },
           type: db.sequelize.QueryTypes.SELECT,
-          transaction,
+          transaction, // <-- Pass transaction
         }
       );
 
@@ -177,7 +193,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       const existing = await db.sequelize.query(existingQuery, {
         replacements: { jobNo: lot.jobNo, lotNo: lot.lotNo },
         type: db.sequelize.QueryTypes.SELECT,
-        transaction,
+        transaction, // <-- Pass transaction
       });
 
       if (existing.length > 0) {
@@ -187,12 +203,43 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         continue;
       }
 
-      const commodityId = await getIdByName("commodities", "commodityName", "commodityId", lot.commodity);
-      const shapeId = await getIdByName("shapes", "shapeName", "shapeId", lot.shape);
-      const brandId = await getIdByName("brands", "brandName", "brandId", lot.brand);
-      const exLmeWarehouseId = await getIdByName("exlmewarehouses", "exLmeWarehouseName", "exLmeWarehouseId", lot.exLmeWarehouse);
-      const inboundWarehouseId = await getIdByName("inboundwarehouses", "inboundWarehouseName", "inboundWarehouseId", lot.inboundWarehouse);
-      const exWarehouseLocationId = await getIdByName("exwarehouselocations", "exWarehouseLocationName", "exWarehouseLocationId", lot.exWarehouseLocation);
+      // ... (all getIdByName calls)
+      const commodityId = await getIdByName(
+        "commodities",
+        "commodityName",
+        "commodityId",
+        lot.commodity
+      );
+      const shapeId = await getIdByName(
+        "shapes",
+        "shapeName",
+        "shapeId",
+        lot.shape
+      );
+      const brandId = await getIdByName(
+        "brands",
+        "brandName",
+        "brandId",
+        lot.brand
+      );
+      const exLmeWarehouseId = await getIdByName(
+        "exlmewarehouses",
+        "exLmeWarehouseName",
+        "exLmeWarehouseId",
+        lot.exLmeWarehouse
+      );
+      const inboundWarehouseId = await getIdByName(
+        "inboundwarehouses",
+        "inboundWarehouseName",
+        "inboundWarehouseId",
+        lot.inboundWarehouse
+      );
+      const exWarehouseLocationId = await getIdByName(
+        "exwarehouselocations",
+        "exWarehouseLocationName",
+        "exWarehouseLocationId",
+        lot.exWarehouseLocation
+      );
 
       // --- Update Lot status ---
       await db.sequelize.query(
@@ -202,7 +249,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
         {
           replacements: { lotId },
           type: db.sequelize.QueryTypes.UPDATE,
-          transaction,
+          transaction, // <-- Pass transaction
         }
       );
 
@@ -246,10 +293,10 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           brandId,
           exWarehouseLot: lot.exWarehouseLot,
           exWarehouseLocationId,
-          scheduledInboundDate: lot.inbounddate, // comes from lot table
+          scheduledInboundDate: lot.inbounddate,
         },
         type: db.sequelize.QueryTypes.INSERT,
-        transaction,
+        transaction, // <-- Pass transaction
       });
 
       const insertedInbound = result[0];
@@ -259,11 +306,11 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       const bundleCheck = await db.sequelize.query(bundleCheckQuery, {
         replacements: { lotId },
         type: db.sequelize.QueryTypes.SELECT,
-        transaction,
+        transaction, // <-- Pass transaction
       });
 
       if (bundleCheck.length > 0) {
-        // Update lot.isWeighted = true
+        // ... (Update lot and inbounds for isWeighted)
         await db.sequelize.query(
           `UPDATE public.lot
            SET "isWeighted" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
@@ -271,11 +318,9 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           {
             replacements: { lotId },
             type: db.sequelize.QueryTypes.UPDATE,
-            transaction,
+            transaction, // <-- Pass transaction
           }
         );
-
-        // --- EXTRA STEP 2: Update inbounds.isWeighted = true if lot.isWeighted = true ---
         await db.sequelize.query(
           `UPDATE public.inbounds
            SET "isWeighted" = true, "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
@@ -283,7 +328,7 @@ const insertInboundFromLots = async (lotsArray, userId) => {
           {
             replacements: { jobNo: lot.jobNo, lotNo: lot.lotNo },
             type: db.sequelize.QueryTypes.UPDATE,
-            transaction,
+            transaction, // <-- Pass transaction
           }
         );
 
@@ -293,15 +338,14 @@ const insertInboundFromLots = async (lotsArray, userId) => {
       insertedInbounds.push(insertedInbound);
     }
 
-    await transaction.commit();
+    if (managedTransaction) await transaction.commit(); // Commit only if we started it
     return insertedInbounds;
   } catch (error) {
-    await transaction.rollback();
+    if (managedTransaction) await transaction.rollback(); // Rollback only if we started it
     console.error("Error in insertInboundFromLots:", error);
     throw error;
   }
 };
-
 
 module.exports = {
   reportConfirmation,
