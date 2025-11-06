@@ -362,8 +362,8 @@ const getPendingOutboundTasks = async (
         so."scheduleOutboundId",
         si."selectedInboundId",
         COALESCE(so."outboundJobNo", CONCAT('SINO', LPAD(so."scheduleOutboundId"::TEXT, 3, '0'))) AS "outboundJobNo",
-        si."releaseDate",
-        si."releaseEndDate",
+        COALESCE(si."releaseDate", so."releaseDate") AS "releaseDate",
+        COALESCE(si."releaseEndDate", so."releaseEndDate") AS "releaseEndDate",
         so."stuffingDate", 
         so."containerNo", 
         so."sealNo",
@@ -396,6 +396,11 @@ const getPendingOutboundTasks = async (
       type: db.sequelize.QueryTypes.SELECT,
     });
 
+    if (detailsForPage.length > 0) {
+      console.log("--- DEBUG: First item from detailsForPage ---");
+      console.log(detailsForPage[0]);
+    }
+
     // Group by schedule ID and calculate date ranges
     const groupedByScheduleId = detailsForPage.reduce((acc, item) => {
       const scheduleId = item.scheduleOutboundId;
@@ -418,10 +423,10 @@ const getPendingOutboundTasks = async (
           releaseDates: [],
         };
       }
-
       // Collect all release dates for this schedule to calculate range later
       if (item.releaseDate)
         acc[scheduleId].releaseDates.push(new Date(item.releaseDate));
+      console.log(`[Reduce] Pushed date for schedule ${scheduleId}. Array length is now: ${acc[scheduleId].releaseDates.length}`);
       if (item.releaseEndDate)
         acc[scheduleId].releaseDates.push(new Date(item.releaseEndDate));
 
@@ -435,6 +440,10 @@ const getPendingOutboundTasks = async (
         brand: item.brand,
         commodity: item.commodity,
         shape: item.shape,
+        releaseDate: item.releaseDate ? formatDate(item.releaseDate) : null,
+        releaseEndDate: item.releaseEndDate
+          ? formatDate(item.releaseEndDate)
+          : null,
       });
       return acc;
     }, {});
@@ -460,6 +469,7 @@ const getPendingOutboundTasks = async (
         group.userInfo.releaseDate = null;
         group.userInfo.releaseEndDate = null;
       }
+      console.log(`[ForEach] Final userInfo for schedule ${group.scheduleInfo.scheduleOutboundId}:`, group.userInfo);
       delete group.releaseDates;
     });
 
@@ -471,39 +481,12 @@ const getPendingOutboundTasks = async (
   }
 };
 
-const pendingOutboundTasksUser = async (scheduleOutboundId) => {
-  try {
-    const query = `
-      SELECT
-        u."username",
-        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
-        TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate",
-        so."containerNo",
-        so."sealNo"
-      FROM public.scheduleoutbounds so
-      JOIN public.users u ON so."userId" = u."userid"
-      WHERE so."scheduleOutboundId" = :scheduleOutboundId
-      LIMIT 1;
-    `;
-    const result = await db.sequelize.query(query, {
-      replacements: { scheduleOutboundId },
-      type: db.sequelize.QueryTypes.SELECT,
-      plain: true,
-    });
-    return {
-      username: result?.username || "N/A",
-      releaseDate: result?.releaseDate || "N/A",
-      stuffingDate: result?.stuffingDate,
-      containerNo: result?.containerNo,
-      sealNo: result?.sealNo,
-    };
-  } catch (error) {
-    console.error("Error fetching user info for outbound tasks:", error);
-    throw error;
-  }
-};
-
-const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType, options = {}) => {
+const reportJobDiscrepancy = async (
+  jobNo,
+  reportedBy,
+  discrepancyType,
+  options = {}
+) => {
   // Get transaction from options, or create a new one if not provided
   const managedTransaction = !options.transaction;
   const transaction = options.transaction || (await db.sequelize.transaction());
@@ -617,7 +600,6 @@ const reverseInbound = async (inboundId) => {
 };
 
 module.exports = {
-  pendingOutboundTasksUser,
   getPendingInboundTasks,
   getPendingOutboundTasks,
   updateScheduleOutboundDetails,
