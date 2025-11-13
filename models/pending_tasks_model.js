@@ -426,7 +426,9 @@ const getPendingOutboundTasks = async (
       // Collect all release dates for this schedule to calculate range later
       if (item.releaseDate)
         acc[scheduleId].releaseDates.push(new Date(item.releaseDate));
-      console.log(`[Reduce] Pushed date for schedule ${scheduleId}. Array length is now: ${acc[scheduleId].releaseDates.length}`);
+      console.log(
+        `[Reduce] Pushed date for schedule ${scheduleId}. Array length is now: ${acc[scheduleId].releaseDates.length}`
+      );
       if (item.releaseEndDate)
         acc[scheduleId].releaseDates.push(new Date(item.releaseEndDate));
 
@@ -469,7 +471,10 @@ const getPendingOutboundTasks = async (
         group.userInfo.releaseDate = null;
         group.userInfo.releaseEndDate = null;
       }
-      console.log(`[ForEach] Final userInfo for schedule ${group.scheduleInfo.scheduleOutboundId}:`, group.userInfo);
+      console.log(
+        `[ForEach] Final userInfo for schedule ${group.scheduleInfo.scheduleOutboundId}:`,
+        group.userInfo
+      );
       delete group.releaseDates;
     });
 
@@ -599,10 +604,43 @@ const reverseInbound = async (inboundId) => {
   }
 };
 
+const pendingOutboundTasksUser = async (scheduleOutboundId) => {
+  try {
+    const query = `
+      SELECT
+        u."username",
+        TO_CHAR(so."releaseDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "releaseDate",
+        TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "stuffingDate",
+        so."containerNo",
+        so."sealNo"
+      FROM public.scheduleoutbounds so
+      JOIN public.users u ON so."userId" = u."userid"
+      WHERE so."scheduleOutboundId" = :scheduleOutboundId
+      LIMIT 1;
+    `;
+    const result = await db.sequelize.query(query, {
+      replacements: { scheduleOutboundId },
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+    return {
+      username: result?.username || "N/A",
+      releaseDate: result?.releaseDate || "N/A",
+      stuffingDate: result?.stuffingDate,
+      containerNo: result?.containerNo,
+      sealNo: result?.sealNo,
+    };
+  } catch (error) {
+    console.error("Error fetching user info for outbound tasks:", error);
+    throw error;
+  }
+};
+
 module.exports = {
   getPendingInboundTasks,
   getPendingOutboundTasks,
   updateScheduleOutboundDetails,
   reportJobDiscrepancy,
   reverseInbound,
+  pendingOutboundTasksUser,
 };

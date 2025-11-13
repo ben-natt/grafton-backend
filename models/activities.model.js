@@ -944,7 +944,7 @@ const getAllScheduleOutbound = async ({
           ORDER BY
               SUBSTRING(i."jobNo" FROM '[A-Za-z]+') ${sortOrder} NULLS LAST,
               CAST(NULLIF(SUBSTRING(i."jobNo" FROM '[0-9]+'), '') AS INTEGER) ${sortOrder} NULLS LAST,
-              CAST(NULLIF(i."lotNo", '') AS INTEGER) ${sortOrder} NULLS LAST
+              i."lotNo" ${sortOrder} NULLS LAST
         `;
       } else {
         // Original logic for all other single-column sorts
