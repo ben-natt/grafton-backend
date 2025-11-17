@@ -92,6 +92,24 @@ exports.handleSync = async (req, res) => {
           break;
         }
 
+        case "UPDATE_GRN": {
+          const outboundId = parseInt(job.target_id, 10);
+          if (isNaN(outboundId)) {
+            throw new Error(`Invalid outboundId: ${job.target_id}`);
+          }
+          const updateData = payload; // payload is already parsed JSON
+
+          console.log(`[Sync] Processing UPDATE_GRN for ${outboundId}`);
+
+          // Call the refactored model function, passing the transaction
+          await grnModel.updateAndRegenerateGrn(outboundId, updateData, {
+            transaction: t,
+          });
+
+          results.push({ jobId: job.id, status: "OK" });
+          break;
+        }
+
         default:
           console.warn(`[Sync] Unknown action_type: ${job.action_type}`);
           results.push({ jobId: job.id, status: "SKIPPED" });

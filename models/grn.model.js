@@ -229,8 +229,11 @@ const grnModel = {
     }
   },
 
-  async updateAndRegenerateGrn(outboundId, data) {
-    const t = await db.sequelize.transaction();
+  async updateAndRegenerateGrn(outboundId, data, options = {}) {
+    // <-- MODIFIED: Add options
+    // --- MODIFIED: Use passed transaction or create a new one ---
+    const t = options.transaction || (await db.sequelize.transaction());
+    // --- END MODIFIED ---
     try {
       const oldDataQuery = `
           SELECT "grnImage", "grnPreviewImage", "driverSignature", "warehouseStaffSignature", "warehouseSupervisorSignature", "isWeightVisible"
@@ -373,7 +376,9 @@ const grnModel = {
         transaction: t,
       });
 
-      await t.commit();
+      if (!options.transaction) {
+        await t.commit();
+      }
 
       const pdfBuffer = await fs.readFile(outputPath);
       const previewImageBuffer = await fs.readFile(previewImagePath);
@@ -383,7 +388,9 @@ const grnModel = {
         previewImage: previewImageBuffer.toString("base64"),
       };
     } catch (error) {
-      await t.rollback();
+      if (!options.transaction) {
+        await t.rollback();
+      }
       console.error("MODEL ERROR in updateAndRegenerateGrn:", error);
       throw error;
     }
