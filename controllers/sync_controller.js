@@ -1,7 +1,7 @@
 const db = require("../database");
 const pendingTasksModel = require("../models/pending_tasks_model");
-// --- ADD THIS LINE ---
 const confirmInboundLogic = require("../models/confirm_inbound_model");
+const grnModel = require("../models/grn.model");
 
 // This is the new function that will process the batch
 exports.handleSync = async (req, res) => {
