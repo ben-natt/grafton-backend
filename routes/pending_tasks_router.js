@@ -140,22 +140,6 @@ router.put("/schedule-outbound/:scheduleOutboundId", async (req, res) => {
   }
 });
 
-router.post("/tasks-outbound-user", async (req, res) => {
-  const { scheduleOutboundId } = req.body;
-  if (!scheduleOutboundId) {
-    return res.status(400).json({ error: "scheduleOutboundId is required." });
-  }
-  try {
-    const result = await pendingTasksModel.pendingOutboundTasksUser(
-      scheduleOutboundId
-    );
-    res.status(200).json(result);
-  } catch (error) {
-    console.error("Error fetching user info for outbound task:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
 // ----------------------------------- OFFICE Flow ---------------------------------
 // --- NEW ROUTE FOR FILTER OPTIONS ---
 router.get("/office-filter-options", async (req, res) => {
