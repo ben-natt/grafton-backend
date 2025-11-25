@@ -525,5 +525,23 @@ router.delete("/lot/:lotId", async (req, res) => {
     res.status(500).json({ error: "Failed to delete lot." });
   }
 });
+
+router.get("/status/supervisor", async (req, res) => {
+  try {
+    const status = await pendingTasksModel.getSupervisorPendingStatus();
+    res.status(200).json(status);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to check supervisor status" });
+  }
+});
+
+router.get("/status/office", async (req, res) => {
+  try {
+    const status = await pendingTasksOfficeModel.getOfficePendingStatus();
+    res.status(200).json(status);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to check office status" });
+  }
+});
   
 module.exports = router;
