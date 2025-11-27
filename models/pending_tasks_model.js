@@ -636,6 +636,31 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
   }
 };
 
+const getSupervisorPendingStatus = async () => {
+  try {
+    // Check for the most recently updated Pending lot
+    // This covers both new schedules (creation) and updates
+    const query = `
+      SELECT MAX("updatedAt") as "lastUpdated"
+      FROM public.lot
+      WHERE status = 'Pending'
+    `;
+    
+    const result = await db.sequelize.query(query, {
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+
+    return {
+      hasPending: !!result?.lastUpdated,
+      lastUpdated: result?.lastUpdated || null
+    };
+  } catch (error) {
+    console.error("Error checking supervisor status:", error);
+    return { hasPending: false, lastUpdated: null };
+  }
+};
+
 module.exports = {
   getPendingInboundTasks,
   getPendingOutboundTasks,
@@ -643,4 +668,5 @@ module.exports = {
   reportJobDiscrepancy,
   reverseInbound,
   pendingOutboundTasksUser,
+  getSupervisorPendingStatus,
 };

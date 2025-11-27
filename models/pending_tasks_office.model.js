@@ -907,6 +907,32 @@ const addMissingLot = async ({ jobNo, lotDetails, resolvedBy }) => {
         return newLot;
     });
 };
+
+const getOfficePendingStatus = async () => {
+  try {
+    // Check for pending Job Reports (Discrepancies)
+    // You can expand this query to include other tables if Office tracks other pending items
+    const query = `
+      SELECT MAX("updatedAt") as "lastUpdated"
+      FROM public.job_reports
+      WHERE "reportStatus" = 'pending'
+    `;
+    
+    const result = await db.sequelize.query(query, {
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+
+    return {
+      hasPending: !!result?.lastUpdated,
+      lastUpdated: result?.lastUpdated || null
+    };
+  } catch (error) {
+    console.error("Error checking office status:", error);
+    return { hasPending: false, lastUpdated: null };
+  }
+};
+
 module.exports = {
   findInboundTasksOffice,
   findOutboundTasksOffice,
@@ -927,4 +953,5 @@ module.exports = {
   addMissingLot,
   addLackingLotToJob,
   deleteLot,
+  getOfficePendingStatus
 };
