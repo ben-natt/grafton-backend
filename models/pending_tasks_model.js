@@ -661,6 +661,51 @@ const getSupervisorPendingStatus = async () => {
   }
 };
 
+const setLastReadPendingTaskTime = async (userId, timestamp) => {
+  try {
+    console.log(`[PendingModel] setLastReadTime called for User: ${userId}`);
+    
+    const query = `
+      INSERT INTO public.user_pending_task_status ("userId", "lastReadTime", "updatedAt")
+      VALUES (:userId, :timestamp, NOW())
+      ON CONFLICT ("userId") 
+      DO UPDATE SET "lastReadTime" = :timestamp, "updatedAt" = NOW();
+    `;
+    
+    await db.sequelize.query(query, {
+      replacements: { userId, timestamp },
+    });
+    
+    console.log("[PendingModel] SQL Executed Successfully.");
+    return true;
+  } catch (error) {
+    console.error("[PendingModel] !!! SQL ERROR:", error);
+    throw error;
+  }
+};
+
+const getLastReadPendingTaskTime = async (userId) => {
+  try {
+    const query = `
+      SELECT "lastReadTime" 
+      FROM public.user_pending_task_status 
+      WHERE "userId" = :userId
+    `;
+    const result = await db.sequelize.query(query, {
+      replacements: { userId },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    
+    if (result && result.length > 0) {
+      return result[0].lastReadTime;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting pending task read time:", error);
+    throw error;
+  }
+};
+
 module.exports = {
   getPendingInboundTasks,
   getPendingOutboundTasks,
@@ -669,4 +714,6 @@ module.exports = {
   reverseInbound,
   pendingOutboundTasksUser,
   getSupervisorPendingStatus,
+  setLastReadPendingTaskTime,
+  getLastReadPendingTaskTime,
 };

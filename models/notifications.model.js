@@ -247,7 +247,53 @@ const deleteDuplicateReportById = async (duplicatedId) => {
   }
 };
 
-// +++ END: NEW DELETE FUNCTIONS +++
+const setLastReadTime = async (userId, timestamp) => {
+  try {
+    console.log(`[Model] setLastReadTime called for User: ${userId}, Time: ${timestamp}`);
+    
+    const query = `
+      INSERT INTO public.user_notification_status ("userId", "lastReadTime", "updatedAt")
+      VALUES (:userId, :timestamp, NOW())
+      ON CONFLICT ("userId") 
+      DO UPDATE SET "lastReadTime" = :timestamp, "updatedAt" = NOW();
+    `;
+    
+    // Log the exact query attempt
+    console.log("[Model] Executing UPSERT query...");
+
+    await db.sequelize.query(query, {
+      replacements: { userId, timestamp },
+    });
+    
+    console.log("[Model] Query executed successfully.");
+    return true;
+  } catch (error) {
+    console.error("[Model] !!! SQL ERROR in setLastReadTime:", error);
+    throw error;
+  }
+};
+
+const getLastReadTime = async (userId) => {
+  try {
+    const query = `
+      SELECT "lastReadTime" 
+      FROM public.user_notification_status 
+      WHERE "userId" = :userId
+    `;
+    const result = await db.sequelize.query(query, {
+      replacements: { userId },
+      type: db.sequelize.QueryTypes.SELECT,
+    });
+    
+    if (result && result.length > 0) {
+      return result[0].lastReadTime;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error getting last read time:", error);
+    throw error;
+  }
+};
 
 module.exports = {
   getReportsByStatus,
@@ -256,4 +302,6 @@ module.exports = {
   getJobReportsByStatus,
   deleteDiscrepancyReportById,
   deleteDuplicateReportById,
+  setLastReadTime, 
+  getLastReadTime,
 };

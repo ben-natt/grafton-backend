@@ -6,6 +6,8 @@ const {
   getJobReportsByStatus,
   deleteDiscrepancyReportById,
   deleteDuplicateReportById,
+  setLastReadTime, 
+  getLastReadTime,
 } = require('../models/notifications.model');
 const router = express.Router();
 
@@ -134,6 +136,40 @@ router.delete('/notifications/duplicates/:status/:duplicatedId', async (req, res
     }
   } catch (error) {
     console.error(`Error deleting duplicate report ${req.params.duplicatedId}:`, error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/notifications/read', async (req, res) => {
+  try {
+    console.log("--- [Router] POST /notifications/read HIT ---");
+    console.log("Request Body:", req.body);
+
+    const { userId, timestamp } = req.body;
+    
+    if (!userId || !timestamp) {
+      console.error("--- [Router] ERROR: Missing fields ---");
+      return res.status(400).json({ error: 'Missing userId or timestamp' });
+    }
+    
+    await setLastReadTime(userId, timestamp);
+    
+    console.log("--- [Router] Success: Read status updated ---");
+    res.status(200).json({ message: 'Read status updated' });
+  } catch (error) {
+    console.error('--- [Router] CRITICAL ERROR:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/notifications/read-status/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const lastReadTime = await getLastReadTime(userId);
+    
+    res.status(200).json({ lastReadTime });
+  } catch (error) {
+    console.error('Error fetching read status:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
