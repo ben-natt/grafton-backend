@@ -4,6 +4,14 @@ const router = express.Router();
 const pendingTasksModel = require("../models/pending_tasks_model");
 const pendingTasksOfficeModel = require("../models/pending_tasks_office.model");
 
+const {
+  // Ensure you are importing your GET functions here too!
+  // getPendingTasksForOffice,
+  // getPendingTasksForWarehouse, 
+  setLastReadPendingTaskTime,
+  getLastReadPendingTaskTime,
+} = require('../models/pending_tasks_model');
+
 // ------------------------ Supervisor Flow ----------------------
 // --- INBOUND ROUTES---
 router.get("/tasks-jobNo", async (req, res) => {
@@ -543,5 +551,37 @@ router.get("/status/office", async (req, res) => {
     res.status(500).json({ error: "Failed to check office status" });
   }
 });
-  
+
+router.post('/pending-tasks/read', async (req, res) => {
+  try {
+    console.log("--- [PendingRouter] POST /pending-tasks/read HIT ---");
+    console.log("[PendingRouter] Body:", req.body);
+
+    const { userId, timestamp } = req.body;
+
+    if (!userId || !timestamp) {
+      console.error("[PendingRouter] ERROR: Missing userId or timestamp");
+      return res.status(400).json({ error: 'Missing userId or timestamp' });
+    }
+
+    await setLastReadPendingTaskTime(userId, timestamp);
+    
+    console.log(`[PendingRouter] Success: Updated read status for user ${userId}`);
+    res.status(200).json({ message: 'Pending task read status updated' });
+  } catch (error) {
+    console.error('[PendingRouter] CRITICAL ERROR:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/pending-tasks/read-status/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const lastReadTime = await getLastReadPendingTaskTime(userId);
+    res.status(200).json({ lastReadTime });
+  } catch (error) {
+    console.error('Error fetching pending task read status:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 module.exports = router;
