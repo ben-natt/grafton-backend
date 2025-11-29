@@ -1,4 +1,3 @@
-
 const db = require("../database");
 const { Op } = require("sequelize");
 
@@ -12,7 +11,11 @@ const formatDate = (date) => {
   return `${day} ${month} ${year}`;
 };
 
-const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filters = {}) => {
+const getPendingTasksWithIncompleteStatus = async (
+  page = 1,
+  pageSize = 10,
+  filters = {}
+) => {
   try {
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
@@ -39,12 +42,14 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
         AND si."lotNo" = l."lotNo"
       )`,
     ];
-    
+
     const replacements = {};
 
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
-      baseWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      baseWhere.push(
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+      );
       replacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
 
@@ -119,7 +124,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     if (paginatedJobNos.length === 0) {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
-    
+
     // Build a separate WHERE clause for the details query to filter lots precisely.
     const detailsWhere = [
       `l."jobNo" IN (:paginatedJobNos)`,
@@ -135,19 +140,20 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           WHERE ib."inboundId" = i."inboundId"
           AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
         )
-      )`
+      )`,
     ];
-    
+
     const detailsReplacements = { paginatedJobNos };
 
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
-      detailsWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      detailsWhere.push(
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+      );
       detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
-    
-    const detailsWhereString = detailsWhere.join(" AND ");
 
+    const detailsWhereString = detailsWhere.join(" AND ");
 
     // Fetch details for the paginated jobs, now with lot-level filtering
     const detailsQuery = `
@@ -171,8 +177,8 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           END as is_incomplete
       FROM public.lot l
       JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
-      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
-      JOIN public.users u ON s."userId" = u.userid
+      LEFT JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
+      LEFT JOIN public.users u ON s."userId" = u.userid
       LEFT JOIN (
         SELECT 
           ib."inboundId",
@@ -204,17 +210,15 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-
     const safeParseLotNo = (value) => {
       if (value === null || value === undefined) return "N/A";
-      if (typeof value === 'number') return value;
-      if (typeof value === 'string') {
+      if (typeof value === "number") return value;
+      if (typeof value === "string") {
         const parsed = parseInt(value, 10);
         return isNaN(parsed) ? "N/A" : parsed;
       }
       return "N/A";
     };
-
 
     // Group results (this logic remains the same)
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
@@ -266,7 +270,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
         },
         isIncomplete: lot.is_incomplete,
       });
-      
+
       return acc;
     }, {});
 
@@ -295,11 +299,13 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     const finalData = Object.values(groupedByJobNo);
     return { data: finalData, page, pageSize, totalPages, totalCount };
   } catch (error) {
-    console.error("Error fetching pending tasks with incomplete status:", error);
+    console.error(
+      "Error fetching pending tasks with incomplete status:",
+      error
+    );
     throw error;
   }
 };
-
 
 const getDetailsPendingTasksCrew = async (jobNo) => {
   try {

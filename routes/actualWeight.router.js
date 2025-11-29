@@ -59,7 +59,7 @@ router.post("/actual/save-weight", async (req, res) => {
         bundles,
         strictValidation,
         null,
-        null,
+        null
       );
     } else if (lotId) {
       result = await actualWeightModel.saveLotWithBundles(
@@ -68,7 +68,7 @@ router.post("/actual/save-weight", async (req, res) => {
         bundles,
         strictValidation,
         null,
-        null,
+        null
       );
     } else {
       // Handle case where we only have jobNo and lotNo
@@ -87,7 +87,7 @@ router.post("/actual/save-weight", async (req, res) => {
           bundles,
           strictValidation,
           jobNo,
-          lotNo,
+          lotNo
         );
       } else {
         // If no inbound found, try to find lotId
@@ -105,7 +105,7 @@ router.post("/actual/save-weight", async (req, res) => {
             bundles,
             strictValidation,
             jobNo,
-            lotNo,
+            lotNo
           );
         } else {
           return res.status(404).json({
@@ -162,13 +162,6 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
     }
     // Priority 2: Check for lotId if inboundId not found/is 0 OR if no bundles found with inboundId
     if ((!bundles || bundles.length === 0) && lotId && lotId !== 0) {
-      console.log(
-        `${
-          bundles.length === 0
-            ? "No bundles found with inboundId, trying"
-            : "Using"
-        } provided lotId: ${lotId}`
-      );
       finalIdValue = lotId;
       isInbound = false;
 
@@ -220,9 +213,6 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
 
         // If no bundles found with inboundId, try lotId
         if (!bundles || bundles.length === 0) {
-          console.log(
-            `No bundles found with inboundId ${finalIdValue}, trying to find lotId from jobNo/lotNo`
-          );
           const lotResult = await actualWeightModel.findRelatedId(
             null,
             true,
@@ -282,7 +272,6 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
     // console.log('Search attempts:', searchAttempts);
 
     if (!bundles || bundles.length === 0) {
-      console.log(`No bundles found after all attempts`);
       return res.status(404).json({
         error: "No bundles found after searching all possible IDs",
         searchAttempts: searchAttempts,
@@ -301,9 +290,9 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
     if (bundles.length > 0) {
       const sampleBundle = bundles[0];
       console.log(`Additional bundle info:`, {
-        crewLotNo: sampleBundle.crewLotNo || 'N/A',
-        bundleStickerWeight: sampleBundle.stickerWeight || 'N/A',
-        inboundStickerWeight: sampleBundle.inboundStickerWeight || 'N/A',
+        crewLotNo: sampleBundle.crewLotNo || "N/A",
+        bundleStickerWeight: sampleBundle.stickerWeight || "N/A",
+        inboundStickerWeight: sampleBundle.inboundStickerWeight || "N/A",
       });
     }
 
@@ -317,7 +306,6 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
   }
 });
 
-
 router.post("/actual/duplicate-bundles", async (req, res) => {
   console.log("[DEBUG] Request Body:", req.body);
 
@@ -329,7 +317,8 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
     // Add validation for the new parameter
     if (!sourceExWLot || !targetExWLot || !resolvedBy || !lotId) {
       return res.status(400).json({
-        error: "sourceExWLot, targetExWLot, resolvedBy, and lotId must be provided",
+        error:
+          "sourceExWLot, targetExWLot, resolvedBy, and lotId must be provided",
       });
     }
 
@@ -355,7 +344,6 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
     });
   }
 });
-
 
 // save lotNo
 router.post("/actual/update-crew-lotno", async (req, res) => {
@@ -416,7 +404,8 @@ router.post("/actual/update-crew-lotno", async (req, res) => {
     } else {
       res.status(404).json({
         success: false,
-        message: "Unable to update Crew Lot No. No matching inboundId or lotId found.",
+        message:
+          "Unable to update Crew Lot No. No matching inboundId or lotId found.",
         searchAttempts,
       });
     }
@@ -430,16 +419,10 @@ router.post("/actual/update-crew-lotno", async (req, res) => {
   }
 });
 
-
 // checks if the jobNo/lotNo is already scheduled outbound also used in repack page to check if it is outbounded
 router.post("/actual/check-outbound-status", async (req, res) => {
   try {
-    const {
-      inboundId,
-      lotId,
-      jobNo,
-      lotNo,
-    } = req.body;
+    const { inboundId, lotId, jobNo, lotNo } = req.body;
 
     let finalIdValue = null;
     let isInbound = true;
@@ -459,14 +442,14 @@ router.post("/actual/check-outbound-status", async (req, res) => {
         resolvedJobNo,
         resolvedLotNo
       );
-      
+
       searchAttempts.push({
         type: "inboundId",
         id: finalIdValue,
         found: outboundStatus ? 1 : 0,
       });
     }
-    
+
     // Priority 2: Check for lotId if inboundId not found/is 0 OR if no status found with inboundId
     if (!outboundStatus && lotId && lotId !== 0) {
       finalIdValue = lotId;
@@ -478,7 +461,7 @@ router.post("/actual/check-outbound-status", async (req, res) => {
         resolvedJobNo,
         resolvedLotNo
       );
-      
+
       searchAttempts.push({
         type: "lotId",
         id: finalIdValue,
@@ -506,7 +489,7 @@ router.post("/actual/check-outbound-status", async (req, res) => {
           jobNo,
           lotNo
         );
-        
+
         searchAttempts.push({
           type: "inboundId (from jobNo/lotNo)",
           id: finalIdValue,
@@ -526,13 +509,14 @@ router.post("/actual/check-outbound-status", async (req, res) => {
             finalIdValue = lotResult;
             isInbound = false;
 
-            outboundStatus = await actualWeightModel.checkOutboundScheduleStatus(
-              finalIdValue,
-              isInbound,
-              jobNo,
-              lotNo
-            );
-            
+            outboundStatus =
+              await actualWeightModel.checkOutboundScheduleStatus(
+                finalIdValue,
+                isInbound,
+                jobNo,
+                lotNo
+              );
+
             searchAttempts.push({
               type: "lotId (from jobNo/lotNo)",
               id: finalIdValue,
@@ -559,7 +543,7 @@ router.post("/actual/check-outbound-status", async (req, res) => {
             jobNo,
             lotNo
           );
-          
+
           searchAttempts.push({
             type: "lotId (from jobNo/lotNo)",
             id: finalIdValue,
@@ -569,39 +553,52 @@ router.post("/actual/check-outbound-status", async (req, res) => {
       }
     }
 
-
     // Prepare response
     const isScheduledForOutbound = !!outboundStatus;
-    let message = '';
+    let message = "";
     let scheduledDate = null;
     let outboundReference = null;
 
     if (isScheduledForOutbound) {
       const status = outboundStatus;
-      
+
       // Format the scheduled date
       if (status.scheduledAt) {
-        scheduledDate = new Date(status.scheduledAt).toISOString().split('T')[0];
+        scheduledDate = new Date(status.scheduledAt)
+          .toISOString()
+          .split("T")[0];
       }
-      
+
       // Create outbound reference
       outboundReference = `OUT-${status.scheduleOutboundId}`;
-      
+
       // Create appropriate message based on outbound status
       if (status.isOutbounded) {
         message = `This lot has already been outbounded (${outboundReference}). Weight editing is disabled.`;
-      } else if (status.releaseDate || status.exportDate || status.deliveryDate) {
-        const releaseInfo = status.releaseDate ? `Release: ${new Date(status.releaseDate).toLocaleDateString()}` : '';
-        const exportInfo = status.exportDate ? `Export: ${new Date(status.exportDate).toLocaleDateString()}` : '';
-        const deliveryInfo = status.deliveryDate ? `Delivery: ${new Date(status.deliveryDate).toLocaleDateString()}` : '';
-        
-        const dates = [releaseInfo, exportInfo, deliveryInfo].filter(Boolean).join(', ');
+      } else if (
+        status.releaseDate ||
+        status.exportDate ||
+        status.deliveryDate
+      ) {
+        const releaseInfo = status.releaseDate
+          ? `Release: ${new Date(status.releaseDate).toLocaleDateString()}`
+          : "";
+        const exportInfo = status.exportDate
+          ? `Export: ${new Date(status.exportDate).toLocaleDateString()}`
+          : "";
+        const deliveryInfo = status.deliveryDate
+          ? `Delivery: ${new Date(status.deliveryDate).toLocaleDateString()}`
+          : "";
+
+        const dates = [releaseInfo, exportInfo, deliveryInfo]
+          .filter(Boolean)
+          .join(", ");
         message = `This lot is scheduled for outbound (${outboundReference}). ${dates}. Weight editing is disabled.`;
       } else {
         message = `This lot is scheduled for outbound (${outboundReference}) on ${scheduledDate}. Weight editing is disabled.`;
       }
     } else {
-      message = 'Lot is not scheduled for outbound. Weight editing is allowed.';
+      message = "Lot is not scheduled for outbound. Weight editing is allowed.";
     }
 
     // Return response
@@ -613,23 +610,25 @@ router.post("/actual/check-outbound-status", async (req, res) => {
       searchAttempts,
       finalSearchedId: finalIdValue,
       finalSearchedType: isInbound ? "inboundId" : "lotId",
-      outboundDetails: outboundStatus ? {
-        selectedInboundId: outboundStatus.selectedInboundId,
-        scheduleOutboundId: outboundStatus.scheduleOutboundId,
-        isOutbounded: outboundStatus.isOutbounded,
-        releaseDate: outboundStatus.releaseDate,
-        exportDate: outboundStatus.exportDate,
-        deliveryDate: outboundStatus.deliveryDate,
-      } : null
+      outboundDetails: outboundStatus
+        ? {
+            selectedInboundId: outboundStatus.selectedInboundId,
+            scheduleOutboundId: outboundStatus.scheduleOutboundId,
+            isOutbounded: outboundStatus.isOutbounded,
+            releaseDate: outboundStatus.releaseDate,
+            exportDate: outboundStatus.exportDate,
+            deliveryDate: outboundStatus.deliveryDate,
+          }
+        : null,
     });
-
   } catch (error) {
     console.error("Error in check-outbound-status:", error);
     res.status(500).json({
       error: "Internal server error",
       details: error.message,
       isScheduledForOutbound: false,
-      message: "Error checking outbound status. Weight editing is temporarily disabled.",
+      message:
+        "Error checking outbound status. Weight editing is temporarily disabled.",
     });
   }
 });
@@ -651,13 +650,16 @@ router.post("/actual/get-historical-bundles", async (req, res) => {
     );
 
     if (bundles && bundles.length > 0) {
-      console.log(`[DEBUG] Found ${bundles.length} bundles. Sending 200 OK response.`);
+      console.log(
+        `[DEBUG] Found ${bundles.length} bundles. Sending 200 OK response.`
+      );
       res.status(200).json(bundles);
     } else {
-      console.log("[DEBUG] No bundles found by the model. Sending 404 Not Found response.");
+      console.log(
+        "[DEBUG] No bundles found by the model. Sending 404 Not Found response."
+      );
       res.status(404).json({
-        error:
-          `No historical bundles found for ${jobNo} - ${lotNo}.`,
+        error: `No historical bundles found for ${jobNo} - ${lotNo}.`,
       });
     }
   } catch (error) {
