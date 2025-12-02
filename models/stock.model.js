@@ -224,6 +224,7 @@ const getLotSummary = async (jobNo, lotNo) => {
     const detailsQuery = `
       SELECT
         i."jobNo" AS "JobNo", i."lotNo" AS "LotNo", i."noOfBundle" AS "NoOfBundle",
+        i."crewLotNo" AS "CrewLotNo",
         i."inboundId", i."barcodeNo" AS "Barcode", c."commodityName" AS "Commodity", b."brandName" AS "Brand",
         s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
         i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
@@ -1025,11 +1026,11 @@ async function getIndividualBundleSheet(jobNo, exWarehouseLot) {
       s."shapeName", 
       b."brandName", 
       w."inboundWarehouseName",
-      i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') AS "lotNoWarrantNo", 
+      i."jobNo" || ' - ' || LPAD(i."crewLotNo"::text, 3, '0') AS "lotNoWarrantNo", 
       i."exWarehouseLot",
       ib."bundleNo" AS "bundleNo", 
       ib."meltNo" AS "heatCastNo",
-      i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') || '-' || LPAD(ib."bundleNo"::text, 2, '0') AS "batchNo",
+      i."jobNo" || ' - ' || LPAD(i."crewLotNo"::text, 3, '0') || '-' || LPAD(ib."bundleNo"::text, 2, '0') AS "batchNo",
       ib."stickerWeight" AS "producerGW", 
       ib."stickerWeight" AS "producerNW", 
       ib."weight" AS "weighedGW"
@@ -1061,6 +1062,7 @@ const getUniqueExWarehouseLotsByJobNo = async (jobNo) => {
     const query = `
       SELECT DISTINCT i."exWarehouseLot",
        i."lotNo",
+       i."crewLotNo",
        s."shapeName",
        c."commodityName",
        b."brandName",
@@ -1076,7 +1078,7 @@ WHERE i."jobNo" = :jobNo
   AND o."inboundId" IS NULL
   AND ot."inboundId" IS NULL
   AND i."exWarehouseLot" IS NOT NULL
-ORDER BY i."lotNo" ASC;
+ORDER BY i."crewLotNo" ASC;
 
     `;
     const results = await db.sequelize.query(query, {
