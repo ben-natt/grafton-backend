@@ -258,7 +258,6 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
       UPDATE public.inbounds
       SET 
         "crewLotNo" = :crewLotNo,
-        "lotNo" = :crewLotNo,
         "updatedAt" = NOW()
       WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
       AND ("isWeighted" IS NULL OR "isWeighted" = false)
@@ -1232,3 +1231,4 @@ module.exports = {
   checkOutboundScheduleStatus,
   getHistoricalBundlesByJobAndLot,
 };
+/////
