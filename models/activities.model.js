@@ -207,6 +207,7 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
         TO_CHAR(i."createdAt" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
         i."jobNo" AS "Job No",
         i."lotNo" AS "Lot No",
+        i."crewLotNo" AS "CrewLotNo",
         i."exWarehouseLot" AS "Ex-W Lot",
         exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
         c."commodityName" AS "Metal",
@@ -564,6 +565,7 @@ const getInboundRecordByInboundId = async (inboundId) => {
   try {
     const query = `SELECT
           i."jobNo" AS "JobNo", i."lotNo" AS "LotNo", i."noOfBundle" AS "NoOfBundle",
+          i."crewLotNo" AS "CrewLotNo",
           i."inboundId", i."barcodeNo" AS "Barcode", c."commodityName" AS "Commodity", b."brandName" AS "Brand",
           s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
           i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
