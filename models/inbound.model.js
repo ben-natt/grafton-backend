@@ -5,7 +5,7 @@ const getAllInbound = async () => {
         const query = `
             SELECT 
                 TO_CHAR(i."inboundDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "DATE",
-                i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",
+                i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 2, '0') AS "Lot No",698
                 i."inboundId" AS "inboundId",
                 i."exWarehouseLot" AS "Ex-W Lot",
                 c."commodityName" AS "Metal",

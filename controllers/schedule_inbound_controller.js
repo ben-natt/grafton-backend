@@ -49,6 +49,19 @@ exports.createScheduleInbound = async (req, res) => {
 
   try {
     for (const jobNo in jobDataMap) {
+      // --- VALIDATION: Check for Duplicate Job No ---
+      const existingJob = await ScheduleInbound.findOne({
+        where: { jobNo: jobNo },
+        transaction: transaction,
+      });
+
+      if (existingJob) {
+        const error = new Error(`Job No ${jobNo} is already scheduled.`);
+        error.code = 'DUPLICATE_SCHEDULE';
+        throw error;
+      }
+      // ----------------------------------------------
+
       const { lots } = jobDataMap[jobNo];
       for (const lot of lots) {
         if (lot.shape && typeof lot.shape === 'string') {
@@ -79,7 +92,7 @@ exports.createScheduleInbound = async (req, res) => {
         await findOrCreateRaw('inboundwarehouses', 'inboundWarehouseName', lot.inboundWarehouse, transaction);
       }
 
-      // This part remains the same as it uses the correctly imported models.
+      // Create ScheduleInbound record
       const [scheduleInbound] = await ScheduleInbound.upsert({
         jobNo: jobNo,
         inboundDate: new Date(inboundDate),
@@ -105,9 +118,19 @@ exports.createScheduleInbound = async (req, res) => {
     await transaction.commit();
     res.status(200).json({ message: 'Inbound schedule and lots created/updated successfully!' });
     console.log('Inbound schedule and lots created/updated successfully!');
+
   } catch (dbError) {
     await transaction.rollback();
     console.error('Database error during scheduling:', dbError);
+
+    // Specific handling for Duplicate Schedule
+    if (dbError.code === 'DUPLICATE_SCHEDULE') {
+      return res.status(409).json({
+        message: dbError.message,
+        errorCode: 'DUPLICATE_SCHEDULE',
+      });
+    }
+
     res.status(500).json({
       message: 'An error occurred during the scheduling process.',
       error: dbError.message,

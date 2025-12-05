@@ -12,6 +12,10 @@ router.post("/actual/save-weight", async (req, res) => {
     actualWeight,
     bundles,
     strictValidation,
+    // [NEW] Destructure new fields
+    tareWeight,
+    scaleNo,
+    userId,
   } = req.body;
 
   try {
@@ -60,6 +64,10 @@ router.post("/actual/save-weight", async (req, res) => {
         strictValidation,
         null,
         null,
+        // [NEW] Pass new fields
+        tareWeight,
+        scaleNo,
+        userId
       );
     } else if (lotId) {
       result = await actualWeightModel.saveLotWithBundles(
@@ -69,6 +77,10 @@ router.post("/actual/save-weight", async (req, res) => {
         strictValidation,
         null,
         null,
+        // [NEW] Pass new fields
+        tareWeight,
+        scaleNo,
+        userId
       );
     } else {
       // Handle case where we only have jobNo and lotNo
@@ -88,6 +100,10 @@ router.post("/actual/save-weight", async (req, res) => {
           strictValidation,
           jobNo,
           lotNo,
+          // [NEW] Pass new fields
+          tareWeight,
+          scaleNo,
+          userId
         );
       } else {
         // If no inbound found, try to find lotId
@@ -106,6 +122,10 @@ router.post("/actual/save-weight", async (req, res) => {
             strictValidation,
             jobNo,
             lotNo,
+            // [NEW] Pass new fields
+            tareWeight,
+            scaleNo,
+            userId
           );
         } else {
           return res.status(404).json({
