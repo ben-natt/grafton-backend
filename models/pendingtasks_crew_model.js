@@ -18,6 +18,11 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     const offset = (page - 1) * pageSize;
 
     // Build base filter conditions for finding relevant jobs
+    // 1. Status must be 'Received'
+    // 2. Report is false
+    // 3. Must be Confirmed by Supervisor (l."isConfirm" = true)
+    // 4. Must satisfy incomplete weighting conditions OR have incomplete bundles
+    // 5. Must NOT be selected for outbound (prevents red dot when Office schedules it)
     const baseWhere = [
       `l."status" = 'Received'`,
       `l."report" = false`,
@@ -121,6 +126,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     }
     
     // Build a separate WHERE clause for the details query to filter lots precisely.
+    // Ensure the same strict conditions apply to the detailed fetching.
     const detailsWhere = [
       `l."jobNo" IN (:paginatedJobNos)`,
       `l."status" = 'Received'`,
@@ -135,6 +141,12 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           WHERE ib."inboundId" = i."inboundId"
           AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
         )
+      )`,
+      `NOT EXISTS (
+        SELECT 1
+        FROM public.selectedinbounds si
+        WHERE si."jobNo" = l."jobNo" 
+        AND si."lotNo" = l."lotNo"
       )`
     ];
     
@@ -148,8 +160,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     
     const detailsWhereString = detailsWhere.join(" AND ");
 
-
-    // Fetch details for the paginated jobs, now with lot-level filtering
+    // Fetch details for the paginated jobs
     const detailsQuery = `
       SELECT
           l."lotId", i."crewLotNo" AS "lotNo", i."jobNo", l.commodity, l."expectedBundleCount",
@@ -200,10 +211,9 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     `;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
-      replacements: detailsReplacements, // Use the new replacements object
+      replacements: detailsReplacements,
       type: db.sequelize.QueryTypes.SELECT,
     });
-
 
     const safeParseLotNo = (value) => {
       if (value === null || value === undefined) return "N/A";
@@ -215,8 +225,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
       return "N/A";
     };
 
-
-    // Group results (this logic remains the same)
+    // Group results
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
@@ -348,8 +357,104 @@ const pendingTasksUserIdSingleDateCrew = async (jobNo) => {
   }
 };
 
+const getCrewPendingStatus = async (userId) => {
+  try {
+    // 1. Get Task Updated Time
+    // [FIX] Force timestamp to be returned as ISO string to avoid timezone confusion in node-postgres
+    const taskQuery = `
+      SELECT
+        to_json(MAX(l."updatedAt"))::text as "lastUpdated",
+        COUNT(l."jobNo")::int as "count"
+      FROM public.lot l
+      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
+      WHERE 
+        l."status" = 'Received'
+        AND l."report" = false
+        AND l."isConfirm" = true
+        AND (
+          i."isWeighted" IS NOT TRUE
+          OR EXISTS (
+            SELECT 1 FROM public.inboundbundles ib
+            WHERE ib."inboundId" = i."inboundId"
+            AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
+          )
+        )
+    `;
+
+    const taskResult = await db.sequelize.query(taskQuery, {
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+
+    // 2. Get User Read Time
+    let lastReadTime = null;
+    if (userId) {
+      // [FIX] Also force JSON/ISO output for read time
+      const readQuery = `
+        SELECT to_json("lastReadTime")::text as "readTime"
+        FROM public.user_pending_task_status 
+        WHERE "userId" = :userId
+      `;
+      
+      const readResult = await db.sequelize.query(readQuery, {
+        replacements: { userId },
+        type: db.sequelize.QueryTypes.SELECT,
+        plain: true,
+      });
+      
+      if (readResult && readResult.readTime) {
+        // Strip quotes added by to_json if necessary
+        lastReadTime = readResult.readTime.replace(/^"|"$/g, '');
+      }
+    }
+
+    const count = taskResult?.count || 0;
+    // Strip quotes added by to_json
+    const lastUpdated = taskResult?.lastUpdated ? taskResult.lastUpdated.replace(/^"|"$/g, '') : null;
+
+    return {
+      hasPending: count > 0,
+      lastUpdated: lastUpdated,
+      count: count,
+      lastReadTime: lastReadTime 
+    };
+  } catch (error) {
+    console.error("Error checking crew pending status:", error);
+    throw error;
+  }
+};
+
+const updateCrewReadStatus = async (userId, explicitDate) => {
+  try {
+    // [FIX] Use explicitDate string directly if available to prevent Node from shifting it to local time
+    const timeValue = explicitDate || new Date().toISOString();
+    
+    if (!userId) throw new Error("UserId is required");
+
+    const query = `
+      INSERT INTO public.user_pending_task_status ("userId", "lastReadTime")
+      VALUES (:userId, :timeValue)
+      ON CONFLICT ("userId") 
+      DO UPDATE SET 
+        "lastReadTime" = :timeValue;
+    `;
+
+    await db.sequelize.query(query, {
+      replacements: { userId, timeValue },
+      type: db.sequelize.QueryTypes.INSERT,
+    });
+
+    return { success: true, timestamp: timeValue };
+  } catch (error) {
+    console.error("Error updating crew read status:", error);
+    throw error;
+  }
+};
+
 module.exports = {
   getPendingTasksWithIncompleteStatus,
   getDetailsPendingTasksCrew,
   pendingTasksUserIdSingleDateCrew,
+  getCrewPendingStatus,
+  updateCrewReadStatus,
 };

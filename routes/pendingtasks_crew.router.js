@@ -55,4 +55,38 @@ router.post("/tasks-user-single-date", async (req, res) => {
   }
 });
 
+router.get("/status", async (req, res) => {
+  try {
+    // [FIX] Extract userId from query parameters
+    const userId = req.query.userId; 
+    
+    // [FIX] Pass userId to the model function
+    const result = await pendingTasksCrewModal.getCrewPendingStatus(userId);
+    
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error fetching crew pending status:", error);
+    res.status(500).json({ error: "Failed to fetch status." });
+  }
+});
+
+router.post("/read", async (req, res) => {
+  try {
+    // [FIX] Accept readTime from body
+    const { userId, readTime } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "UserId is required" });
+    }
+
+    // Pass explicit readTime
+    const result = await pendingTasksCrewModal.updateCrewReadStatus(userId, readTime);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error marking tasks as read:", error);
+    res.status(500).json({ error: "Failed to update read status." });
+  }
+});
+
+
 module.exports = router;
