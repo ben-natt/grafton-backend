@@ -359,65 +359,61 @@ const pendingTasksUserIdSingleDateCrew = async (jobNo) => {
 
 const getCrewPendingStatus = async (userId) => {
   try {
-    // 1. Get Task Updated Time
-    // [FIX] Force timestamp to be returned as ISO string to avoid timezone confusion in node-postgres
-    const taskQuery = `
-      SELECT
-        to_json(MAX(l."updatedAt"))::text as "lastUpdated",
-        COUNT(l."jobNo")::int as "count"
-      FROM public.lot l
-      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
-      WHERE 
-        l."status" = 'Received'
-        AND l."report" = false
-        AND l."isConfirm" = true
-        AND (
-          i."isWeighted" IS NOT TRUE
-          OR EXISTS (
-            SELECT 1 FROM public.inboundbundles ib
-            WHERE ib."inboundId" = i."inboundId"
-            AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
+    // FIX:
+    // We explicitly cast both sides of the comparison to ensure a raw UTC comparison.
+    // CASE WHEN MAX(l."updatedAt") > COALESCE(user_read_time, 1970)
+    
+    // Note: If lastReadTime is stored without a timezone, we cast it to UTC ('YYYY-MM-DD HH:MM:SS+00')
+    // to match updatedAt which is usually timestamptz.
+    
+    const query = `
+      WITH pending_updates AS (
+        SELECT MAX(l."updatedAt") as "latestUpdate"
+        FROM public.lot l
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
+        WHERE 
+          l."status" = 'Received'
+          AND l."report" = false
+          AND l."isConfirm" = true
+          AND (
+            i."isWeighted" IS NOT TRUE
+            OR EXISTS (
+              SELECT 1 FROM public.inboundbundles ib
+              WHERE ib."inboundId" = i."inboundId"
+              AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
+            )
           )
-        )
+      )
+      SELECT
+        CASE 
+          WHEN MAX("latestUpdate") > COALESCE(
+            (SELECT "lastReadTime" FROM public.user_pending_task_status WHERE "userId" = :userId),
+            '1970-01-01'::timestamp
+          ) THEN true 
+          ELSE false 
+        END as "hasPending",
+        MAX("latestUpdate") as "lastUpdated",
+        (SELECT "lastReadTime" FROM public.user_pending_task_status WHERE "userId" = :userId) as "lastReadTime"
+      FROM pending_updates;
     `;
 
-    const taskResult = await db.sequelize.query(taskQuery, {
+    const result = await db.sequelize.query(query, {
+      replacements: { userId },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
 
-    // 2. Get User Read Time
-    let lastReadTime = null;
-    if (userId) {
-      // [FIX] Also force JSON/ISO output for read time
-      const readQuery = `
-        SELECT to_json("lastReadTime")::text as "readTime"
-        FROM public.user_pending_task_status 
-        WHERE "userId" = :userId
-      `;
-      
-      const readResult = await db.sequelize.query(readQuery, {
-        replacements: { userId },
-        type: db.sequelize.QueryTypes.SELECT,
-        plain: true,
-      });
-      
-      if (readResult && readResult.readTime) {
-        // Strip quotes added by to_json if necessary
-        lastReadTime = readResult.readTime.replace(/^"|"$/g, '');
-      }
+    if (!result) {
+      return { hasPending: false, lastUpdated: null, lastReadTime: null };
     }
 
-    const count = taskResult?.count || 0;
-    // Strip quotes added by to_json
-    const lastUpdated = taskResult?.lastUpdated ? taskResult.lastUpdated.replace(/^"|"$/g, '') : null;
-
+    // Force return as a Date object or null to avoid string parsing issues on client
     return {
-      hasPending: count > 0,
-      lastUpdated: lastUpdated,
-      count: count,
-      lastReadTime: lastReadTime 
+      hasPending: result.hasPending === true || result.hasPending === 1,
+      lastUpdated: result.lastUpdated ? new Date(result.lastUpdated) : null,
+      lastReadTime: result.lastReadTime ? new Date(result.lastReadTime) : null 
     };
+
   } catch (error) {
     console.error("Error checking crew pending status:", error);
     throw error;
@@ -426,25 +422,27 @@ const getCrewPendingStatus = async (userId) => {
 
 const updateCrewReadStatus = async (userId, explicitDate) => {
   try {
-    // [FIX] Use explicitDate string directly if available to prevent Node from shifting it to local time
-    const timeValue = explicitDate || new Date().toISOString();
+    const replacements = { userId };
     
-    if (!userId) throw new Error("UserId is required");
+    // Ensure we insert a clean ISO timestamp if provided
+    if (explicitDate) {
+      replacements.explicitDate = explicitDate; // e.g., '2025-12-11T01:39:24.314Z'
+    }
 
     const query = `
       INSERT INTO public.user_pending_task_status ("userId", "lastReadTime")
-      VALUES (:userId, :timeValue)
+      VALUES (:userId, ${explicitDate ? ':explicitDate::timestamptz' : 'NOW()'})
       ON CONFLICT ("userId") 
       DO UPDATE SET 
-        "lastReadTime" = :timeValue;
+        "lastReadTime" = ${explicitDate ? ':explicitDate::timestamptz' : 'NOW()'};
     `;
 
     await db.sequelize.query(query, {
-      replacements: { userId, timeValue },
+      replacements,
       type: db.sequelize.QueryTypes.INSERT,
     });
 
-    return { success: true, timestamp: timeValue };
+    return { success: true };
   } catch (error) {
     console.error("Error updating crew read status:", error);
     throw error;
