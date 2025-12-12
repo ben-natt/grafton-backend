@@ -93,23 +93,23 @@ const getInventory = async (filters) => {
       `;
     }
 
-    // --- START: Sorting Logic for getInventory ---
     const sortableColumns = {
-      "Job No": '"Job No"',
-      Lots: '"Lot No"',
-      Metal: '"Metal"',
-      Brand: '"Brand"',
-      Shape: '"Shape"',
-      Bundles: '"Qty"',
-      Weight: '"Weight"',
+      "JobNo": '"Job No"',      // Matches frontend sending 'JobNo'
+      "LotNo": '"Lot No"',      // Matches frontend sending 'LotNo'
+      "Metal": '"Metal"',       // Matches frontend sending 'Metal'
+      "Brand": '"Brand"',       // Matches frontend sending 'Brand'
+      "Shape": '"Shape"',       // Matches frontend sending 'Shape'
+      "Qty": '"Qty"',           // Matches frontend sending 'Qty'
+      "Weight": '"Weight"',     // Matches frontend sending 'Weight'
     };
+    
     let orderByClause = 'ORDER BY "Job No" ASC'; // Default sort
+    
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortColumn = sortableColumns[filters.sortBy];
       const sortOrder = filters.sortOrder === "desc" ? "DESC" : "ASC";
       orderByClause = `ORDER BY ${sortColumn} ${sortOrder}`;
     }
-    // --- END: Sorting Logic ---
 
     const countQuery = `${cteQuery} SELECT COUNT(*)::int AS "totalItems" FROM grouped_inventory ${finalWhereClause};`;
 
@@ -232,6 +232,13 @@ const getLotSummary = async (jobNo, lotNo) => {
         i."createdAt" AS "InboundDate", TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD') AS "ScheduleInboundDate",
         si."createdAt" AS "CreatedAt",
         i."grossWeight" AS "GrossWeight", i."netWeight" AS "NetWeight", i."actualWeight" AS "ActualWeight",
+        
+        -- [NEW] Added Fields
+        i."tareWeight" AS "TareWeight",
+        i."scaleNo" AS "ScaleNo",
+        TO_CHAR(i."lottedAt" AT TIME ZONE 'Asia/Singapore', 'DD Mon YYYY') AS "LottedAt",
+        u3."username" AS "LottedBy",
+
         i."isRebundled" AS "IsRebundled", i."isRepackProvided" AS "IsRepackProvided",
         u1."username" AS "ScheduledBy",
         u2."username" AS "ProcessedBy",
@@ -249,7 +256,9 @@ const getLotSummary = async (jobNo, lotNo) => {
       LEFT JOIN public.exwarehouselocations exwhl ON exwhl."exWarehouseLocationId" = i."exWarehouseLocationId"
       LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
       LEFT JOIN public.users u1 ON u1.userid = i."userId"
-     LEFT JOIN public.users u2 ON u2.userid = i."processedId"
+      LEFT JOIN public.users u2 ON u2.userid = i."processedId"
+      -- [NEW] Join to get Lotted By username
+      LEFT JOIN public.users u3 ON u3.userid = i."lottedById"
       WHERE o."inboundId" IS NULL
         -- MODIFICATION: Ensure the lot is not in outboundtransactions
         AND ot."inboundId" IS NULL
@@ -896,6 +905,7 @@ const getLotsByJobNo = async (jobNo, brandName, shapeName, filters) => {
                 i."inboundId" as id,
                 i."jobNo" AS "JobNo",
                 i."lotNo" AS "LotNo",
+                i."crewLotNo",
                 i."exWarehouseLot" AS "Ex-WarehouseLot",
                 c."commodityName" AS "Metal",
                 b."brandName" AS "Brand",
@@ -1110,5 +1120,5 @@ module.exports = {
   getInventory1,
   getAllLotsForExport,
   getIndividualBundleSheet,
-  getUniqueExWarehouseLotsByJobNo,
+  getUniqueExWarehouseLotsByJobNo
 };

@@ -5,9 +5,6 @@ const pendingTasksModel = require("../models/pending_tasks_model");
 const pendingTasksOfficeModel = require("../models/pending_tasks_office.model");
 
 const {
-  // Ensure you are importing your GET functions here too!
-  // getPendingTasksForOffice,
-  // getPendingTasksForWarehouse, 
   setLastReadPendingTaskTime,
   getLastReadPendingTaskTime,
 } = require('../models/pending_tasks_model');
@@ -38,9 +35,7 @@ router.get("/tasks-jobNo", async (req, res) => {
 router.post("/report-job-discrepancy", async (req, res) => {
   try {
     const { jobNo, reportedBy, discrepancyType } = req.body;
-    // +++ CONSOLE LOG: What the router received +++
-    console.log(`[Router] POST /report-job-discrepancy received:`, { jobNo, reportedBy, discrepancyType });
-
+    
     if (!jobNo || !reportedBy || !discrepancyType) {
       return res.status(400).json({ error: "jobNo, reportedBy, and discrepancyType are required." });
     }
@@ -51,9 +46,6 @@ router.post("/report-job-discrepancy", async (req, res) => {
 
     const reportedCount = await pendingTasksModel.reportJobDiscrepancy(jobNo, reportedBy, discrepancyType);
 
-    // +++ CONSOLE LOG: What the model function returned +++
-    console.log(`[Router] Model reported ${reportedCount} lots. Sending response.`);
-
     if (reportedCount > 0) {
       res.status(200).json({
         message: `Successfully reported discrepancy for ${reportedCount} lot(s) in job ${jobNo}.`
@@ -62,11 +54,11 @@ router.post("/report-job-discrepancy", async (req, res) => {
       res.status(404).json({ message: "No pending, unreported lots found for the specified job." });
     }
   } catch (error) {
-    // +++ CONSOLE LOG: Log any router-level errors +++
     console.error("[Router] Error in /report-job-discrepancy:", error);
     res.status(500).json({ error: "Failed to report job discrepancy." });
   }
 });
+
 router.post("/reverse-inbound/:inboundId", async (req, res) => {
   try {
     const { inboundId } = req.params;
@@ -84,7 +76,6 @@ router.post("/reverse-inbound/:inboundId", async (req, res) => {
       error: "Failed to reverse inbound task.",
       details: error.message,
     });
-
   }
 });
 
@@ -96,9 +87,8 @@ router.get("/tasks-outbound-ids", async (req, res) => {
     const filters = {
       startDate: req.query.startDate,
       endDate: req.query.endDate,
-      jobNo: req.query.jobNo, // Add jobNo filter
+      jobNo: req.query.jobNo, 
     };
-    // Call the new unified function for outbound tasks
     const result = await pendingTasksModel.getPendingOutboundTasks(
       page,
       pageSize,
@@ -149,7 +139,6 @@ router.put("/schedule-outbound/:scheduleOutboundId", async (req, res) => {
 });
 
 // ----------------------------------- OFFICE Flow ---------------------------------
-// --- NEW ROUTE FOR FILTER OPTIONS ---
 router.get("/office-filter-options", async (req, res) => {
   try {
     const isOutbound = req.query.isOutbound === "true";
@@ -163,7 +152,6 @@ router.get("/office-filter-options", async (req, res) => {
   }
 });
 
-// --- INBOUND ROUTES ---
 router.post("/acknowledge-report", async (req, res) => {
   try {
     const { lotId, reportStatus, resolvedBy } = req.body;
@@ -185,12 +173,6 @@ router.post("/acknowledge-report", async (req, res) => {
       reportStatus,
       resolvedBy,
     });
-
-    if (!updatedReports || updatedReports.length === 0) {
-      return res
-        .status(404)
-        .json({ error: "No pending report found to update for this lotId." });
-    }
 
     res.status(200).json({
       message: `Report ${reportStatus} successfully.`,
@@ -224,12 +206,6 @@ router.post("/acknowledge-duplicated", async (req, res) => {
       resolvedBy,
     });
 
-    if (!updatedReports || updatedReports.length === 0) {
-      return res
-        .status(404)
-        .json({ error: "No pending report found to update for this lotId." });
-    }
-
     res.status(200).json({
       message: `Report ${reportStatus} successfully.`,
       updatedReport: updatedReports[0],
@@ -243,22 +219,13 @@ router.post("/acknowledge-duplicated", async (req, res) => {
 router.get("/report-supervisor/:lotId", async (req, res) => {
   try {
     const lotId = parseInt(req.params.lotId);
+    if (!lotId) return res.status(400).json({ error: "lotId is required" });
 
-    if (!lotId) {
-      return res.status(400).json({ error: "lotId is required" });
-    }
-
-    const result = await pendingTasksOfficeModel.getReportSupervisorUsername(
-      lotId
-    );
-
-    if (!result) {
-      return res.status(404).json({ error: "No report found for this lotId" });
-    }
+    const result = await pendingTasksOfficeModel.getReportSupervisorUsername(lotId);
+    if (!result) return res.status(404).json({ error: "No report found for this lotId" });
 
     res.status(200).json({ username: result.username });
   } catch (error) {
-    console.error("Error fetching report supervisor username:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -266,34 +233,19 @@ router.get("/report-supervisor/:lotId", async (req, res) => {
 router.get("/duplicate-report/:lotId", async (req, res) => {
   try {
     const lotId = parseInt(req.params.lotId);
+    if (!lotId) return res.status(400).json({ error: "Valid lotId is required" });
 
-    if (!lotId || isNaN(lotId)) {
-      return res.status(400).json({ error: "Valid lotId is required" });
-    }
+    const result = await pendingTasksOfficeModel.getDuplicateReportUsername(lotId);
+    if (!result) return res.status(404).json({ error: "No duplicate report found" });
 
-    const result = await pendingTasksOfficeModel.getDuplicateReportUsername(
-      lotId
-    );
-
-    if (!result) {
-      return res.status(404).json({
-        error: "No duplicate report found for this lotId",
-        message: "No user has reported this lot as a duplicate",
-      });
-    }
-
-    res.status(200).json({
-      username: result.username,
-      message: "Username retrieved successfully",
-    });
+    res.status(200).json({ username: result.username });
   } catch (error) {
-    console.error("Error fetching duplicate report username:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
 router.post("/quantity/update", async (req, res) => {
-  const { lotId, expectedBundleCount } = req.body; // changed from jobNo to lotId
+  const { lotId, expectedBundleCount } = req.body;
   try {
     const result = await pendingTasksOfficeModel.pendingTasksUpdateQuantity(
       lotId,
@@ -301,75 +253,33 @@ router.post("/quantity/update", async (req, res) => {
     );
     res.status(200).json(result);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Failed to update quantity." });
   }
 });
 
-// Router endpoints (add to your existing router file) (edit functionality )
 router.post("/lot-inbound/get", async (req, res) => {
-  
   const { jobNo, lotNo, exWLot } = req.body;
-  if (!jobNo || !lotNo || !exWLot) {
-    return res.status(400).json({
-      error: "jobNo, lotNo, and exWarehouseLot are required in the request body.",
-    });
-  }
+  if (!jobNo || !lotNo || !exWLot) return res.status(400).json({ error: "Missing fields" });
   try {
-    const result = await pendingTasksOfficeModel.getLotInboundDate(
-      jobNo,
-      lotNo,
-      exWLot
-    );
-    if (!result) {
-      return res.status(404).json({ error: "Lot not found" });
-    }
-
+    const result = await pendingTasksOfficeModel.getLotInboundDate(jobNo, lotNo, exWLot);
+    if (!result) return res.status(404).json({ error: "Lot not found" });
     res.status(200).json(result);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Failed to fetch lot inbound date." });
   }
 });
 
 router.post("/lot-inbound/update", async (req, res) => {
-  // +++ ADD THIS LOG +++
-  console.log("--- BACKEND LOG ---");
-  console.log("Received request for /lot-inbound/update");
-  console.log("REQUEST BODY:", req.body);
-  // +++ END OF LOG +++
-
   const { jobNo, lotNo, exWarehouseLot, inboundDate, userId } = req.body;
-
   if (!jobNo || !lotNo || !exWarehouseLot || !inboundDate || !userId) {
-    // This part is currently being triggered
-    return res.status(400).json({
-      error: "jobNo, lotNo, exWarehouseLot, inboundDate, and userId are required.",
-    });
+    return res.status(400).json({ error: "Missing required fields." });
   }
-
   try {
-    const existingLot = await pendingTasksOfficeModel.getLotInboundDate(jobNo, lotNo, exWarehouseLot);
-    if (!existingLot) {
-      return res.status(404).json({ error: "Lot not found" });
-    }
-
-    // MODIFIED: Pass userId for activity logging
     const result = await pendingTasksOfficeModel.updateLotInboundDate(
-      jobNo,
-      lotNo,
-      exWarehouseLot,
-      inboundDate,
-      userId
+      jobNo, lotNo, exWarehouseLot, inboundDate, userId
     );
-
-    res.status(200).json({
-      success: true,
-      message: "Lot inbound date updated successfully",
-      data: result,
-    });
+    res.status(200).json({ success: true, message: "Updated successfully", data: result });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Failed to update lot inbound date." });
   }
 });
@@ -379,28 +289,19 @@ router.post("/tasks-inbound-office", async (req, res) => {
     const { filters, pagination } = req.body;
     const page = pagination?.page || 1;
     const pageSize = pagination?.pageSize || 10;
-    const result = await pendingTasksOfficeModel.findInboundTasksOffice(
-      filters,
-      page,
-      pageSize
-    );
+    const result = await pendingTasksOfficeModel.findInboundTasksOffice(filters, page, pageSize);
     res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch pending inbound tasks." });
   }
 });
 
-// --- OUTBOUND ROUTES ---
 router.post("/tasks-outbound-office", async (req, res) => {
   try {
     const { filters, pagination } = req.body;
     const page = pagination?.page || 1;
     const pageSize = pagination?.pageSize || 10;
-    const result = await pendingTasksOfficeModel.findOutboundTasksOffice(
-      filters,
-      page,
-      pageSize
-    );
+    const result = await pendingTasksOfficeModel.findOutboundTasksOffice(filters, page, pageSize);
     res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch pending outbound tasks." });
@@ -409,65 +310,24 @@ router.post("/tasks-outbound-office", async (req, res) => {
 
 router.post("/lot-outbound/get", async (req, res) => {
   const { jobNo, lotNo } = req.body;
-  if (!jobNo || !lotNo) {
-    return res.status(400).json({
-      error: "jobNo and lotNo are required in the request body.",
-    });
-  }
   try {
-    const result = await pendingTasksOfficeModel.getLotOutboundDates(
-      jobNo,
-      lotNo
-    );
-    if (!result) {
-      return res.status(404).json({ error: "Lot not found" });
-    }
+    const result = await pendingTasksOfficeModel.getLotOutboundDates(jobNo, lotNo);
+    if (!result) return res.status(404).json({ error: "Lot not found" });
     res.status(200).json(result);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Failed to fetch outbound dates." });
   }
 });
 
 router.post("/lot-outbound/update", async (req, res) => {
-  const {
-    jobNo,
-    lotNo,
-    releaseDate,
-    releaseEndDate,
-    exportDate,
-    deliveryDate,
-  } = req.body;
-
-  if (!jobNo || !lotNo || !releaseDate) {
-    return res.status(400).json({
-      error: "jobNo, lotNo, and releaseDate are required.",
-    });
-  }
-
+  const { jobNo, lotNo, releaseDate } = req.body;
+  if (!jobNo || !lotNo || !releaseDate) return res.status(400).json({ error: "Missing fields" });
   try {
-    const existingLot = await pendingTasksOfficeModel.getLotOutboundDates(
-      jobNo,
-      lotNo
-    );
-    if (!existingLot) {
-      return res.status(404).json({ error: "Lot not found" });
-    }
     const result = await pendingTasksOfficeModel.updateLotOutboundDates(
-      jobNo,
-      lotNo,
-      releaseDate,
-      releaseEndDate,
-      exportDate,
-      deliveryDate
+      jobNo, lotNo, req.body.releaseDate, req.body.releaseEndDate, req.body.exportDate, req.body.deliveryDate
     );
-    res.status(200).json({
-      success: true,
-      message: "Outbound dates updated successfully",
-      data: result,
-    });
+    res.status(200).json({ success: true, message: "Updated successfully", data: result });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Failed to update outbound dates." });
   }
 });
@@ -476,23 +336,17 @@ router.get("/job-report-info/:jobNo", async (req, res) => {
   try {
     const { jobNo } = req.params;
     const info = await pendingTasksOfficeModel.getJobReportInfo(jobNo);
-    if (info) {
-      res.status(200).json(info);
-    } else {
-      res.status(404).json({ message: "No pending report found for this job." });
-    }
+    if (info) res.status(200).json(info);
+    else res.status(404).json({ message: "No pending report found." });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch job report info." });
   }
 });
 
-// NEW & CONSOLIDATED: Handles the initial "Accept" or "Decline" of a job report
 router.post("/acknowledge-job-report", async (req, res) => {
   try {
     const { jobNo, status, resolvedBy } = req.body;
-    if (!jobNo || !status || !resolvedBy) {
-      return res.status(400).json({ error: "jobNo, status, and resolvedBy are required." });
-    }
+    if (!jobNo || !status || !resolvedBy) return res.status(400).json({ error: "Missing fields" });
     const result = await pendingTasksOfficeModel.updateJobReportStatus({ jobNo, status, resolvedBy });
     res.status(200).json({ message: "Job report status updated.", data: result });
   } catch (error) {
@@ -500,76 +354,76 @@ router.post("/acknowledge-job-report", async (req, res) => {
   }
 });
 
-// NEW ROUTE: Handles finalization of an "extra lots" report.
 router.post('/finalize-job-report', async (req, res) => {
   try {
     const { jobNo, deletedLotIds, resolvedBy } = req.body;
-    if (!jobNo || !deletedLotIds || resolvedBy === undefined) {
-      return res.status(400).json({ error: 'Missing required fields: jobNo, deletedLotIds, resolvedBy' });
-    }
-    await pendingTasksOfficeModel.finalizeJobReport({
-      jobNo,
-      deletedLotIds,
-      resolvedBy,
-    });
+    if (!jobNo || !deletedLotIds || resolvedBy === undefined) return res.status(400).json({ error: 'Missing fields' });
+    await pendingTasksOfficeModel.finalizeJobReport({ jobNo, deletedLotIds, resolvedBy });
     res.status(200).json({ message: 'Job report finalized successfully.' });
   } catch (error) {
-    console.error('Error finalizing job report:', error);
     res.status(500).json({ error: 'Failed to finalize job report.' });
   }
 });
 
-// NEW ROUTE: Deletes a lot (by updating its status)
 router.delete("/lot/:lotId", async (req, res) => {
   try {
     const { lotId } = req.params;
     const result = await pendingTasksOfficeModel.deleteLot(parseInt(lotId));
-    if (result) {
-      res.status(200).json({ message: "Lot deleted successfully." });
-    } else {
-      res.status(404).json({ message: "Lot not found." });
-    }
+    if (result) res.status(200).json({ message: "Lot deleted successfully." });
+    else res.status(404).json({ message: "Lot not found." });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete lot." });
   }
 });
 
+// --- STATUS CHECKS (FIXED) ---
+
 router.get("/status/supervisor", async (req, res) => {
   try {
-    const status = await pendingTasksModel.getSupervisorPendingStatus();
+    const userId = req.query.userId; 
+    const status = await pendingTasksModel.getSupervisorPendingStatus(userId);
     res.status(200).json(status);
   } catch (error) {
+    console.error("Error checking supervisor status:", error);
     res.status(500).json({ error: "Failed to check supervisor status" });
   }
 });
 
+// [CRITICAL FIX] Pass userId to getOfficePendingStatus
 router.get("/status/office", async (req, res) => {
   try {
-    const status = await pendingTasksOfficeModel.getOfficePendingStatus();
+    const userId = req.query.userId; 
+    // This connects to the function you MUST update in pending_tasks_office.model.js
+    const status = await pendingTasksOfficeModel.getOfficePendingStatus(userId);
     res.status(200).json(status);
   } catch (error) {
+    console.error("Error checking office status:", error);
     res.status(500).json({ error: "Failed to check office status" });
   }
 });
 
+// --- FIX: Remove 'createdAt' and 'updatedAt' to prevent DB crash ---
 router.post('/pending-tasks/read', async (req, res) => {
   try {
-    console.log("--- [PendingRouter] POST /pending-tasks/read HIT ---");
-    console.log("[PendingRouter] Body:", req.body);
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
-    const { userId, timestamp } = req.body;
+    // We only update 'lastReadTime'. The other columns don't exist in your table.
+    const query = `
+      INSERT INTO public.user_pending_task_status ("userId", "lastReadTime")
+      VALUES (:userId, NOW())
+      ON CONFLICT ("userId") 
+      DO UPDATE SET "lastReadTime" = NOW();
+    `;
 
-    if (!userId || !timestamp) {
-      console.error("[PendingRouter] ERROR: Missing userId or timestamp");
-      return res.status(400).json({ error: 'Missing userId or timestamp' });
-    }
+    await require("../database").sequelize.query(query, {
+      replacements: { userId },
+      type: require("sequelize").QueryTypes.INSERT
+    });
 
-    await setLastReadPendingTaskTime(userId, timestamp);
-    
-    console.log(`[PendingRouter] Success: Updated read status for user ${userId}`);
     res.status(200).json({ message: 'Pending task read status updated' });
   } catch (error) {
-    console.error('[PendingRouter] CRITICAL ERROR:', error);
+    console.error('[PendingRouter] ERROR updating read status:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -580,8 +434,8 @@ router.get('/pending-tasks/read-status/:userId', async (req, res) => {
     const lastReadTime = await getLastReadPendingTaskTime(userId);
     res.status(200).json({ lastReadTime });
   } catch (error) {
-    console.error('Error fetching pending task read status:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 module.exports = router;

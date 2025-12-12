@@ -1,8 +1,6 @@
 const db = require("../database");
 
 // ----- INBOUND ROUTES -------
-// in pending_tasks_office.model.js
-
 const findInboundTasksOffice = async (
   filters = {},
   page = 1,
@@ -45,26 +43,18 @@ const findInboundTasksOffice = async (
       replacements.scheduledBy = filters.scheduledBy;
     }
 
-    // --- START OF MODIFICATION ---
-    // Updated the filter logic to handle specific discrepancy types.
     if (filters.type) {
       if (filters.type === "Job Discrepancy") {
-        // This filters for jobs that have a pending report in the `job_reports` table.
         whereClauses += ` AND EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
       } else if (filters.type === "Lot Discrepancy") {
-        // This finds lots with an individual report flag (l.report = true)
-        // BUT excludes lots that are part of a job with a pending job-level report.
-        // This isolates true lot-level discrepancies.
         whereClauses += ` AND l.report = true AND NOT EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
       }
-      // "Duplicated" filter is removed.
     }
-    // --- END OF MODIFICATION ---
 
     const countQuery = `
       SELECT COUNT(DISTINCT l."jobNo")::int
       FROM public.lot l
-      LEFT JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo" -- CORRECTED JOIN
+      LEFT JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
       LEFT JOIN public.users u ON s."userId" = u."userid"
       WHERE ${whereClauses}
     `;
@@ -78,7 +68,7 @@ const findInboundTasksOffice = async (
     const jobNoQuery = `
       SELECT l."jobNo"
       FROM public.lot l
-      LEFT JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo" -- CORRECTED JOIN
+      LEFT JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
       LEFT JOIN public.users u ON s."userId" = u."userid"
       WHERE ${whereClauses}
       GROUP BY l."jobNo"
@@ -96,7 +86,7 @@ const findInboundTasksOffice = async (
       return { totalCount, data: {} };
     }
 
-  const tasksQuery = `
+    const tasksQuery = `
       SELECT DISTINCT ON (l."lotId")
         l."jobNo",
         TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
@@ -118,14 +108,15 @@ const findInboundTasksOffice = async (
     `;
     
     const reportsQuery = `
-  SELECT
-    jr."jobNo",
-    jr."discrepancyType",
-    u.username as "supervisorUsername"
-  FROM public.job_reports jr
-  JOIN public.users u ON jr."reportedById" = u.userid
-  WHERE jr."jobNo" IN (:jobNos) AND jr."reportStatus" = 'pending'
-`;
+      SELECT
+        jr."jobNo",
+        jr."discrepancyType",
+        u.username as "supervisorUsername"
+      FROM public.job_reports jr
+      JOIN public.users u ON jr."reportedById" = u.userid
+      WHERE jr."jobNo" IN (:jobNos) AND jr."reportStatus" = 'pending'
+    `;
+    
     const [tasksResult, reportsResult] = await Promise.all([
         db.sequelize.query(tasksQuery, {
             replacements: { ...replacements, jobNos },
@@ -139,7 +130,7 @@ const findInboundTasksOffice = async (
 
     const tasksMap = {};
     for (const task of tasksResult) {
- if (!tasksMap[task.jobNo]) {
+      if (!tasksMap[task.jobNo]) {
         tasksMap[task.jobNo] = { jobNo: task.jobNo, lots: [], reportInfo: null };
       }
       tasksMap[task.jobNo].lots.push({ ...task, canEdit: false, isEditing: false });
@@ -161,8 +152,8 @@ const findInboundTasksOffice = async (
     throw error;
   }
 };
-// Update lot inbounddate (updated to work with lot table) (edit functionality)
-const getLotInboundDate = async (jobNo, lotNo,exWarehouseLot) => {
+
+const getLotInboundDate = async (jobNo, lotNo, exWarehouseLot) => {
   try {
     const query = `
       SELECT 
@@ -177,8 +168,6 @@ const getLotInboundDate = async (jobNo, lotNo,exWarehouseLot) => {
       replacements: { jobNo, lotNo, exWarehouseLot },
       type: db.sequelize.QueryTypes.SELECT,
     });
-    console.log("I am result", result);
-    
     return result[0] || null;
   } catch (error) {
     console.error("Error fetching lot inbound date:", error);
@@ -186,7 +175,6 @@ const getLotInboundDate = async (jobNo, lotNo,exWarehouseLot) => {
   }
 };
 
-// Update lot inbounddate (specific to jobNo + lotNo) (edit functionality)
 const updateLotInboundDate = async (jobNo, lotNo, exWarehouseLot, inboundDate) => {
   try {
     const query = `
@@ -195,12 +183,10 @@ const updateLotInboundDate = async (jobNo, lotNo, exWarehouseLot, inboundDate) =
       WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo AND "exWarehouseLot" = :exWarehouseLot
       RETURNING *;
     `;
-
     const result = await db.sequelize.query(query, {
       replacements: { jobNo, lotNo, exWarehouseLot, inboundDate },
       type: db.sequelize.QueryTypes.UPDATE,
     });
-
     return result[0];
   } catch (error) {
     console.error("Error updating lot inbound date:", error);
@@ -209,18 +195,13 @@ const updateLotInboundDate = async (jobNo, lotNo, exWarehouseLot, inboundDate) =
 };
 
 // ----- OUTBOUND ROUTES -------
-const findOutboundTasksOffice = async (
-  filters = {},
-  page = 1,
-  pageSize = 10
-) => {
+const findOutboundTasksOffice = async (filters = {}, page = 1, pageSize = 10) => {
   try {
     const offset = (page - 1) * pageSize;
     let whereClauses = `si."isOutbounded" = false`;
     const replacements = {};
 
     if (filters.startDate && filters.endDate) {
-
       whereClauses += ` AND (si."releaseDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`;
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
@@ -309,7 +290,6 @@ const findOutboundTasksOffice = async (
         TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "exportDate",
         TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "deliveryDate",
         so."outboundType"
-
       ${baseQuery}
       WHERE so."scheduleOutboundId" IN (:scheduleIds) AND ${whereClauses}
       ORDER BY si."releaseDate" ASC, i."lotNo"::integer ASC
@@ -325,17 +305,10 @@ const findOutboundTasksOffice = async (
       if (!tasksMap[scheduleId]) {
         tasksMap[scheduleId] = [];
       }
-
-      // Create release date range string
       let releaseDateRange = task.releaseDate || "";
-      if (
-        task.releaseDate &&
-        task.releaseEndDate &&
-        task.releaseDate !== task.releaseEndDate
-      ) {
+      if (task.releaseDate && task.releaseEndDate && task.releaseDate !== task.releaseEndDate) {
         releaseDateRange = `${task.releaseDate} - ${task.releaseEndDate}`;
       }
-
       tasksMap[scheduleId].push({
         selectedInboundId: task.selectedInboundId.toString(),
         jobNo: task.jobNo.toString(),
@@ -364,7 +337,6 @@ const findOutboundTasksOffice = async (
   }
 };
 
-// Get outbound dates for a specific lot
 const getLotOutboundDates = async (jobNo, lotNo) => {
   try {
     const query = `
@@ -378,12 +350,10 @@ const getLotOutboundDates = async (jobNo, lotNo) => {
       ORDER BY "updatedAt" DESC
       LIMIT 1;
     `;
-
     const result = await db.sequelize.query(query, {
       replacements: { jobNo, lotNo },
       type: db.sequelize.QueryTypes.SELECT,
     });
-
     return result[0] || null;
   } catch (error) {
     console.error("Error fetching lot outbound dates:", error);
@@ -391,35 +361,18 @@ const getLotOutboundDates = async (jobNo, lotNo) => {
   }
 };
 
-// Helper function to convert DD/MM/YYYY to YYYY-MM-DD
 const convertDateFormat = (dateString) => {
   if (!dateString) return null;
-
-  // Check if it's already in YYYY-MM-DD format
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-    return dateString;
-  }
-
-  // Convert DD/MM/YYYY to YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return dateString;
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
     const [day, month, year] = dateString.split("/");
     return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   }
-
   return null;
 };
 
-// Updated updateLotOutboundDates with date conversion
-const updateLotOutboundDates = async (
-  jobNo,
-  lotNo,
-  releaseDate,
-  releaseEndDate,
-  exportDate,
-  deliveryDate
-) => {
+const updateLotOutboundDates = async (jobNo, lotNo, releaseDate, releaseEndDate, exportDate, deliveryDate) => {
   try {
-    // Convert dates from DD/MM/YYYY to YYYY-MM-DD format
     const convertedReleaseDate = convertDateFormat(releaseDate);
     const convertedReleaseEndDate = convertDateFormat(releaseEndDate);
     const convertedExportDate = convertDateFormat(exportDate);
@@ -436,7 +389,6 @@ const updateLotOutboundDates = async (
       WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
       RETURNING *;
     `;
-
     const result = await db.sequelize.query(query, {
       replacements: {
         jobNo,
@@ -448,7 +400,6 @@ const updateLotOutboundDates = async (
       },
       type: db.sequelize.QueryTypes.UPDATE,
     });
-
     return result[0];
   } catch (error) {
     console.error("Error updating lot outbound dates:", error);
@@ -478,7 +429,6 @@ const getOfficeFilterOptions = async (isOutbound) => {
         scheduledBys: `SELECT DISTINCT u.username as val FROM public.scheduleinbounds s JOIN public.users u ON s."userId" = u."userid" JOIN public.lot l ON s."jobNo" = l."jobNo" WHERE l.status = 'Pending' AND u.username IS NOT NULL ORDER BY val`,
       };
     }
-
     const results = {};
     for (const key in queries) {
       const result = await db.sequelize.query(queries[key], {
@@ -493,6 +443,7 @@ const getOfficeFilterOptions = async (isOutbound) => {
   }
 };
 
+// --- FIX START: Use standard NOW() instead of Timezone Shift ---
 const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
   try {
     const query = `
@@ -506,17 +457,15 @@ const updateReportStatus = async ({ lotId, reportStatus, resolvedBy }) => {
       SET "reportStatus" = :reportStatus,
           "resolvedBy" = :resolvedBy,
           "resolvedOn" = NOW(),
-          "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
+          "updatedAt" = NOW() 
       WHERE "lotId" = :lotId
         AND "reportStatus" = 'pending'
       RETURNING *;
     `;
-
     const result = await db.sequelize.query(query, {
       replacements: { lotId, reportStatus, resolvedBy },
       type: db.sequelize.QueryTypes.UPDATE,
     });
-
     return result[0];
   } catch (error) {
     console.error("Error updating report resolution:", error);
@@ -542,25 +491,23 @@ const updateDuplicateStatus = async ({ lotId, reportStatus, resolvedBy }) => {
           "resolvedById" = :resolvedBy,
           "resolvedOn" = NOW(),
           "isResolved" = true,
-          "updatedAt" = (NOW() AT TIME ZONE 'Asia/Singapore')
+          "updatedAt" = NOW()
       WHERE "lotId" = :lotId
         AND "reportStatus" = 'pending'
       RETURNING *;
     `;
-
     const result = await db.sequelize.query(query, {
       replacements: { lotId, reportStatus, resolvedBy },
       type: db.sequelize.QueryTypes.UPDATE,
     });
-
     return result[0];
   } catch (error) {
     console.error("Error updating duplicate status:", error);
     throw error;
   }
 };
+// --- FIX END ---
 
-// for report
 const getReportSupervisorUsername = async (lotId) => {
   try {
     const query = `
@@ -571,12 +518,10 @@ const getReportSupervisorUsername = async (lotId) => {
       ORDER BY r."reportedOn" DESC
       LIMIT 1;
     `;
-
     const result = await db.sequelize.query(query, {
       replacements: { lotId },
       type: db.sequelize.QueryTypes.SELECT,
     });
-
     return result[0];
   } catch (error) {
     console.error("Error fetching report supervisor username:", error);
@@ -584,7 +529,6 @@ const getReportSupervisorUsername = async (lotId) => {
   }
 };
 
-// for duplication
 const getDuplicateReportUsername = async (lotId) => {
   try {
     const query = `
@@ -595,12 +539,10 @@ const getDuplicateReportUsername = async (lotId) => {
       ORDER BY ld."reportedOn" DESC
       LIMIT 1;
     `;
-
     const result = await db.sequelize.query(query, {
       replacements: { lotId },
       type: db.sequelize.QueryTypes.SELECT,
     });
-
     return result[0];
   } catch (error) {
     console.error("Error fetching duplicate report username:", error);
@@ -620,7 +562,6 @@ const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
       replacements: { lotId, expectedBundleCount },
       type: db.sequelize.QueryTypes.UPDATE,
     });
-
     return result[0];
   } catch (error) {
     console.error("Error updating quantity:", error);
@@ -653,8 +594,6 @@ const getJobReportInfo = async (jobNo) => {
 
 const updateJobReportStatus = async ({ jobNo, status, resolvedBy }, existingTransaction = null) => {
   const logic = async (t) => {
-    // Step 1: Determine the true final status for the report.
-    // For "lack" reports, "accepted" is the final resolution step and should be stored as "resolved".
     let finalStatus = status;
     if (status === 'accepted') {
         const getReportTypeQuery = `
@@ -668,13 +607,10 @@ const updateJobReportStatus = async ({ jobNo, status, resolvedBy }, existingTran
             plain: true,
             transaction: t,
         });
-
         if (reportTypeResult && reportTypeResult.discrepancyType === 'lack') {
             finalStatus = 'resolved';
         }
     }
-
-    // Step 2: Update the job_reports table with the determined status.
     const updateReportQuery = `
       UPDATE public.job_reports
       SET "reportStatus" = :finalStatus, "resolvedById" = :resolvedBy, "resolvedOn" = NOW()
@@ -682,18 +618,14 @@ const updateJobReportStatus = async ({ jobNo, status, resolvedBy }, existingTran
       RETURNING "discrepancyType", "reportStatus";
     `;
     const reportResult = await db.sequelize.query(updateReportQuery, {
-      replacements: { jobNo, finalStatus, resolvedBy }, // Use finalStatus
+      replacements: { jobNo, finalStatus, resolvedBy },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
       transaction: t,
     });
-
     if (!reportResult) {
-      // Updated the error message for better debugging
       throw new Error("No pending or accepted report found for this job to update.");
     }
-
-    // Step 3: Reset the report flag for all lots in this job.
     const resetLotFlagsQuery = `
       UPDATE public.lot
       SET report = false
@@ -704,11 +636,8 @@ const updateJobReportStatus = async ({ jobNo, status, resolvedBy }, existingTran
       type: db.sequelize.QueryTypes.UPDATE,
       transaction: t,
     });
-    
     return reportResult;
   };
-
-  // This part handles transactions correctly
   if (existingTransaction) {
     return logic(existingTransaction);
   } else {
@@ -718,36 +647,22 @@ const updateJobReportStatus = async ({ jobNo, status, resolvedBy }, existingTran
 
 const addLackingLotToJob = async ({ jobNo, lotDetails }) => {
   return db.sequelize.transaction(async (t) => {
-    // 1. Find the existing schedule for this job to link the new lot to it
-    const scheduleQuery = `
-      SELECT "scheduleInboundId", "inboundDate" FROM public.scheduleinbounds
-      WHERE "jobNo" = :jobNo LIMIT 1;
-    `;
+    const scheduleQuery = `SELECT "scheduleInboundId", "inboundDate" FROM public.scheduleinbounds WHERE "jobNo" = :jobNo LIMIT 1;`;
     const schedule = await db.sequelize.query(scheduleQuery, {
       replacements: { jobNo },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
       transaction: t,
     });
-
-    if (!schedule) {
-      throw new Error(`Cannot supplement job: No existing schedule found for Job No: ${jobNo}`);
-    }
-
-    // 2. Find the highest current lot number for this job to generate the next one
-    const maxLotNoQuery = `
-      SELECT MAX("lotNo") as "maxLot" FROM public.lot WHERE "jobNo" = :jobNo;
-    `;
+    if (!schedule) throw new Error(`Cannot supplement job: No existing schedule found for Job No: ${jobNo}`);
+    const maxLotNoQuery = `SELECT MAX("lotNo") as "maxLot" FROM public.lot WHERE "jobNo" = :jobNo;`;
     const maxLotResult = await db.sequelize.query(maxLotNoQuery, {
       replacements: { jobNo },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
       transaction: t,
     });
-
-    const newLotNo = (maxLotResult.maxLot || 0) + 1; // Increment to get the new lot number
-
-    // 3. Insert the new lot with the retrieved scheduleId and new lotNo
+    const newLotNo = (maxLotResult.maxLot || 0) + 1;
     const { exWarehouseLot, expectedBundleCount, brand, commodity, shape } = lotDetails;
     const insertLotQuery = `
       INSERT INTO public.lot (
@@ -760,7 +675,6 @@ const addLackingLotToJob = async ({ jobNo, lotDetails }) => {
         NOW(), NOW()
       ) RETURNING *;
     `;
-
     const newLot = await db.sequelize.query(insertLotQuery, {
       replacements: {
         jobNo,
@@ -776,8 +690,7 @@ const addLackingLotToJob = async ({ jobNo, lotDetails }) => {
       type: db.sequelize.QueryTypes.INSERT,
       transaction: t,
     });
-
-    return newLot[0][0]; // Return the newly created lot
+    return newLot[0][0];
   });
 };
 
@@ -794,7 +707,7 @@ const deleteLotInTransaction = async (lotId, transaction) => {
             type: db.sequelize.QueryTypes.UPDATE,
             transaction,
         });
-        return result[0][0]; // Return the { jobNo, lotNo } of the deleted lot
+        return result[0][0];
     } catch (error) {
         console.error("Error deleting lot in transaction:", error);
         throw error;
@@ -822,7 +735,6 @@ const deleteLot = async (lotId) => {
 
 const finalizeJobReport = async ({ jobNo, deletedLotIds, resolvedBy }) => {
   return db.sequelize.transaction(async (t) => {
-    // 1. Delete each lot and log the activity
     for (const lotId of deletedLotIds) {
       const deletedLotInfo = await deleteLotInTransaction(lotId, t);
       if (deletedLotInfo) {
@@ -835,9 +747,6 @@ const finalizeJobReport = async ({ jobNo, deletedLotIds, resolvedBy }) => {
         }, t);
       }
     }
-
-    // NEW STEP: Reset the 'report' flag for all remaining lots in this job
-    // This makes them reappear for the supervisor.
     const resetReportFlagQuery = `
       UPDATE public.lot
       SET report = false
@@ -847,10 +756,7 @@ const finalizeJobReport = async ({ jobNo, deletedLotIds, resolvedBy }) => {
       replacements: { jobNo },
       transaction: t,
     });
-
     await updateJobReportStatus({ jobNo, status: 'resolved', resolvedBy }, t);
-
-    // 3. Log the finalization activity
     await logActivity({
       activityType: 'report_finalized',
       userId: resolvedBy,
@@ -860,7 +766,6 @@ const finalizeJobReport = async ({ jobNo, deletedLotIds, resolvedBy }) => {
   });
 };
 
-// ADD THIS NEW FUNCTION
 const logActivity = async (
   { activityType, userId, details = {}, relatedJobNo = null, relatedLotId = null },
   transaction
@@ -879,23 +784,18 @@ const logActivity = async (
         relatedLotId,
       },
       type: db.sequelize.QueryTypes.INSERT,
-      transaction, // Pass the transaction object
+      transaction,
     });
   } catch (error) {
     console.error("Error logging activity:", error);
-    throw error; // Re-throw to ensure transaction rollback
+    throw error;
   }
 };
 
 const addMissingLot = async ({ jobNo, lotDetails, resolvedBy }) => {
     return db.sequelize.transaction(async (t) => {
-        // Step 1: Adds the new lot to the job
         const newLot = await addLackingLotToJob({ jobNo, lotDetails }, t);
-
-        // Step 2 (The missing piece): Updates the job report status to 'resolved'
         await updateJobReportStatus({ jobNo, status: 'resolved', resolvedBy }, t);
-
-        // Step 3: Logs the activity
         await logActivity({
             activityType: 'lot_added',
             userId: resolvedBy,
@@ -903,33 +803,50 @@ const addMissingLot = async ({ jobNo, lotDetails, resolvedBy }) => {
             relatedLotId: newLot.lotId,
             details: { ...lotDetails, reason: 'Resolved lacking lot report' }
         }, t);
-        
         return newLot;
     });
 };
 
-const getOfficePendingStatus = async () => {
+const getOfficePendingStatus = async (userId) => {
   try {
-    // Check for pending Job Reports (Discrepancies)
-    // You can expand this query to include other tables if Office tracks other pending items
+    // UPDATED: Added selection of 'lastReadTime' from user_pending_task_status
     const query = `
-      SELECT MAX("updatedAt") as "lastUpdated"
-      FROM public.job_reports
-      WHERE "reportStatus" = 'pending'
+      SELECT
+        CASE 
+          WHEN MAX(l."updatedAt") > COALESCE(
+            (SELECT "lastReadTime" FROM public.user_pending_task_status WHERE "userId" = :userId),
+            '1970-01-01'::timestamp
+          ) THEN true 
+          ELSE false 
+        END as "hasPending",
+        MAX(l."updatedAt") as "lastUpdated",
+        (SELECT "lastReadTime" FROM public.user_pending_task_status WHERE "userId" = :userId) as "lastReadTime"
+      FROM public.lot l
+      WHERE l.status = 'Pending' 
+         OR l.report = true 
+         OR l."reportDuplicate" = true
+         OR l."isDuplicated" = true
     `;
-    
+
     const result = await db.sequelize.query(query, {
+      replacements: { userId },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
 
+    if (!result) {
+      return { hasPending: false, lastUpdated: null, lastReadTime: null };
+    }
+
     return {
-      hasPending: !!result?.lastUpdated,
-      lastUpdated: result?.lastUpdated || null
+      hasPending: result.hasPending === true || result.hasPending === 1,
+      lastUpdated: result.lastUpdated ? new Date(result.lastUpdated) : null,
+      lastReadTime: result.lastReadTime ? new Date(result.lastReadTime) : null // Return this to Flutter
     };
+
   } catch (error) {
     console.error("Error checking office status:", error);
-    return { hasPending: false, lastUpdated: null };
+    return { hasPending: false, lastUpdated: null, lastReadTime: null };
   }
 };
 

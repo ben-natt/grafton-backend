@@ -165,30 +165,8 @@ const checkDuplicateCrewLotNo = async (
     );
   }
 
-  // // 2. Check range based on jobNo's lot numbers from inbound table only
-  // const rangeQuery = `
-  //   SELECT MIN("lotNo") as minLot, MAX("lotNo") as maxLot
-  //   FROM public.inbounds
-  //   WHERE "jobNo" = :jobNo
-  //   AND ("isWeighted" IS NULL OR "isWeighted" = false)
-  // `;
-
-  // const [rangeResult] = await db.sequelize.query(rangeQuery, {
-  //   replacements: { jobNo },
-  //   type: db.sequelize.QueryTypes.SELECT,
-  //   ...options,
-  // });
-
-  // const { minlot, maxlot } = rangeResult;
-
-  // // Only validate range if there are existing records for this job
-  // if (minlot !== null && maxlot !== null && (crewLotNo < minlot || crewLotNo > maxlot)) {
-  //   throw new Error(
-  //     `Crew Lot No ${crewLotNo} is out of valid range for job ${jobNo} (${minlot} - ${maxlot}).`
-  //   );
-  // }
-
-  return false; // false means no issues
+  // Range validation removed as per original file
+  return false; 
 };
 
 // Update Crew Lot No in both tables
@@ -619,7 +597,11 @@ const saveInboundWithBundles = async (
   bundles,
   strictValidation = false,
   jobNo = null,
-  lotNo = null
+  lotNo = null,
+  // [NEW] New parameters
+  tareWeight = 0,
+  scaleNo = null,
+  userId = null
 ) => {
   const transaction = await db.sequelize.transaction();
 
@@ -659,12 +641,17 @@ const saveInboundWithBundles = async (
     const totalStickerWeight = calculateTotalStickerWeight(bundles);
 
     // Update inbound with crewLotNo and stickerWeight
+    // [MODIFIED] Added tareWeight, scaleNo, lottedById, lottedAt with COALESCE for lotted fields
     const updateQuery = `
       UPDATE public.inbounds 
       SET 
         "actualWeight" = :actualWeight, 
         "isWeighted" = :isWeighted,
         "stickerWeight" = :stickerWeight,
+        "tareWeight" = :tareWeight,
+        "scaleNo" = :scaleNo,
+        "lottedById" = COALESCE("lottedById", :userId),
+        "lottedAt" = COALESCE("lottedAt", NOW()),
         "updatedAt" = NOW()
       WHERE "inboundId" = :inboundId
       RETURNING *
@@ -679,6 +666,10 @@ const saveInboundWithBundles = async (
         actualWeight: actualWeightInMetricTons,
         isWeighted, // Use the new conditional flag here
         stickerWeight: totalStickerWeight,
+        // [NEW] Replacements
+        tareWeight: tareWeight,
+        scaleNo: scaleNo,
+        userId: userId
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -693,6 +684,10 @@ const saveInboundWithBundles = async (
           "actualWeight" = :actualWeight, 
           "isWeighted" = :isWeighted,
           "stickerWeight" = :stickerWeight,
+          "tareWeight" = :tareWeight,
+          "scaleNo" = :scaleNo,
+          "lottedById" = COALESCE("lottedById", :userId),
+          "lottedAt" = COALESCE("lottedAt", NOW()),
           "updatedAt" = NOW()
         WHERE "lotId" = :lotId
       `,
@@ -702,6 +697,10 @@ const saveInboundWithBundles = async (
             actualWeight: actualWeightInMetricTons,
             isWeighted, // And also use it here
             stickerWeight: totalStickerWeight,
+            // [NEW] Replacements
+            tareWeight: tareWeight,
+            scaleNo: scaleNo,
+            userId: userId
           },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
@@ -717,6 +716,9 @@ const saveInboundWithBundles = async (
       bundles: savedBundles,
       isWeighted,
       stickerWeight: totalStickerWeight,
+      // [NEW]
+      tareWeight,
+      scaleNo
     };
   } catch (error) {
     await transaction.rollback();
@@ -732,7 +734,11 @@ const saveLotWithBundles = async (
   bundles,
   strictValidation = false,
   jobNo = null,
-  lotNo = null
+  lotNo = null,
+  // [NEW] New parameters
+  tareWeight = 0,
+  scaleNo = null,
+  userId = null
 ) => {
   const transaction = await db.sequelize.transaction();
 
@@ -774,12 +780,17 @@ const saveLotWithBundles = async (
     const isWeighted = hasAnyData;
 
     // Update lot with crewLotNo and stickerWeight
+    // [MODIFIED] Added tareWeight, scaleNo, lottedById, lottedAt with COALESCE
     const updateQuery = `
       UPDATE public.lot 
       SET 
         "actualWeight" = :actualWeight, 
         "isWeighted" = :isWeighted,
         "stickerWeight" = :stickerWeight,
+        "tareWeight" = :tareWeight,
+        "scaleNo" = :scaleNo,
+        "lottedById" = COALESCE("lottedById", :userId),
+        "lottedAt" = COALESCE("lottedAt", NOW()),
         "updatedAt" = NOW()
       WHERE "lotId" = :lotId
       RETURNING *
@@ -794,6 +805,10 @@ const saveLotWithBundles = async (
         actualWeight: actualWeightInMetricTons,
         isWeighted,
         stickerWeight: totalStickerWeight,
+        // [NEW]
+        tareWeight,
+        scaleNo,
+        userId
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -808,6 +823,10 @@ const saveLotWithBundles = async (
           "actualWeight" = :actualWeight, 
           "isWeighted" = :isWeighted,
           "stickerWeight" = :stickerWeight,
+          "tareWeight" = :tareWeight,
+          "scaleNo" = :scaleNo,
+          "lottedById" = COALESCE("lottedById", :userId),
+          "lottedAt" = COALESCE("lottedAt", NOW()),
           "updatedAt" = NOW()
         WHERE "inboundId" = :inboundId
       `,
@@ -817,6 +836,10 @@ const saveLotWithBundles = async (
             actualWeight: actualWeightInMetricTons,
             isWeighted,
             stickerWeight: totalStickerWeight,
+            // [NEW]
+            tareWeight,
+            scaleNo,
+            userId
           },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
@@ -832,6 +855,9 @@ const saveLotWithBundles = async (
       bundles: savedBundles,
       stickerWeight: totalStickerWeight,
       isWeighted,
+      // [NEW]
+      tareWeight,
+      scaleNo
     };
   } catch (error) {
     await transaction.rollback();
@@ -1231,4 +1257,3 @@ module.exports = {
   checkOutboundScheduleStatus,
   getHistoricalBundlesByJobAndLot,
 };
-/////
