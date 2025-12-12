@@ -57,7 +57,7 @@ const getInventory = async (filters) => {
               b."brandName" AS "Brand",
               s."shapeName" AS "Shape",
               SUM(i."noOfBundle") AS "Qty",
-              SUM(CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END) AS "Weight",
+              SUM(CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE 0 END) AS "Weight",
               SUM(i."grossWeight") AS "GrossWeight",
               SUM(i."actualWeight") AS "ActualWeight"
           FROM public.inbounds i
@@ -224,6 +224,7 @@ const getLotSummary = async (jobNo, lotNo) => {
     const detailsQuery = `
       SELECT
         i."jobNo" AS "JobNo", i."lotNo" AS "LotNo", i."noOfBundle" AS "NoOfBundle",
+        i."crewLotNo" AS "CrewLotNo",
         i."inboundId", i."barcodeNo" AS "Barcode", c."commodityName" AS "Commodity", b."brandName" AS "Brand",
         s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
         i."exWarehouseLot" AS "ExWarehouseLot", i."exWarehouseWarrant" AS "ExWarehouseWarrant",
@@ -326,7 +327,7 @@ const getLotSummary = async (jobNo, lotNo) => {
   }
 };
 
-const getLotDetails = async (filters) => { 
+const getLotDetails = async (filters) => {
   try {
     const replacements = {};
     let whereClauses = ['o."inboundId" IS NULL', 'ot."inboundId" IS NULL'];
@@ -382,9 +383,9 @@ const getLotDetails = async (filters) => {
     if (filters.search) {
       const comboMatch = filters.search.match(/^(.*?)[\s_-]+(\d+)$/i);
 
-      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== '') {
+      if (comboMatch && comboMatch[1] && comboMatch[1].trim() !== "") {
         const [_, jobNoPart, lotNoPart] = comboMatch;
-        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, '');
+        const normalizedJobNo = jobNoPart.replace(/[^a-zA-Z0-9]/g, "");
         const normalizedLotNo = parseInt(lotNoPart, 10); // remove leading zeros
 
         replacements.jobNoSearch = `%${normalizedJobNo}%`;
@@ -395,7 +396,7 @@ const getLotDetails = async (filters) => {
             AND i."lotNo" = :lotNoSearch
         )`);
       } else {
-        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, '');
+        const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, "");
         replacements.normalizedSearch = `%${normalizedSearch}%`;
         replacements.search = `%${filters.search}%`;
 
@@ -424,7 +425,7 @@ const getLotDetails = async (filters) => {
     const whereString = " WHERE " + whereClauses.join(" AND ");
 
     const sortableColumns = {
-      "LotNo": 'i."jobNo" ASC, i."lotNo"',
+      LotNo: 'i."jobNo" ASC, i."lotNo"',
       "Ex-WarehouseLot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
@@ -438,7 +439,9 @@ const getLotDetails = async (filters) => {
       if (filters.sortBy === "Lot No") {
         orderByClause = `ORDER BY i."jobNo" ${sortOrder}, i."lotNo" ${sortOrder}`;
       } else {
-        orderByClause = `ORDER BY ${sortableColumns[filters.sortBy]} ${sortOrder}`;
+        orderByClause = `ORDER BY ${
+          sortableColumns[filters.sortBy]
+        } ${sortOrder}`;
       }
     }
 
@@ -474,11 +477,11 @@ const getLotDetails = async (filters) => {
     const dataQuery = `
       SELECT
         i."inboundId" as id, i."jobNo" AS "JobNo", i."lotNo" AS "LotNo",
-        i."crewLotNo",
+        i."crewLotNo", i."isWeighted",
         i."exWarehouseLot" AS "Ex-WarehouseLot", elme."exLmeWarehouseName" AS "ExLMEWarehouse",
         c."commodityName" AS "Metal", b."brandName" AS "Brand", s."shapeName" AS "Shape",
         i."noOfBundle" AS "Qty", 
-        CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE i."netWeight" END AS "Weight",
+        CASE WHEN i."isWeighted" = true THEN i."actualWeight" ELSE '0.0' END AS "Weight",
         i."grossWeight" AS "GrossWeight", i."actualWeight" AS "ActualWeight",
         exwhl."exWarehouseLocationName" AS "ExWarehouseLocation",
         iw."inboundWarehouseName" AS "InboundWarehouse",
@@ -1026,7 +1029,6 @@ const getAllLotsForExport = async () => {
  * @returns {Promise<Array<Object>>} A promise that resolves to an array of bundle objects for the specified lot.
  */
 async function getIndividualBundleSheet(jobNo, exWarehouseLot) {
-
   const query = `
     SELECT 
       i."jobNo" As "ourReference", 
@@ -1034,11 +1036,11 @@ async function getIndividualBundleSheet(jobNo, exWarehouseLot) {
       s."shapeName", 
       b."brandName", 
       w."inboundWarehouseName",
-      i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') AS "lotNoWarrantNo", 
+      i."jobNo" || ' - ' || LPAD(i."crewLotNo"::text, 3, '0') AS "lotNoWarrantNo", 
       i."exWarehouseLot",
       ib."bundleNo" AS "bundleNo", 
       ib."meltNo" AS "heatCastNo",
-      i."jobNo" || ' - ' || LPAD(i."lotNo"::text, 3, '0') || '-' || LPAD(ib."bundleNo"::text, 2, '0') AS "batchNo",
+      i."jobNo" || ' - ' || LPAD(i."crewLotNo"::text, 3, '0') || '-' || LPAD(ib."bundleNo"::text, 2, '0') AS "batchNo",
       ib."stickerWeight" AS "producerGW", 
       ib."stickerWeight" AS "producerNW", 
       ib."weight" AS "weighedGW"
@@ -1051,14 +1053,13 @@ async function getIndividualBundleSheet(jobNo, exWarehouseLot) {
     WHERE i."exWarehouseLot" = $1 AND i."jobNo" = $2
     ORDER BY ib."bundleNo" ASC;
   `;
-   const replacements = [exWarehouseLot, jobNo];
+  const replacements = [exWarehouseLot, jobNo];
 
   try {
-    const bundles = await db.sequelize
-      .query(query, {
-        type: db.sequelize.QueryTypes.SELECT,
-        bind: replacements,
-      });
+    const bundles = await db.sequelize.query(query, {
+      type: db.sequelize.QueryTypes.SELECT,
+      bind: replacements,
+    });
     return bundles;
   } catch (error) {
     console.error("Error fetching individual bundle sheet:", error);
@@ -1071,6 +1072,7 @@ const getUniqueExWarehouseLotsByJobNo = async (jobNo) => {
     const query = `
       SELECT DISTINCT i."exWarehouseLot",
        i."lotNo",
+       i."crewLotNo",
        s."shapeName",
        c."commodityName",
        b."brandName",
@@ -1086,20 +1088,20 @@ WHERE i."jobNo" = :jobNo
   AND o."inboundId" IS NULL
   AND ot."inboundId" IS NULL
   AND i."exWarehouseLot" IS NOT NULL
-ORDER BY i."lotNo" ASC;
+ORDER BY i."crewLotNo" ASC;
 
     `;
     const results = await db.sequelize.query(query, {
       replacements: { jobNo },
       type: db.sequelize.QueryTypes.SELECT,
     });
-    return results.map(result => ({
+    return results.map((result) => ({
       exWarehouseLot: result.exWarehouseLot,
       lotNo: result.lotNo,
       shapeName: result.shapeName,
       commodityName: result.commodityName,
       brandName: result.brandName,
-      inboundWarehouseName: result.inboundWarehouseName
+      inboundWarehouseName: result.inboundWarehouseName,
     }));
   } catch (error) {
     console.error("Error fetching unique exWarehouseLots:", error);

@@ -1,18 +1,20 @@
-
 const db = require("../database");
 const { Op } = require("sequelize");
 
-// Helper function to format date consistently to match the frontend's expectation.
 const formatDate = (date) => {
   if (!date) return "N/A";
   const d = new Date(date);
-  const day = String(d.getDate()).padStart(2, "0"); // Ensures two-digit day
-  const month = d.toLocaleString("en-US", { month: "short" }); // Use 'short' for 'Sep'
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-US", { month: "short" });
   const year = d.getFullYear();
   return `${day} ${month} ${year}`;
 };
 
-const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filters = {}) => {
+const getPendingTasksWithIncompleteStatus = async (
+  page = 1,
+  pageSize = 10,
+  filters = {}
+) => {
   try {
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
@@ -44,12 +46,14 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
         AND si."lotNo" = l."lotNo"
       )`,
     ];
-    
+
     const replacements = {};
 
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
-      baseWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      baseWhere.push(
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+      );
       replacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
 
@@ -65,7 +69,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
       replacements.endDate = endDate;
     }
 
-    // Count query to find total number of matching jobs
+    // this quesry for 
     const countQuery = `
       WITH jr AS (
         SELECT
@@ -73,7 +77,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
           MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
         FROM public.lot l
-        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
         WHERE ${baseWhereString}
         GROUP BY l."jobNo"
       )
@@ -95,7 +99,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
       return { data: [], page, pageSize, totalPages, totalCount };
     }
 
-    // Get paginated job numbers
+    // --- FIX: Joined on lotNo instead of exWarehouseLot ---
     const jobNoQuery = `
       WITH jr AS (
         SELECT
@@ -103,7 +107,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
           MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
         FROM public.lot l
-        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
         WHERE ${baseWhereString}
         GROUP BY l."jobNo"
       )
@@ -149,31 +153,31 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
         AND si."lotNo" = l."lotNo"
       )`
     ];
-    
+
     const detailsReplacements = { paginatedJobNos };
 
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
-      detailsWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      detailsWhere.push(
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+      );
       detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
-    
-    const detailsWhereString = detailsWhere.join(" AND ");
 
     // Fetch details for the paginated jobs
     const detailsQuery = `
       SELECT
-          l."lotId", i."crewLotNo" AS "lotNo", i."jobNo", l.commodity, l."expectedBundleCount",
+          l."lotId", 
+          i."crewLotNo" AS "lotNo", -- CHANGED: Select crewLotNo for display
+          i."jobNo", l.commodity, l."expectedBundleCount",
           l.brand, l."exWarehouseLot", l."exLmeWarehouse", l.shape, l.report,
           l."inbounddate",
           i."inboundId", i."netWeight",
           u.username,
-          -- Bundle statistics
           COALESCE(bundle_stats.total_bundles, 0) as total_bundles,
           COALESCE(bundle_stats.incomplete_bundles, 0) as incomplete_bundles,
           COALESCE(bundle_stats.complete_bundles, 0) as complete_bundles,
           COALESCE(bundle_stats.any_data_bundles, 0) as any_data_bundles,
-          -- Incomplete status
           CASE 
             WHEN COALESCE(bundle_stats.any_data_bundles, 0) > 0 
                  AND COALESCE(bundle_stats.incomplete_bundles, 0) > 0 
@@ -181,9 +185,9 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
             ELSE false 
           END as is_incomplete
       FROM public.lot l
-      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
-      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
-      JOIN public.users u ON s."userId" = u.userid
+      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."lotNo" = i."lotNo"
+      LEFT JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
+      LEFT JOIN public.users u ON s."userId" = u.userid
       LEFT JOIN (
         SELECT 
           ib."inboundId",
@@ -217,8 +221,8 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
 
     const safeParseLotNo = (value) => {
       if (value === null || value === undefined) return "N/A";
-      if (typeof value === 'number') return value;
-      if (typeof value === 'string') {
+      if (typeof value === "number") return value;
+      if (typeof value === "string") {
         const parsed = parseInt(value, 10);
         return isNaN(parsed) ? "N/A" : parsed;
       }
@@ -275,7 +279,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
         },
         isIncomplete: lot.is_incomplete,
       });
-      
+
       return acc;
     }, {});
 
@@ -304,21 +308,26 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     const finalData = Object.values(groupedByJobNo);
     return { data: finalData, page, pageSize, totalPages, totalCount };
   } catch (error) {
-    console.error("Error fetching pending tasks with incomplete status:", error);
+    console.error(
+      "Error fetching pending tasks with incomplete status:",
+      error
+    );
     throw error;
   }
 };
 
-
 const getDetailsPendingTasksCrew = async (jobNo) => {
   try {
+    // --- FIX: Joined on lotNo instead of exWarehouseLot ---
     const query = `
       SELECT 
-        l."lotId", l."lotNo", l."jobNo", l."commodity", l."expectedBundleCount", 
+        l."lotId", 
+        i."crewLotNo" AS "lotNo", -- CHANGED: Select crewLotNo for display
+        l."jobNo", l."commodity", l."expectedBundleCount", 
         l."brand", l."exWarehouseLot", l."exLmeWarehouse", l."shape", l."report",
         i."inboundId", i."netWeight"
       FROM public.lot l
-      JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."exWarehouseLot" = l."exWarehouseLot"
+      JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."lotNo" = l."lotNo"
       WHERE l."jobNo" = :jobNo
         AND l."status" = 'Received' AND l."report" = false AND l."isConfirm" = true
         AND i."isWeighted" IS NOT TRUE
