@@ -389,11 +389,10 @@ router.get("/status/supervisor", async (req, res) => {
   }
 });
 
-// [CRITICAL FIX] Pass userId to getOfficePendingStatus
 router.get("/status/office", async (req, res) => {
   try {
     const userId = req.query.userId; 
-    // This connects to the function you MUST update in pending_tasks_office.model.js
+    // This now connects to the UPDATED function in pending_tasks_office.model.js
     const status = await pendingTasksOfficeModel.getOfficePendingStatus(userId);
     res.status(200).json(status);
   } catch (error) {
@@ -401,14 +400,12 @@ router.get("/status/office", async (req, res) => {
     res.status(500).json({ error: "Failed to check office status" });
   }
 });
-
-// --- FIX: Remove 'createdAt' and 'updatedAt' to prevent DB crash ---
 router.post('/pending-tasks/read', async (req, res) => {
   try {
     const { userId } = req.body;
     if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
-    // We only update 'lastReadTime'. The other columns don't exist in your table.
+    // [FIXED] Use standard UTC NOW()
     const query = `
       INSERT INTO public.user_pending_task_status ("userId", "lastReadTime")
       VALUES (:userId, NOW())
@@ -421,7 +418,7 @@ router.post('/pending-tasks/read', async (req, res) => {
       type: require("sequelize").QueryTypes.INSERT
     });
 
-    res.status(200).json({ message: 'Pending task read status updated' });
+    res.status(200).json({ message: 'Pending task read status updated (UTC)' });
   } catch (error) {
     console.error('[PendingRouter] ERROR updating read status:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -434,8 +431,8 @@ router.get('/pending-tasks/read-status/:userId', async (req, res) => {
     const lastReadTime = await getLastReadPendingTaskTime(userId);
     res.status(200).json({ lastReadTime });
   } catch (error) {
+    console.error('[PendingRouter] ERROR fetching read status:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 module.exports = router;

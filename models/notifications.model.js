@@ -38,16 +38,13 @@ const getReportsByStatus = async (status = 'pending') => {
       replacements: { status },
       type: db.sequelize.QueryTypes.SELECT,
     });
-    
-    // +++ CONSOLE LOG +++
-    console.log(`[Model] Found ${result.length} LOT reports.`);
+
     return result;
   } catch (error) {
-    console.error("Error fetching reports by status:", error);
+    console.error(`[Model] Error fetching reports by status ${status}:`, error);
     throw error;
   }
 };
-
 /**
  * Fetches job discrepancy reports from the job_reports table.
  * @param {string} status - The status of the reports to fetch ('pending', 'accepted', 'declined').
@@ -251,15 +248,23 @@ const setLastReadTime = async (userId, timestamp) => {
   try {
     console.log(`[Model] setLastReadTime called for User: ${userId}, Time: ${timestamp}`);
     
+    // --- CHANGED: Convert timestamp and NOW() to SGT ---
+    // We use AT TIME ZONE 'Asia/Singapore' to ensure the stored value reflects SGT.
     const query = `
       INSERT INTO public.user_notification_status ("userId", "lastReadTime", "updatedAt")
-      VALUES (:userId, :timestamp, NOW())
+      VALUES (
+        :userId, 
+        (:timestamp)::timestamptz AT TIME ZONE 'Asia/Singapore', 
+        NOW() AT TIME ZONE 'Asia/Singapore'
+      )
       ON CONFLICT ("userId") 
-      DO UPDATE SET "lastReadTime" = :timestamp, "updatedAt" = NOW();
+      DO UPDATE SET 
+        "lastReadTime" = (:timestamp)::timestamptz AT TIME ZONE 'Asia/Singapore', 
+        "updatedAt" = NOW() AT TIME ZONE 'Asia/Singapore';
     `;
     
     // Log the exact query attempt
-    console.log("[Model] Executing UPSERT query...");
+    console.log("[Model] Executing UPSERT query with SGT conversion...");
 
     await db.sequelize.query(query, {
       replacements: { userId, timestamp },

@@ -809,23 +809,41 @@ const addMissingLot = async ({ jobNo, lotDetails, resolvedBy }) => {
 
 const getOfficePendingStatus = async (userId) => {
   try {
-    // UPDATED: Added selection of 'lastReadTime' from user_pending_task_status
+    // LOGIC UPDATE: 
+    // Fetches MAX(updatedAt) from 'scheduleinbounds' and 'scheduleoutbounds' 
+    // instead of 'lot' and 'selectedinbounds', matching Supervisor logic.
+    
     const query = `
+      WITH pending_schedules AS (
+        -- 1. Inbound Schedules with Pending Lots
+        -- We join lot to ensure we only check schedules that actually have pending work
+        SELECT MAX(s."updatedAt") as "latestUpdate"
+        FROM public.scheduleinbounds s
+        JOIN public.lot l ON s."jobNo" = l."jobNo"
+        WHERE l.status = 'Pending'
+           OR l.report = true 
+           OR l."reportDuplicate" = true
+           OR l."isDuplicated" = true
+
+        UNION ALL
+
+        -- 2. Outbound Schedules with non-outbounded items
+        SELECT MAX(so."updatedAt") as "latestUpdate"
+        FROM public.scheduleoutbounds so
+        JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
+        WHERE si."isOutbounded" = false
+      )
       SELECT
         CASE 
-          WHEN MAX(l."updatedAt") > COALESCE(
+          WHEN MAX("latestUpdate") > COALESCE(
             (SELECT "lastReadTime" FROM public.user_pending_task_status WHERE "userId" = :userId),
             '1970-01-01'::timestamp
           ) THEN true 
           ELSE false 
         END as "hasPending",
-        MAX(l."updatedAt") as "lastUpdated",
+        MAX("latestUpdate") as "lastUpdated",
         (SELECT "lastReadTime" FROM public.user_pending_task_status WHERE "userId" = :userId) as "lastReadTime"
-      FROM public.lot l
-      WHERE l.status = 'Pending' 
-         OR l.report = true 
-         OR l."reportDuplicate" = true
-         OR l."isDuplicated" = true
+      FROM pending_schedules;
     `;
 
     const result = await db.sequelize.query(query, {
@@ -841,7 +859,7 @@ const getOfficePendingStatus = async (userId) => {
     return {
       hasPending: result.hasPending === true || result.hasPending === 1,
       lastUpdated: result.lastUpdated ? new Date(result.lastUpdated) : null,
-      lastReadTime: result.lastReadTime ? new Date(result.lastReadTime) : null // Return this to Flutter
+      lastReadTime: result.lastReadTime ? new Date(result.lastReadTime) : null 
     };
 
   } catch (error) {

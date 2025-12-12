@@ -521,70 +521,63 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
 
 const getSupervisorPendingStatus = async (userId) => {
   try {
-    // 1. Inbound Pending Time (checks public.lot)
-    const inboundQuery = `SELECT MAX("updatedAt") as "ts" FROM public.lot WHERE status = 'Pending'`;
-    
-    // 2. Outbound Pending Time (checks public.selectedinbounds for active outbound tasks)
-    const outboundQuery = `
-      SELECT MAX(si."updatedAt") as "ts"
-      FROM public.selectedinbounds si
-      WHERE si."isOutbounded" = false
+    console.log(`\n--- [SupervisorStatus] Check for User: ${userId} ---`);
+
+    // 1. Get Creation Timestamp (UTC) of latest schedules
+    const inboundQuery = `
+      SELECT MAX(s."createdAt") as "ts" 
+      FROM public.scheduleinbounds s
+      JOIN public.lot l ON s."scheduleInboundId" = l."scheduleInboundId"
+      WHERE l.status = 'Pending'
     `;
     
-    // 3. Outbound Schedule Time (checks container/seal updates on scheduleoutbounds)
-    const scheduleQuery = `
-      SELECT MAX(so."updatedAt") as "ts"
+    const outboundQuery = `
+      SELECT MAX(so."createdAt") as "ts"
       FROM public.scheduleoutbounds so
       JOIN public.selectedinbounds si ON so."scheduleOutboundId" = si."scheduleOutboundId"
       WHERE si."isOutbounded" = false
     `;
 
-    const [inboundRes, outboundRes, scheduleRes] = await Promise.all([
+    const [inboundRes, outboundRes] = await Promise.all([
         db.sequelize.query(inboundQuery, { plain: true, type: db.sequelize.QueryTypes.SELECT }),
-        db.sequelize.query(outboundQuery, { plain: true, type: db.sequelize.QueryTypes.SELECT }),
-        db.sequelize.query(scheduleQuery, { plain: true, type: db.sequelize.QueryTypes.SELECT })
+        db.sequelize.query(outboundQuery, { plain: true, type: db.sequelize.QueryTypes.SELECT })
     ]);
 
-    // Collect all timestamps and filter out nulls
-    const times = [
-        inboundRes?.ts ? new Date(inboundRes.ts) : null,
-        outboundRes?.ts ? new Date(outboundRes.ts) : null,
-        scheduleRes?.ts ? new Date(scheduleRes.ts) : null
-    ].filter(d => d !== null);
+    const inboundTime = inboundRes?.ts ? new Date(inboundRes.ts) : null;
+    const outboundTime = outboundRes?.ts ? new Date(outboundRes.ts) : null;
 
-    // If no pending tasks at all (inbound or outbound), return false
-    if (times.length === 0) return { hasPending: false, lastUpdated: null };
+    console.log(`[SupervisorStatus] Inbound (UTC): ${inboundTime ? inboundTime.toISOString() : 'None'}`);
+    console.log(`[SupervisorStatus] Outbound (UTC): ${outboundTime ? outboundTime.toISOString() : 'None'}`);
 
-    // Get the absolute latest activity time
-    const lastTaskTime = new Date(Math.max(...times));
+    const times = [inboundTime, outboundTime].filter(d => d !== null);
 
-    // 4. Check if User has read this latest time
-    let userLastRead = null;
-    if (userId) {
-      const readQuery = `SELECT "lastReadTime" FROM public.user_pending_task_status WHERE "userId" = :userId`;
-      const readResult = await db.sequelize.query(readQuery, {
-        replacements: { userId },
-        type: db.sequelize.QueryTypes.SELECT,
-        plain: true,
-      });
-      if (readResult && readResult.lastReadTime) userLastRead = new Date(readResult.lastReadTime);
+    // If NO pending tasks exist, return false.
+    if (times.length === 0) {
+      console.log(`[SupervisorStatus] RESULT: No pending tasks found. DOT OFF.`);
+      return { hasPending: false, lastUpdated: null };
     }
 
-    let shouldShow = true;
-    if (userLastRead && userLastRead >= lastTaskTime) shouldShow = false;
+    const lastTaskTime = new Date(Math.max(...times));
+    
+    // [CRITICAL CHANGE]
+    // We ALWAYS return true if there are pending tasks.
+    // We do NOT check the DB for 'lastReadTime' because it is unreliable/corrupted.
+    // The Client (Flutter) will compare this 'lastUpdated' vs its Local Storage 'lastReadTime'.
+    console.log(`[SupervisorStatus] Tasks Found. Max Time: ${lastTaskTime.toISOString()}`);
+    console.log(`[SupervisorStatus] RESULT: FORCE TRUE (Delegating read-check to Client)`);
 
-    return { hasPending: shouldShow, lastUpdated: lastTaskTime };
+    return { hasPending: true, lastUpdated: lastTaskTime };
   } catch (error) {
     console.error("Error checking supervisor status:", error);
     return { hasPending: false, lastUpdated: null };
   }
 };
 
-// FIX: Modified to use NOW() for timestamp, ignoring the second argument
 const setLastReadPendingTaskTime = async (userId, timestampIgnored) => {
   try {
-    console.log(`[PendingModel] setLastReadTime called for User: ${userId}`);
-    // Using NOW() ensures consistency between server time and DB time
+    console.log(`[PendingModel] setLastReadTime called for User: ${userId}. Setting to NOW() UTC.`);
+    
+    // Write standard UTC. This ensures future reads are saved correctly.
     const query = `
       INSERT INTO public.user_pending_task_status ("userId", "lastReadTime", "updatedAt")
       VALUES (:userId, NOW(), NOW())
@@ -596,7 +589,7 @@ const setLastReadPendingTaskTime = async (userId, timestampIgnored) => {
       replacements: { userId },
     });
     
-    console.log("[PendingModel] SQL Executed Successfully.");
+    console.log("[PendingModel] Read status updated successfully.");
     return true;
   } catch (error) {
     console.error("[PendingModel] !!! SQL ERROR:", error);
@@ -630,7 +623,6 @@ const notifySupervisorOfNewTask = async (lotId) => {
     console.error("Error triggering supervisor notification:", error);
   }
 };
-
 module.exports = {
   getPendingInboundTasks,
   getPendingOutboundTasks,
