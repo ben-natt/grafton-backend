@@ -21,6 +21,12 @@ function generateOtp() {
   return Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit OTP
 }
 
+// helper function for domain validation
+const isValidDomain = (email) => {
+  // Checks if email contains @natt or @ubts (case insensitive)
+  return /@(natt|ubts)/i.test(email);
+};
+
 // Configure multer for file uploads, storing images in the profile-specific directory.
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -58,10 +64,19 @@ router.post("/send-otp", async (req, res) => {
   if (!email) {
     return res.status(400).json({ message: "Email is required" });
   }
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
+  const emailFormatRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailFormatRegex.test(email)) {
     return res.status(400).json({ message: "Invalid email format" });
   }
+
+  // Enforce specific domains
+  if (!isValidDomain(email)) {
+    return res.status(400).json({
+      message:
+        "Restricted Access: Only emails containing @natt or @ubts are allowed.",
+    });
+  }
+
   try {
     const existingUser = await usersModel.getUserByEmail(email);
     if (existingUser) {
@@ -245,6 +260,12 @@ router.post("/register", async (req, res) => {
       .json({ message: "Email and password are required for registration." });
   }
 
+  if (!isValidDomain(email)) {
+    return res.status(400).json({
+      message: "Registration failed: Invalid email domain.",
+    });
+  }
+
   const storedOtpData = otpStore[email];
   if (!storedOtpData || !storedOtpData.verified) {
     return res.status(403).json({
@@ -413,12 +434,10 @@ router.put("/profile", authenticate, (req, res) => {
     // MODIFICATION: Handle multer-specific errors first
     if (err instanceof multer.MulterError) {
       if (err.code === "LIMIT_FILE_SIZE") {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Image file size cannot exceed 2MB.",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Image file size cannot exceed 2MB.",
+        });
       }
       return res.status(400).json({ success: false, message: err.message });
     } else if (err) {
@@ -514,20 +533,16 @@ router.put("/profile", authenticate, (req, res) => {
         error.name === "SequelizeUniqueConstraintError" ||
         (error.original && error.original.code === "23505")
       ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Username already exists. Please choose a different one.",
-          });
-      }
-      res
-        .status(500)
-        .json({
+        return res.status(400).json({
           success: false,
-          message: "Server error",
-          error: error.message,
+          message: "Username already exists. Please choose a different one.",
         });
+      }
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
     }
   });
 });

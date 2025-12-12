@@ -153,7 +153,7 @@ models.Lot = sequelize.define(
     freezeTableName: true,
     name: {
       singular: "lot",
-      plural: "lots",
+      plural: "lot",
     },
   }
 );

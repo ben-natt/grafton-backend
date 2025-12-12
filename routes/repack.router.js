@@ -27,9 +27,6 @@ const storage = multer.diskStorage({
   filename: function (req, file, cb) {
     const ext = path.extname(file.originalname);
     const tempFilename = `${uuidv4()}${ext}`;
-    console.log(
-      `Saving temp file: ${tempFilename} (original: ${file.originalname})`
-    );
     cb(null, tempFilename);
   },
 });
@@ -57,13 +54,6 @@ const upload = multer({
 
     // Use extension-based MIME type if available, otherwise use detected type
     const actualMimeType = mimeTypeMap[ext] || file.mimetype;
-
-    console.log("File details:", {
-      originalname: file.originalname,
-      detectedMimeType: file.mimetype,
-      extension: ext,
-      actualMimeType: actualMimeType,
-    });
 
     // Check both extension and MIME type
     if (
@@ -622,7 +612,6 @@ const deleteImageFile = (imagePath) => {
     const fullPath = path.join(__dirname, "..", imagePath);
     if (fs.existsSync(fullPath)) {
       fs.unlinkSync(fullPath);
-      console.log(`Deleted old image: ${imagePath}`);
     }
   } catch (error) {
     console.error(`Error deleting image ${imagePath}:`, error);
