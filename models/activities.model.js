@@ -164,7 +164,7 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
     const sortableColumns = {
       DATE: 'i."inboundDate"',
       "Job No": 'i."jobNo"',
-      "Lot No": 'i."jobNo", i."lotNo"',
+      "Lot No": 'i."jobNo", i."crewLotNo"',
       "Ex-W Lot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
@@ -175,9 +175,15 @@ const getInboundRecord = async ({ page = 1, pageSize = 25, filters = {} }) => {
 
     let orderByClause = 'ORDER BY i."inboundDate" DESC NULLS LAST';
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
-      const sortColumn = sortableColumns[filters.sortBy];
+      const sortColumns = sortableColumns[filters.sortBy]
+        .split(",")
+        .map((col) => col.trim());
       const sortOrder = filters.sortOrder === "DESC" ? "DESC" : "ASC";
-      orderByClause = `ORDER BY ${sortColumn} ${sortOrder} NULLS LAST`;
+
+      const orderedColumns = sortColumns
+        .map((col) => `${col} ${sortOrder} NULLS LAST`)
+        .join(", ");
+      orderByClause = `ORDER BY ${orderedColumns}`;
     }
 
     const baseQuery = `
@@ -347,7 +353,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
       "Scheduled By": 'u_scheduled."username"',
     };
 
-    let orderByClause = 'ORDER BY o."createdAt" DESC NULLS LAST'; 
+    let orderByClause = 'ORDER BY o."createdAt" DESC NULLS LAST';
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortColumns = sortableColumns[filters.sortBy]
         .split(",")

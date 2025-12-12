@@ -52,7 +52,7 @@ const getInventory = async (filters) => {
       WITH grouped_inventory AS (
           SELECT
               i."jobNo" AS "Job No",
-              COUNT(DISTINCT i."lotNo") AS "Lot No",
+              COUNT(DISTINCT i."crewLotNo") AS "Lot No",
               c."commodityName" AS "Metal",
               b."brandName" AS "Brand",
               s."shapeName" AS "Shape",
@@ -94,17 +94,17 @@ const getInventory = async (filters) => {
     }
 
     const sortableColumns = {
-      "JobNo": '"Job No"',      // Matches frontend sending 'JobNo'
-      "LotNo": '"Lot No"',      // Matches frontend sending 'LotNo'
-      "Metal": '"Metal"',       // Matches frontend sending 'Metal'
-      "Brand": '"Brand"',       // Matches frontend sending 'Brand'
-      "Shape": '"Shape"',       // Matches frontend sending 'Shape'
-      "Qty": '"Qty"',           // Matches frontend sending 'Qty'
-      "Weight": '"Weight"',     // Matches frontend sending 'Weight'
+      JobNo: '"Job No"', // Matches frontend sending 'JobNo'
+      LotNo: '"Lot No"', // Matches frontend sending 'LotNo'
+      Metal: '"Metal"', // Matches frontend sending 'Metal'
+      Brand: '"Brand"', // Matches frontend sending 'Brand'
+      Shape: '"Shape"', // Matches frontend sending 'Shape'
+      Qty: '"Qty"', // Matches frontend sending 'Qty'
+      Weight: '"Weight"', // Matches frontend sending 'Weight'
     };
-    
+
     let orderByClause = 'ORDER BY "Job No" ASC'; // Default sort
-    
+
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortColumn = sortableColumns[filters.sortBy];
       const sortOrder = filters.sortOrder === "desc" ? "DESC" : "ASC";
@@ -407,7 +407,7 @@ const getLotDetails = async (filters) => {
           c."commodityName" ILIKE :search OR
           b."brandName" ILIKE :search OR
           s."shapeName" ILIKE :search OR
-          CAST(i."lotNo" AS TEXT) ILIKE :search OR
+          CAST(i."crewLotNo" AS TEXT) ILIKE :search OR
           CAST(i."netWeight" AS TEXT) ILIKE :search OR
           CAST(i."noOfBundle" AS TEXT) ILIKE :search OR
           CAST(i."grossWeight" AS TEXT) ILIKE :search OR
@@ -425,7 +425,7 @@ const getLotDetails = async (filters) => {
     const whereString = " WHERE " + whereClauses.join(" AND ");
 
     const sortableColumns = {
-      LotNo: 'i."jobNo" ASC, i."lotNo"',
+      LotNo: 'i."jobNo" ASC, i."crewLotNo"',
       "Ex-WarehouseLot": 'i."exWarehouseLot"',
       Metal: 'c."commodityName"',
       Brand: 'b."brandName"',
@@ -436,8 +436,8 @@ const getLotDetails = async (filters) => {
     let orderByClause = 'ORDER BY i."inboundId" ASC';
     if (filters.sortBy && sortableColumns[filters.sortBy]) {
       const sortOrder = filters.sortOrder === "desc" ? "DESC" : "ASC";
-      if (filters.sortBy === "Lot No") {
-        orderByClause = `ORDER BY i."jobNo" ${sortOrder}, i."lotNo" ${sortOrder}`;
+      if (filters.sortBy === "LotNo" || filters.sortBy === "Lot No") {
+        orderByClause = `ORDER BY i."jobNo" ${sortOrder}, i."crewLotNo" ${sortOrder}`;
       } else {
         orderByClause = `ORDER BY ${
           sortableColumns[filters.sortBy]
@@ -1120,5 +1120,5 @@ module.exports = {
   getInventory1,
   getAllLotsForExport,
   getIndividualBundleSheet,
-  getUniqueExWarehouseLotsByJobNo
+  getUniqueExWarehouseLotsByJobNo,
 };
