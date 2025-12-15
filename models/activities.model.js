@@ -393,6 +393,7 @@ const getOutboundRecord = async ({ page = 1, pageSize = 10, filters = {} }) => {
         o."jobNo" AS "Job No",
         so."outboundJobNo" AS "Outbound Job No",
         o."lotNo" AS "Lot No",
+        i."crewLotNo" AS "CrewLotNo",
         o."exWarehouseLot" AS "Ex-W Lot",
         o."commodity" AS "Metal",
         o."brands" AS "Brand",
@@ -611,7 +612,7 @@ const getInboundRecordByInboundId = async (inboundId) => {
 const getOutboundRecordByOutboundId = async (outboundId) => {
   try {
     const query = `SELECT
-          o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", o."noOfBundle" AS "NoOfBundle",
+          o."jobNo" AS "JobNo", o."lotNo" AS "LotNo", i."crewLotNo" AS "CrewLotNo", o."noOfBundle" AS "NoOfBundle",
           o."actualWeight" AS "ActualWeight",
           o."grossWeight" AS "GrossWeight",
           o."outboundTransactionId", o."commodity" AS "Commodity", o."brands" AS "Brand",
@@ -621,6 +622,7 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
           si."releaseEndDate" AS "ReleaseEndDate", 
           so."createdAt" AS "ScheduleOutboundDate",
           so."outboundJobNo" AS "OutboundJobNo",
+          so."outboundType" AS "OutboundType",
           o."containerNo" AS "ContainerNo",
           o."sealNo" AS "SealNo",
           si."exportDate" AS "ExportDate", si."deliveryDate" AS "DeliveryDate",
@@ -646,6 +648,7 @@ const getOutboundRecordByOutboundId = async (outboundId) => {
         LEFT JOIN public.users processor ON processor.userid = o."outboundedBy"
         LEFT JOIN public.selectedinbounds si ON si."inboundId" = o."inboundId"
         LEFT JOIN public.scheduleoutbounds so ON so."scheduleOutboundId" = si."scheduleOutboundId"
+        LEFT JOIN public.inbounds i ON i."inboundId" = o."inboundId"
         WHERE o."outboundTransactionId" = :outboundId
         LIMIT 1;`;
 
@@ -999,6 +1002,7 @@ const getAllScheduleOutbound = async ({
         si."inboundId" AS id,
         i."jobNo" AS "Job No",
         i."lotNo" AS "Lot No",
+        i."crewLotNo" AS "CrewLotNo",
         i."exWarehouseLot" AS "Ex-W Lot",
         exlme."exLmeWarehouseName" AS "exLmeWarehouse",
         c."commodityName" AS "Metal",

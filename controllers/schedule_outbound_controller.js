@@ -181,6 +181,10 @@ exports.uploadExcel = async (req, res) => {
           wasCorrected = true;
         }
 
+        const lotNoToUse = masterInbound.crewLotNo
+          ? masterInbound.crewLotNo
+          : masterInbound.lotNo;
+
         const weightToUse = masterInbound.isWeighted
           ? masterInbound.actualWeight
           : masterInbound.netWeight;
@@ -188,7 +192,7 @@ exports.uploadExcel = async (req, res) => {
         const lotDataForFrontend = {
           inboundId: masterInbound.inboundId,
           jobNo: masterInbound.jobNo,
-          lotNo: masterInbound.lotNo,
+          lotNo: lotNoToUse,
           exWarehouseLot: masterInbound.exWarehouseLot,
           metal: masterInbound.commodityDetails?.name ?? null,
           brand: masterInbound.brandDetails?.name ?? null,
@@ -216,7 +220,7 @@ exports.uploadExcel = async (req, res) => {
         };
 
         if (wasCorrected) {
-          lotDataForFrontend.autoCorrected = true; 
+          lotDataForFrontend.autoCorrected = true;
         }
 
         processedLots.push(lotDataForFrontend);

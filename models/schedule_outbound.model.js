@@ -348,6 +348,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: "exWarehouseLot",
       },
+      crewLotNo: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "crewLotNo",
+      },
     },
     {
       tableName: "inbounds", // This is the actual table name
