@@ -5,10 +5,8 @@ const db = require("../database");
  * @param {string} status - The status of the reports to fetch ('pending', 'accepted', 'declined').
  * @returns {Promise<Array<Object>>} A promise that resolves to an array of report objects.
  */
-const getReportsByStatus = async (status = 'pending') => {
+const getReportsByStatus = async (status = "pending") => {
   try {
-    // +++ CONSOLE LOG +++
-    console.log(`[Model] Fetching LOT reports with status: ${status}`);
     const query = `
       SELECT 
         lr."reportId",
@@ -33,7 +31,7 @@ const getReportsByStatus = async (status = 'pending') => {
       WHERE lr."reportStatus" = :status
       ORDER BY lr."reportedOn" DESC;
     `;
-    
+
     const result = await db.sequelize.query(query, {
       replacements: { status },
       type: db.sequelize.QueryTypes.SELECT,
@@ -50,19 +48,17 @@ const getReportsByStatus = async (status = 'pending') => {
  * @param {string} status - The status of the reports to fetch ('pending', 'accepted', 'declined').
  * @returns {Promise<Array<Object>>} A promise that resolves to an array of job report objects.
  */
-const getJobReportsByStatus = async (status = 'pending') => {
+const getJobReportsByStatus = async (status = "pending") => {
   try {
-    console.log(`[Model] Fetching JOB reports with status: ${status}`);
-
     let statusFilterClause;
     const replacements = { status };
 
-    if (status === 'accepted') {
+    if (status === "accepted") {
       statusFilterClause = `jr."reportStatus" IN ('accepted', 'resolved')`;
     } else {
       statusFilterClause = `jr."reportStatus" = :status`;
     }
-    
+
     const query = `
       SELECT 
         jr."jobReportId" as "reportId",
@@ -92,13 +88,12 @@ const getJobReportsByStatus = async (status = 'pending') => {
       WHERE ${statusFilterClause} -- Use the dynamic status filter here
       ORDER BY jr."reportedOn" DESC;
     `;
-    
+
     const result = await db.sequelize.query(query, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
     });
-    
-    console.log(`[Model] Found ${result.length} JOB reports.`);
+
     return result;
   } catch (error) {
     console.error("Error fetching job reports by status:", error);
@@ -111,7 +106,7 @@ const getJobReportsByStatus = async (status = 'pending') => {
  * @param {string} status - The status of the reports to fetch ('pending', 'accepted', 'declined').
  * @returns {Promise<Array<Object>>} A promise that resolves to an array of duplicate report objects.
  */
-const getDuplicateReportsByStatus = async (status = 'pending') => {
+const getDuplicateReportsByStatus = async (status = "pending") => {
   try {
     const query = `
       SELECT 
@@ -133,19 +128,18 @@ const getDuplicateReportsByStatus = async (status = 'pending') => {
       WHERE ld."reportStatus" = :status
       ORDER BY ld."reportedOn" DESC;
     `;
-    
+
     const result = await db.sequelize.query(query, {
       replacements: { status },
       type: db.sequelize.QueryTypes.SELECT,
     });
-    
+
     return result;
   } catch (error) {
     console.error("Error fetching duplicate reports by status:", error);
     throw error;
   }
 };
-
 
 /**
  * Fetches all discrepancy reports for a specific lot ID.
@@ -165,7 +159,7 @@ const getReportsByLotId = async (lotId) => {
       WHERE lr."lotId" = :lotId
       ORDER BY lr."reportedOn" DESC;
     `;
-    
+
     const result = await db.sequelize.query(query, {
       replacements: { lotId },
       type: db.sequelize.QueryTypes.SELECT,
@@ -193,10 +187,9 @@ const deleteDiscrepancyReportById = async (reportId) => {
     const [jobResults, jobMetadata] = await db.sequelize.query(jobDeleteQuery, {
       replacements: { reportId },
     });
-    
+
     // sequelize.query with DELETE might not provide rowCount, so check the result differently or assume success
     if (jobMetadata && jobMetadata.rowCount > 0) {
-      console.log(`[Model] Deleted 1 row from job_reports with ID: ${reportId}`);
       return true;
     }
 
@@ -207,11 +200,8 @@ const deleteDiscrepancyReportById = async (reportId) => {
     });
 
     if (lotMetadata && lotMetadata.rowCount > 0) {
-      console.log(`[Model] Deleted 1 row from lot_reports with ID: ${reportId}`);
       return true;
     }
-
-    console.log(`[Model] No discrepancy report found with ID: ${reportId} in any table.`);
     return false;
   } catch (error) {
     console.error("Error deleting discrepancy report:", error);
@@ -232,11 +222,8 @@ const deleteDuplicateReportById = async (duplicatedId) => {
     });
 
     if (metadata && metadata.rowCount > 0) {
-      console.log(`[Model] Deleted 1 row from lot_duplicate with ID: ${duplicatedId}`);
       return true;
     }
-    
-    console.log(`[Model] No duplicate report found with ID: ${duplicatedId}.`);
     return false;
   } catch (error) {
     console.error("Error deleting duplicate report:", error);
@@ -246,8 +233,6 @@ const deleteDuplicateReportById = async (duplicatedId) => {
 
 const setLastReadTime = async (userId, timestamp) => {
   try {
-    console.log(`[Model] setLastReadTime called for User: ${userId}, Time: ${timestamp}`);
-    
     // --- CHANGED: Convert timestamp and NOW() to SGT ---
     // We use AT TIME ZONE 'Asia/Singapore' to ensure the stored value reflects SGT.
     const query = `
@@ -262,15 +247,10 @@ const setLastReadTime = async (userId, timestamp) => {
         "lastReadTime" = (:timestamp)::timestamptz AT TIME ZONE 'Asia/Singapore', 
         "updatedAt" = NOW() AT TIME ZONE 'Asia/Singapore';
     `;
-    
-    // Log the exact query attempt
-    console.log("[Model] Executing UPSERT query with SGT conversion...");
 
     await db.sequelize.query(query, {
       replacements: { userId, timestamp },
     });
-    
-    console.log("[Model] Query executed successfully.");
     return true;
   } catch (error) {
     console.error("[Model] !!! SQL ERROR in setLastReadTime:", error);
@@ -289,7 +269,7 @@ const getLastReadTime = async (userId) => {
       replacements: { userId },
       type: db.sequelize.QueryTypes.SELECT,
     });
-    
+
     if (result && result.length > 0) {
       return result[0].lastReadTime;
     }
@@ -307,6 +287,6 @@ module.exports = {
   getJobReportsByStatus,
   deleteDiscrepancyReportById,
   deleteDuplicateReportById,
-  setLastReadTime, 
+  setLastReadTime,
   getLastReadTime,
 };
