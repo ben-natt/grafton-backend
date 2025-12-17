@@ -39,9 +39,9 @@ app.use("/grn", express.static(path.join(__dirname, "./grn")));
 // Routes
 app.use("/users", userRoutes);
 app.use("/inbounds", inboundRoutes);
-app.use("/outbounds", outboundRoutes); // Uncomment if outbound routes are needed
-app.use("/schedule", scheduleRoutes); // Adjust path if needed
-app.use("/schedule-outbounds", scheduleOutboundRoutes); // Uncomment if outbound scheduling routes are needed
+app.use("/outbounds", outboundRoutes);
+app.use("/schedule", scheduleRoutes); 
+app.use("/schedule-outbounds", scheduleOutboundRoutes); 
 app.use("/stocks", stockRoutes);
 
 app.use("/activities", activitiesRoutes);

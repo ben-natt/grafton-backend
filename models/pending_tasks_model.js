@@ -9,7 +9,11 @@ const formatDate = (date) => {
   return `${day} ${month} ${year}`;
 };
 
-const getPendingInboundTasks = async (page = 1, pageSize = 10, filters = {}) => {
+const getPendingInboundTasks = async (
+  page = 1,
+  pageSize = 10,
+  filters = {}
+) => {
   try {
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
@@ -60,7 +64,8 @@ const getPendingInboundTasks = async (page = 1, pageSize = 10, filters = {}) => 
 
     const totalCount = countResult?.count || 0;
     const totalPages = Math.ceil(totalCount / pageSize);
-    if (totalCount === 0) return { data: [], page, pageSize, totalPages, totalCount };
+    if (totalCount === 0)
+      return { data: [], page, pageSize, totalPages, totalCount };
 
     const jobNoQuery = `
       WITH jr AS (
@@ -85,9 +90,12 @@ const getPendingInboundTasks = async (page = 1, pageSize = 10, filters = {}) => 
     });
 
     const paginatedJobNos = jobNoResults.map((j) => j.jobNo);
-    if (paginatedJobNos.length === 0) return { data: [], page, pageSize, totalPages, totalCount };
+    if (paginatedJobNos.length === 0)
+      return { data: [], page, pageSize, totalPages, totalCount };
 
-    const lotFilterClause = exWarehouseLot ? `AND l."exWarehouseLot" ILIKE :exWarehouseLot` : "";
+    const lotFilterClause = exWarehouseLot
+      ? `AND l."exWarehouseLot" ILIKE :exWarehouseLot`
+      : "";
 
     const detailsQuery = `
       SELECT
@@ -107,7 +115,8 @@ const getPendingInboundTasks = async (page = 1, pageSize = 10, filters = {}) => 
     `;
 
     const detailsReplacements = { paginatedJobNos };
-    if (exWarehouseLot) detailsReplacements.exWarehouseLot = `%${exWarehouseLot}%`;
+    if (exWarehouseLot)
+      detailsReplacements.exWarehouseLot = `%${exWarehouseLot}%`;
 
     const detailsForPage = await db.sequelize.query(detailsQuery, {
       replacements: detailsReplacements,
@@ -124,7 +133,8 @@ const getPendingInboundTasks = async (page = 1, pageSize = 10, filters = {}) => 
           inboundDates: [],
         };
       }
-      if (lot.inbounddate) acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
+      if (lot.inbounddate)
+        acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
       acc[jobNo].lotDetails.push({
         lotId: lot.lotId,
         lotNo: lot.lotNo,
@@ -144,8 +154,12 @@ const getPendingInboundTasks = async (page = 1, pageSize = 10, filters = {}) => 
 
     Object.values(groupedByJobNo).forEach((group) => {
       if (group.inboundDates.length > 0) {
-        const minDate = new Date(Math.min(...group.inboundDates.map((d) => d.getTime())));
-        const maxDate = new Date(Math.max(...group.inboundDates.map((d) => d.getTime())));
+        const minDate = new Date(
+          Math.min(...group.inboundDates.map((d) => d.getTime()))
+        );
+        const maxDate = new Date(
+          Math.max(...group.inboundDates.map((d) => d.getTime()))
+        );
         const minDateString = minDate.toDateString();
         const maxDateString = maxDate.toDateString();
 
@@ -159,14 +173,23 @@ const getPendingInboundTasks = async (page = 1, pageSize = 10, filters = {}) => 
       delete group.inboundDates;
     });
 
-    return { data: Object.values(groupedByJobNo), page, pageSize, totalPages, totalCount };
+    return {
+      data: Object.values(groupedByJobNo),
+      page,
+      pageSize,
+      totalPages,
+      totalCount,
+    };
   } catch (error) {
     console.error("Error fetching pending inbound tasks:", error);
     throw error;
   }
 };
 
-const updateScheduleOutboundDetails = async (scheduleOutboundId, { containerNo, sealNo }) => {
+const updateScheduleOutboundDetails = async (
+  scheduleOutboundId,
+  { containerNo, sealNo }
+) => {
   try {
     if (containerNo === undefined && sealNo === undefined) return null;
     const setClauses = [];
@@ -199,7 +222,11 @@ const updateScheduleOutboundDetails = async (scheduleOutboundId, { containerNo, 
   }
 };
 
-const getPendingOutboundTasks = async (page = 1, pageSize = 10, filters = {}) => {
+const getPendingOutboundTasks = async (
+  page = 1,
+  pageSize = 10,
+  filters = {}
+) => {
   try {
     const { startDate, endDate, jobNo } = filters;
     const offset = (page - 1) * pageSize;
@@ -265,7 +292,8 @@ const getPendingOutboundTasks = async (page = 1, pageSize = 10, filters = {}) =>
     const totalCount = countResult?.count || 0;
     const totalPages = Math.ceil(totalCount / pageSize);
 
-    if (totalCount === 0) return { data: [], page, pageSize, totalPages, totalCount };
+    if (totalCount === 0)
+      return { data: [], page, pageSize, totalPages, totalCount };
 
     const scheduleIdQuery = `
       WITH schedule_ranges AS (
@@ -291,8 +319,11 @@ const getPendingOutboundTasks = async (page = 1, pageSize = 10, filters = {}) =>
       type: db.sequelize.QueryTypes.SELECT,
     });
 
-    const paginatedScheduleIds = scheduleIdResults.map((s) => s.scheduleOutboundId);
-    if (paginatedScheduleIds.length === 0) return { data: [], page, pageSize, totalPages, totalCount };
+    const paginatedScheduleIds = scheduleIdResults.map(
+      (s) => s.scheduleOutboundId
+    );
+    if (paginatedScheduleIds.length === 0)
+      return { data: [], page, pageSize, totalPages, totalCount };
 
     const detailsQuery = `
       SELECT
@@ -343,7 +374,9 @@ const getPendingOutboundTasks = async (page = 1, pageSize = 10, filters = {}) =>
           },
           userInfo: {
             username: item.username,
-            stuffingDate: item.stuffingDate ? formatDate(item.stuffingDate) : null,
+            stuffingDate: item.stuffingDate
+              ? formatDate(item.stuffingDate)
+              : null,
             containerNo: item.containerNo,
             sealNo: item.sealNo,
             outboundType: item.outboundType,
@@ -352,8 +385,10 @@ const getPendingOutboundTasks = async (page = 1, pageSize = 10, filters = {}) =>
           releaseDates: [],
         };
       }
-      if (item.releaseDate) acc[scheduleId].releaseDates.push(new Date(item.releaseDate));
-      if (item.releaseEndDate) acc[scheduleId].releaseDates.push(new Date(item.releaseEndDate));
+      if (item.releaseDate)
+        acc[scheduleId].releaseDates.push(new Date(item.releaseDate));
+      if (item.releaseEndDate)
+        acc[scheduleId].releaseDates.push(new Date(item.releaseEndDate));
 
       acc[scheduleId].lotDetails.push({
         selectedInboundId: item.selectedInboundId,
@@ -366,20 +401,27 @@ const getPendingOutboundTasks = async (page = 1, pageSize = 10, filters = {}) =>
         commodity: item.commodity,
         shape: item.shape,
         releaseDate: item.releaseDate ? formatDate(item.releaseDate) : null,
-        releaseEndDate: item.releaseEndDate ? formatDate(item.releaseEndDate) : null,
+        releaseEndDate: item.releaseEndDate
+          ? formatDate(item.releaseEndDate)
+          : null,
       });
       return acc;
     }, {});
 
     Object.values(groupedByScheduleId).forEach((group) => {
       if (group.releaseDates.length > 0) {
-        const minDate = new Date(Math.min(...group.releaseDates.map((d) => d.getTime())));
-        const maxDate = new Date(Math.max(...group.releaseDates.map((d) => d.getTime())));
+        const minDate = new Date(
+          Math.min(...group.releaseDates.map((d) => d.getTime()))
+        );
+        const maxDate = new Date(
+          Math.max(...group.releaseDates.map((d) => d.getTime()))
+        );
         const minDateString = minDate.toDateString();
         const maxDateString = maxDate.toDateString();
 
         group.userInfo.releaseDate = formatDate(minDate);
-        group.userInfo.releaseEndDate = minDateString === maxDateString ? null : formatDate(maxDate);
+        group.userInfo.releaseEndDate =
+          minDateString === maxDateString ? null : formatDate(maxDate);
       } else {
         group.userInfo.releaseDate = null;
         group.userInfo.releaseEndDate = null;
@@ -387,14 +429,25 @@ const getPendingOutboundTasks = async (page = 1, pageSize = 10, filters = {}) =>
       delete group.releaseDates;
     });
 
-    return { data: Object.values(groupedByScheduleId), page, pageSize, totalPages, totalCount };
+    return {
+      data: Object.values(groupedByScheduleId),
+      page,
+      pageSize,
+      totalPages,
+      totalCount,
+    };
   } catch (error) {
     console.error("Error fetching pending outbound tasks:", error);
     throw error;
   }
 };
 
-const reportJobDiscrepancy = async (jobNo, reportedBy, discrepancyType, options = {}) => {
+const reportJobDiscrepancy = async (
+  jobNo,
+  reportedBy,
+  discrepancyType,
+  options = {}
+) => {
   const managedTransaction = !options.transaction;
   const transaction = options.transaction || (await db.sequelize.transaction());
   try {
@@ -479,7 +532,11 @@ const reverseInbound = async (inboundId) => {
     );
 
     await t.commit();
-    return { success: true, message: "Inbound reversed successfully.", inboundId: inboundId };
+    return {
+      success: true,
+      message: "Inbound reversed successfully.",
+      inboundId: inboundId,
+    };
   } catch (error) {
     await t.rollback();
     console.error("Error reversing inbound:", error);
@@ -521,8 +578,6 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
 
 const getSupervisorPendingStatus = async (userId) => {
   try {
-    console.log(`\n--- [SupervisorStatus] Check for User: ${userId} ---`);
-
     // 1. Get Creation Timestamp (UTC) of latest schedules
     const inboundQuery = `
       SELECT MAX(s."createdAt") as "ts" 
@@ -530,7 +585,7 @@ const getSupervisorPendingStatus = async (userId) => {
       JOIN public.lot l ON s."scheduleInboundId" = l."scheduleInboundId"
       WHERE l.status = 'Pending'
     `;
-    
+
     const outboundQuery = `
       SELECT MAX(so."createdAt") as "ts"
       FROM public.scheduleoutbounds so
@@ -539,32 +594,26 @@ const getSupervisorPendingStatus = async (userId) => {
     `;
 
     const [inboundRes, outboundRes] = await Promise.all([
-        db.sequelize.query(inboundQuery, { plain: true, type: db.sequelize.QueryTypes.SELECT }),
-        db.sequelize.query(outboundQuery, { plain: true, type: db.sequelize.QueryTypes.SELECT })
+      db.sequelize.query(inboundQuery, {
+        plain: true,
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
+      db.sequelize.query(outboundQuery, {
+        plain: true,
+        type: db.sequelize.QueryTypes.SELECT,
+      }),
     ]);
 
     const inboundTime = inboundRes?.ts ? new Date(inboundRes.ts) : null;
     const outboundTime = outboundRes?.ts ? new Date(outboundRes.ts) : null;
-
-    console.log(`[SupervisorStatus] Inbound (UTC): ${inboundTime ? inboundTime.toISOString() : 'None'}`);
-    console.log(`[SupervisorStatus] Outbound (UTC): ${outboundTime ? outboundTime.toISOString() : 'None'}`);
-
-    const times = [inboundTime, outboundTime].filter(d => d !== null);
+    const times = [inboundTime, outboundTime].filter((d) => d !== null);
 
     // If NO pending tasks exist, return false.
     if (times.length === 0) {
-      console.log(`[SupervisorStatus] RESULT: No pending tasks found. DOT OFF.`);
       return { hasPending: false, lastUpdated: null };
     }
 
     const lastTaskTime = new Date(Math.max(...times));
-    
-    // [CRITICAL CHANGE]
-    // We ALWAYS return true if there are pending tasks.
-    // We do NOT check the DB for 'lastReadTime' because it is unreliable/corrupted.
-    // The Client (Flutter) will compare this 'lastUpdated' vs its Local Storage 'lastReadTime'.
-    console.log(`[SupervisorStatus] Tasks Found. Max Time: ${lastTaskTime.toISOString()}`);
-    console.log(`[SupervisorStatus] RESULT: FORCE TRUE (Delegating read-check to Client)`);
 
     return { hasPending: true, lastUpdated: lastTaskTime };
   } catch (error) {
@@ -575,8 +624,10 @@ const getSupervisorPendingStatus = async (userId) => {
 
 const setLastReadPendingTaskTime = async (userId, timestampIgnored) => {
   try {
-    console.log(`[PendingModel] setLastReadTime called for User: ${userId}. Setting to NOW() UTC.`);
-    
+    console.log(
+      `[PendingModel] setLastReadTime called for User: ${userId}. Setting to NOW() UTC.`
+    );
+
     // Write standard UTC. This ensures future reads are saved correctly.
     const query = `
       INSERT INTO public.user_pending_task_status ("userId", "lastReadTime", "updatedAt")
@@ -584,11 +635,11 @@ const setLastReadPendingTaskTime = async (userId, timestampIgnored) => {
       ON CONFLICT ("userId") 
       DO UPDATE SET "lastReadTime" = NOW(), "updatedAt" = NOW();
     `;
-    
+
     await db.sequelize.query(query, {
       replacements: { userId },
     });
-    
+
     console.log("[PendingModel] Read status updated successfully.");
     return true;
   } catch (error) {
