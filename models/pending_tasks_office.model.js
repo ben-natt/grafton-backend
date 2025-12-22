@@ -1,6 +1,7 @@
 const db = require("../database");
 
 // ----- INBOUND ROUTES -------
+
 const findInboundTasksOffice = async (
   filters = {},
   page = 1,
@@ -11,16 +12,14 @@ const findInboundTasksOffice = async (
     let whereClauses = `l.status = 'Pending'`;
     const replacements = {};
 
-    // --- 1. NEW SEARCH LOGIC ---
+    // --- 1. SEARCH LOGIC (existing, unchanged) ---
     if (filters.search) {
       const searchTerm = filters.search.trim();
       const searchPattern = `%${searchTerm}%`;
       replacements.search = searchPattern;
 
-      // Logic to handle "Job-Lot" specific search or general text search
       if (searchTerm.includes("-")) {
         const parts = searchTerm.split("-");
-        // Try exact Job-Lot match first
         whereClauses += ` AND (
           (l."jobNo" ILIKE :searchJobPart AND l."lotNo"::text ILIKE :searchLotPart)
           OR l."jobNo" ILIKE :search
@@ -41,15 +40,15 @@ const findInboundTasksOffice = async (
       }
     }
 
-    // --- EXISTING FILTERS ---
+    // --- 2. DATE RANGE FILTER ---
     if (filters.startDate && filters.endDate) {
       whereClauses += ` AND (l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`;
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
     }
-    // Specific Column Filters (from Filter Modal)
+
+    // --- 3. EXACT LOT NO FILTER ---
     if (filters.lotNo) {
-      // If filtering by specific "Job - Lot" string from dropdown
       const [jobNo, lotNo] = filters.lotNo.split(" - ");
       if (jobNo && lotNo) {
         whereClauses += ` AND l."jobNo" = :exactJobNo AND l."lotNo"::text = :exactLotNo`;
@@ -57,16 +56,30 @@ const findInboundTasksOffice = async (
         replacements.exactLotNo = lotNo;
       }
     }
+
+    // --- 4. JOB NO FILTER (existing) ---
+    if (filters.jobNo) {
+      whereClauses += ` AND l."jobNo" ILIKE :jobNo`;
+      replacements.jobNo = `%${filters.jobNo}%`;
+    }
+
+    // --- 5. NEW: EXTRA JOB NO FILTER FOR PHONE ---
+    if (filters.extraJobNo) {
+      whereClauses += ` AND l."jobNo" ILIKE :extraJobNo`;
+      replacements.extraJobNo = `%${filters.extraJobNo}%`;
+    }
+
+    // --- 6. CASE-INSENSITIVE COLUMN FILTERS ---
     if (filters.commodity) {
-      whereClauses += ` AND l.commodity = :commodity`;
+      whereClauses += ` AND LOWER(l.commodity) = LOWER(:commodity)`;
       replacements.commodity = filters.commodity;
     }
     if (filters.brand) {
-      whereClauses += ` AND l.brand = :brand`;
+      whereClauses += ` AND LOWER(l.brand) = LOWER(:brand)`;
       replacements.brand = filters.brand;
     }
     if (filters.shape) {
-      whereClauses += ` AND l.shape = :shape`;
+      whereClauses += ` AND LOWER(l.shape) = LOWER(:shape)`;
       replacements.shape = filters.shape;
     }
     if (filters.quantity) {
@@ -74,9 +87,11 @@ const findInboundTasksOffice = async (
       replacements.quantity = parseInt(filters.quantity, 10);
     }
     if (filters.scheduledBy) {
-      whereClauses += ` AND u.username = :scheduledBy`;
+      whereClauses += ` AND LOWER(u.username) = LOWER(:scheduledBy)`;
       replacements.scheduledBy = filters.scheduledBy;
     }
+
+    // --- 7. TYPE FILTER (Job/Lot Discrepancy) ---
     if (filters.type) {
       if (filters.type === "Job Discrepancy") {
         whereClauses += ` AND EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
@@ -85,6 +100,7 @@ const findInboundTasksOffice = async (
       }
     }
 
+    // Continue with existing query logic...
     const countQuery = `
       SELECT COUNT(DISTINCT l."jobNo")::int
       FROM public.lot l
@@ -145,10 +161,13 @@ const findInboundTasksOffice = async (
       SELECT
         jr."jobNo",
         jr."discrepancyType",
+        jr."reportStatus" = 'accepted' as "isAccepted", 
+        (jr."reportStatus" = 'resolved') as "isFinalized",
         u.username as "supervisorUsername"
       FROM public.job_reports jr
       JOIN public.users u ON jr."reportedById" = u.userid
-      WHERE jr."jobNo" IN (:jobNos) AND jr."reportStatus" = 'pending'
+      WHERE jr."jobNo" IN (:jobNos) 
+      AND (jr."reportStatus" = 'pending' OR jr."reportStatus" = 'accepted')
     `;
 
     const [tasksResult, reportsResult] = await Promise.all([
@@ -184,6 +203,8 @@ const findInboundTasksOffice = async (
           hasReport: true,
           type: report.discrepancyType,
           supervisor: report.supervisorUsername,
+          isAccepted: report.isAccepted,
+          isFinalized: report.isFinalized,
         };
       }
     }
@@ -195,7 +216,10 @@ const findInboundTasksOffice = async (
   }
 };
 
-// ----- OUTBOUND ROUTES -------
+// ============================================================================
+// UPDATE THE findOutboundTasksOffice FUNCTION
+// ============================================================================
+
 const findOutboundTasksOffice = async (
   filters = {},
   page = 1,
@@ -206,7 +230,7 @@ const findOutboundTasksOffice = async (
     let whereClauses = `si."isOutbounded" = false`;
     const replacements = {};
 
-    // --- 1. NEW SEARCH LOGIC ---
+    // --- 1. SEARCH LOGIC ---
     if (filters.search) {
       const searchTerm = filters.search.trim();
       const searchPattern = `%${searchTerm}%`;
@@ -235,12 +259,14 @@ const findOutboundTasksOffice = async (
       }
     }
 
-    // --- EXISTING FILTERS ---
+    // --- 2. DATE RANGE FILTER ---
     if (filters.startDate && filters.endDate) {
       whereClauses += ` AND (si."releaseDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`;
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
     }
+
+    // --- 3. LOT NO FILTER ---
     if (filters.lotNo) {
       const [jobNo, lotNo] = filters.lotNo.split(" - ");
       if (jobNo && lotNo) {
@@ -249,16 +275,24 @@ const findOutboundTasksOffice = async (
         replacements.exactLotNo = lotNo;
       }
     }
+
+    // --- 4. NEW: EXTRA JOB NO FILTER FOR PHONE ---
+    if (filters.extraJobNo) {
+      whereClauses += ` AND so."outboundJobNo" ILIKE :extraJobNo`;
+      replacements.extraJobNo = `%${filters.extraJobNo}%`;
+    }
+
+    // --- 5. CASE-INSENSITIVE COLUMN FILTERS ---
     if (filters.commodity) {
-      whereClauses += ` AND c."commodityName" = :commodity`;
+      whereClauses += ` AND LOWER(c."commodityName") = LOWER(:commodity)`;
       replacements.commodity = filters.commodity;
     }
     if (filters.brand) {
-      whereClauses += ` AND b."brandName" = :brand`;
+      whereClauses += ` AND LOWER(b."brandName") = LOWER(:brand)`;
       replacements.brand = filters.brand;
     }
     if (filters.shape) {
-      whereClauses += ` AND sh."shapeName" = :shape`;
+      whereClauses += ` AND LOWER(sh."shapeName") = LOWER(:shape)`;
       replacements.shape = filters.shape;
     }
     if (filters.quantity) {
@@ -266,12 +300,14 @@ const findOutboundTasksOffice = async (
       replacements.quantity = parseInt(filters.quantity, 10);
     }
     if (filters.scheduledBy) {
-      whereClauses += ` AND u.username = :scheduledBy`;
+      whereClauses += ` AND LOWER(u.username) = LOWER(:scheduledBy)`;
       replacements.scheduledBy = filters.scheduledBy;
     }
+
+    // --- 6. TYPE FILTER (Container/Flatbed) ---
     if (filters.type) {
-      whereClauses += ` AND so."outboundType" = :outboundType`;
-      replacements.outboundType = filters.type.toLowerCase();
+      whereClauses += ` AND LOWER(so."outboundType") = LOWER(:outboundType)`;
+      replacements.outboundType = filters.type;
     }
 
     const baseQuery = `
@@ -338,7 +374,6 @@ const findOutboundTasksOffice = async (
 
     const tasksMap = {};
     for (const task of tasksResult) {
-      // Ensure outbound job No is used as grouping key, fallback to ID if needed
       const scheduleKey =
         task.outboundJobNo || `SCH-${task.scheduleOutboundId}`;
       if (!tasksMap[scheduleKey]) {

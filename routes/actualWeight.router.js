@@ -12,7 +12,7 @@ router.post("/actual/save-weight", async (req, res) => {
     actualWeight,
     bundles,
     strictValidation,
-    // [NEW] Destructure new fields
+    exWarehouseLot,
     tareWeight,
     scaleNo,
     userId,
@@ -62,9 +62,9 @@ router.post("/actual/save-weight", async (req, res) => {
         actualWeight,
         bundles,
         strictValidation,
-        null,
-        null,
-        // [NEW] Pass new fields
+        jobNo,
+        lotNo,
+        exWarehouseLot,
         tareWeight,
         scaleNo,
         userId
@@ -75,9 +75,9 @@ router.post("/actual/save-weight", async (req, res) => {
         actualWeight,
         bundles,
         strictValidation,
-        null,
-        null,
-        // [NEW] Pass new fields
+        jobNo,
+        lotNo,
+        exWarehouseLot,
         tareWeight,
         scaleNo,
         userId
@@ -89,7 +89,7 @@ router.post("/actual/save-weight", async (req, res) => {
         null,
         false,
         jobNo,
-        lotNo
+        exWarehouseLot
       );
 
       if (inboundResult) {
@@ -100,7 +100,7 @@ router.post("/actual/save-weight", async (req, res) => {
           strictValidation,
           jobNo,
           lotNo,
-          // [NEW] Pass new fields
+          exWarehouseLot,
           tareWeight,
           scaleNo,
           userId
@@ -111,7 +111,7 @@ router.post("/actual/save-weight", async (req, res) => {
           null,
           true,
           jobNo,
-          lotNo
+          exWarehouseLot
         );
 
         if (lotResult) {
@@ -122,7 +122,7 @@ router.post("/actual/save-weight", async (req, res) => {
             strictValidation,
             jobNo,
             lotNo,
-            // [NEW] Pass new fields
+            exWarehouseLot,
             tareWeight,
             scaleNo,
             userId
@@ -156,6 +156,7 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
       lotId,
       jobNo,
       lotNo,
+      exWarehouseLot,
       strictValidation = false,
     } = req.body;
 
@@ -163,6 +164,92 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
     let isInbound = true;
     let bundles = [];
     let searchAttempts = [];
+
+    if (inboundId && inboundId !== 0) {
+      try {
+        const verifyQuery = `
+      SELECT "inboundId", "jobNo", "exWarehouseLot", "noOfBundle" 
+      FROM public.inbounds 
+      WHERE "inboundId" = $1
+    `;
+        const [verifyResult] = await actualWeightModel.db.sequelize.query(
+          verifyQuery,
+          {
+            bind: [inboundId],
+            type: actualWeightModel.db.sequelize.QueryTypes.SELECT,
+          }
+        );
+
+        if (!verifyResult) {
+          return res.status(404).json({
+            error: `Inbound record with inboundId ${inboundId} not found`,
+          });
+        }
+
+        // Verify jobNo matches if provided
+        if (jobNo && verifyResult.jobNo !== jobNo) {
+          return res.status(400).json({
+            error: `JobNo mismatch: provided '${jobNo}' but inboundId ${inboundId} has '${verifyResult.jobNo}'`,
+          });
+        }
+
+        // Verify exWarehouseLot matches if provided
+        if (exWarehouseLot && verifyResult.exWarehouseLot !== exWarehouseLot) {
+          return res.status(400).json({
+            error: `ExWarehouseLot mismatch: provided '${exWarehouseLot}' but inboundId ${inboundId} has '${verifyResult.exWarehouseLot}'`,
+          });
+        }
+      } catch (err) {
+        console.error("[VALIDATION ERROR]", err);
+        return res.status(500).json({
+          error: "Validation failed",
+          details: err.message,
+        });
+      }
+    }
+
+    if (lotId && lotId !== 0) {
+      try {
+        const verifyQuery = `
+      SELECT "lotId", "jobNo", "exWarehouseLot", "expectedBundleCount" 
+      FROM public.lot 
+      WHERE "lotId" = $1
+    `;
+        const [verifyResult] = await actualWeightModel.db.sequelize.query(
+          verifyQuery,
+          {
+            bind: [lotId],
+            type: actualWeightModel.db.sequelize.QueryTypes.SELECT,
+          }
+        );
+
+        if (!verifyResult) {
+          return res.status(404).json({
+            error: `Lot record with lotId ${lotId} not found`,
+          });
+        }
+
+        // Verify jobNo matches if provided
+        if (jobNo && verifyResult.jobNo !== jobNo) {
+          return res.status(400).json({
+            error: `JobNo mismatch: provided '${jobNo}' but lotId ${lotId} has '${verifyResult.jobNo}'`,
+          });
+        }
+
+        // Verify exWarehouseLot matches if provided
+        if (exWarehouseLot && verifyResult.exWarehouseLot !== exWarehouseLot) {
+          return res.status(400).json({
+            error: `ExWarehouseLot mismatch: provided '${exWarehouseLot}' but lotId ${lotId} has '${verifyResult.exWarehouseLot}'`,
+          });
+        }
+      } catch (err) {
+        console.error("[VALIDATION ERROR]", err);
+        return res.status(500).json({
+          error: "Validation failed",
+          details: err.message,
+        });
+      }
+    }
 
     // Priority 1: Check for inboundId
     if (inboundId && inboundId !== 0) {
@@ -287,9 +374,6 @@ router.post("/actual/get-bundles-if-weighted", async (req, res) => {
         }
       }
     }
-
-    // Log all search attempts
-    // console.log('Search attempts:', searchAttempts);
 
     if (!bundles || bundles.length === 0) {
       return res.status(404).json({

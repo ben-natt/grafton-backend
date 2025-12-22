@@ -1,3 +1,4 @@
+const e = require("express");
 const db = require("../database");
 
 // Helper function to find related ID (inboundId if lotId is provided, or lotId if inboundId is provided)
@@ -166,7 +167,7 @@ const checkDuplicateCrewLotNo = async (
   }
 
   // Range validation removed as per original file
-  return false; 
+  return false;
 };
 
 // Update Crew Lot No in both tables
@@ -294,6 +295,7 @@ const upsertBundle = async (
   relatedId = null,
   jobNo = null,
   lotNo = null,
+  exWarehouseLot = null,
   transaction = null
 ) => {
   const options = transaction ? { transaction } : {};
@@ -301,41 +303,54 @@ const upsertBundle = async (
   let relatedIdField = isInbound ? "lotId" : "inboundId";
 
   try {
-    // If we don't have the primary ID but have jobNo and lotNo, try to find it
-    if (!idValue && jobNo && lotNo) {
+    // If we don't have the primary ID but have jobNo and exWarehouseLot, try to find it
+    if (!idValue && jobNo && exWarehouseLot) {
       const findQuery = `
         SELECT ${isInbound ? '"inboundId"' : '"lotId"'} 
         FROM ${isInbound ? "public.inbounds" : "public.lot"} 
-        WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+        WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
         LIMIT 1
       `;
 
       const [result] = await db.sequelize.query(findQuery, {
-        replacements: { jobNo, lotNo },
+        replacements: { jobNo, exWarehouseLot },
         type: db.sequelize.QueryTypes.SELECT,
         ...options,
       });
 
       if (result) {
         idValue = isInbound ? result.inboundId : result.lotId;
+        console.log(
+          `[upsertBundle] Found ${
+            isInbound ? "inboundId" : "lotId"
+          }: ${idValue} using jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}`
+        );
       }
     }
 
     // If we don't have the related ID, try to find it
     if (!relatedId) {
       if (idValue) {
-        relatedId = await findRelatedId(idValue, !isInbound, jobNo, lotNo);
-      } else if (jobNo && lotNo) {
-        // Try to find the related ID directly using jobNo and lotNo
+        relatedId = await findRelatedId(
+          idValue,
+          !isInbound,
+          jobNo,
+          exWarehouseLot
+        );
+        console.log(
+          `[upsertBundle] Found relatedId: ${relatedId} from idValue: ${idValue}`
+        );
+      } else if (jobNo && exWarehouseLot) {
+        // Try to find the related ID directly using jobNo and exWarehouseLot
         const findRelatedQuery = `
           SELECT ${!isInbound ? '"inboundId"' : '"lotId"'} 
           FROM ${!isInbound ? "public.inbounds" : "public.lot"} 
-          WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+          WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
           LIMIT 1
         `;
 
         const [relatedResult] = await db.sequelize.query(findRelatedQuery, {
-          replacements: { jobNo, lotNo },
+          replacements: { jobNo, exWarehouseLot },
           type: db.sequelize.QueryTypes.SELECT,
           ...options,
         });
@@ -344,12 +359,18 @@ const upsertBundle = async (
           relatedId = !isInbound
             ? relatedResult.inboundId
             : relatedResult.lotId;
+          console.log(
+            `[upsertBundle] Found relatedId: ${relatedId} using jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}`
+          );
         }
       }
     }
 
-    // Validate we have at least one ID
+    // CRITICAL VALIDATION: Ensure we have at least one ID
     if (!idValue && !relatedId) {
+      console.error(
+        `[upsertBundle] FAILED: No IDs available for jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}, bundleNo: ${bundleNo}`
+      );
       throw new Error(
         "Cannot upsert bundle - neither primary ID nor related ID is available"
       );
@@ -598,12 +619,20 @@ const saveInboundWithBundles = async (
   strictValidation = false,
   jobNo = null,
   lotNo = null,
-  // [NEW] New parameters
+  exWarehouseLot = null,
   tareWeight = 0,
   scaleNo = null,
   userId = null
 ) => {
   const transaction = await db.sequelize.transaction();
+
+  console.log(`[saveLotWithBundles] Starting save:`, {
+    inboundId,
+    jobNo,
+    exWarehouseLot,
+    bundleCount: bundles.length,
+    bundleNumbers: bundles.map((b) => b.bundleNo),
+  });
 
   try {
     // Find related lotId, using jobNo and lotNo if inboundId is null
@@ -621,7 +650,7 @@ const saveInboundWithBundles = async (
         bundle.stickerWeight, // Pass stickerWeight to upsertBundle
         relatedLotId,
         jobNo,
-        lotNo,
+        exWarehouseLot,
         transaction
       );
       if (savedBundle) savedBundles.push(savedBundle);
@@ -669,7 +698,7 @@ const saveInboundWithBundles = async (
         // [NEW] Replacements
         tareWeight: tareWeight,
         scaleNo: scaleNo,
-        userId: userId
+        userId: userId,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -700,7 +729,7 @@ const saveInboundWithBundles = async (
             // [NEW] Replacements
             tareWeight: tareWeight,
             scaleNo: scaleNo,
-            userId: userId
+            userId: userId,
           },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
@@ -718,7 +747,7 @@ const saveInboundWithBundles = async (
       stickerWeight: totalStickerWeight,
       // [NEW]
       tareWeight,
-      scaleNo
+      scaleNo,
     };
   } catch (error) {
     await transaction.rollback();
@@ -735,12 +764,20 @@ const saveLotWithBundles = async (
   strictValidation = false,
   jobNo = null,
   lotNo = null,
-  // [NEW] New parameters
+  exWarehouseLot = null,
   tareWeight = 0,
   scaleNo = null,
   userId = null
 ) => {
   const transaction = await db.sequelize.transaction();
+
+  console.log(`[saveInboundWithBundles] Starting save:`, {
+    lotId,
+    jobNo,
+    exWarehouseLot,
+    bundleCount: bundles.length,
+    bundleNumbers: bundles.map((b) => b.bundleNo),
+  });
 
   try {
     // Find related inboundId, using jobNo and lotNo if lotId is null
@@ -758,7 +795,7 @@ const saveLotWithBundles = async (
         bundle.stickerWeight, // Pass stickerWeight to upsertBundle
         relatedInboundId,
         jobNo,
-        lotNo,
+        exWarehouseLot,
         transaction
       );
       if (savedBundle) {
@@ -808,7 +845,7 @@ const saveLotWithBundles = async (
         // [NEW]
         tareWeight,
         scaleNo,
-        userId
+        userId,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -839,7 +876,7 @@ const saveLotWithBundles = async (
             // [NEW]
             tareWeight,
             scaleNo,
-            userId
+            userId,
           },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
@@ -857,7 +894,7 @@ const saveLotWithBundles = async (
       isWeighted,
       // [NEW]
       tareWeight,
-      scaleNo
+      scaleNo,
     };
   } catch (error) {
     await transaction.rollback();
@@ -881,7 +918,9 @@ const getBundlesIfWeighted = async (
         SELECT 
           ib.*,
           i."crewLotNo",
-          i."stickerWeight" as inboundStickerWeight
+          i."stickerWeight" as "inboundStickerWeight",
+          i."tareWeight",
+          i."scaleNo"
         FROM inboundbundles ib
         LEFT JOIN inbounds i ON ib."inboundId" = i."inboundId"
         WHERE ib."inboundId" = ?
@@ -1103,7 +1142,7 @@ const checkOutboundScheduleStatus = async (
           si."scheduleOutboundId",
           si."isOutbounded",
           si."jobNo",
-          si."lotNo",
+           si."lotNo",
           si."releaseDate",
           si."exportDate",
           si."deliveryDate",
@@ -1244,6 +1283,7 @@ const getHistoricalBundlesByJobAndLot = async (jobNo, lotNo) => {
 };
 
 module.exports = {
+  db,
   findRelatedId,
   updateInboundActualWeight,
   saveInboundWithBundles,
