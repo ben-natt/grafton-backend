@@ -866,7 +866,6 @@ const saveLotWithBundles = async (
   }
 };
 
-// get bundles if weighted from backend
 const getBundlesIfWeighted = async (
   idValue,
   isInbound,
@@ -877,11 +876,14 @@ const getBundlesIfWeighted = async (
     let replacements;
 
     if (isInbound) {
+      // FIX: Added i."tareWeight" and i."scaleNo" to the SELECT list
       query = `
         SELECT 
           ib.*,
           i."crewLotNo",
-          i."stickerWeight" as inboundStickerWeight
+          i."stickerWeight" as "inboundStickerWeight",
+          i."tareWeight",
+          i."scaleNo"
         FROM inboundbundles ib
         LEFT JOIN inbounds i ON ib."inboundId" = i."inboundId"
         WHERE ib."inboundId" = ?
@@ -889,13 +891,17 @@ const getBundlesIfWeighted = async (
       `;
       replacements = [idValue];
     } else {
+      // FIX: Added i."tareWeight" and i."scaleNo" to the SELECT list
+      // Note: In the ELSE block (for Lots), 'i' aliases the 'lot' table, logic remains the same
       query = `
         SELECT 
           ib.*,
           i."crewLotNo",
-          i."stickerWeight" as inboundStickerWeight
+          i."stickerWeight" as "inboundStickerWeight",
+          i."tareWeight",
+          i."scaleNo"
         FROM inboundbundles ib
-        LEFT JOIN inbounds i ON ib."inboundId" = i."inboundId"
+        LEFT JOIN public.lot i ON ib."lotId" = i."lotId"
         WHERE ib."lotId" = ?
         ORDER BY ib."bundleNo"
       `;
@@ -909,6 +915,7 @@ const getBundlesIfWeighted = async (
 
     // Log some sample data if bundles found
     if (bundles.length > 0) {
+      // console.log("Sample bundle data:", bundles[0]);
     }
 
     return bundles;
