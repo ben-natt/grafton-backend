@@ -1,4 +1,3 @@
-
 const db = require("../database");
 const { Op } = require("sequelize");
 
@@ -6,50 +5,63 @@ const { Op } = require("sequelize");
 const formatDate = (date) => {
   if (!date) return "N/A";
   const d = new Date(date);
-  const day = String(d.getDate()).padStart(2, "0"); // Ensures two-digit day
-  const month = d.toLocaleString("en-US", { month: "short" }); // Use 'short' for 'Sep'
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-US", { month: "short" });
   const year = d.getFullYear();
   return `${day} ${month} ${year}`;
 };
 
-const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filters = {}) => {
+const getPendingTasksWithIncompleteStatus = async (
+  page = 1,
+  pageSize = 10,
+  filters = {}
+) => {
   try {
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
-    // Build base filter conditions for finding relevant jobs
-    // 1. Status must be 'Received'
-    // 2. Report is false
-    // 3. Must be Confirmed by Supervisor (l."isConfirm" = true)
-    // 4. Must satisfy incomplete weighting conditions OR have incomplete bundles
-    // 5. Must NOT be selected for outbound (prevents red dot when Office schedules it)
+    // ✅ UPDATED: Check isWeighted in BOTH lot and inbounds tables for backward compatibility
+    // This handles data where:
+    // 1. OLD DATA: Only lot.isWeighted was updated (inbounds.isWeighted = false)
+    // 2. NEW DATA: Both lot.isWeighted and inbounds.isWeighted are updated
     const baseWhere = [
       `l."status" = 'Received'`,
       `l."report" = false`,
       `l."isConfirm" = true`,
       `(
-        i."isWeighted" IS NOT TRUE
-        OR
-        EXISTS (
-          SELECT 1
-          FROM public.inboundbundles ib
-          WHERE ib."inboundId" = i."inboundId"
-          AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '' OR ib."stickerWeight" IS NULL OR ib."stickerWeight" <= 0)
-        )
-      )`,
+    -- Show lot if NO bundles exist yet (crew needs to create them)
+    NOT EXISTS (
+      SELECT 1 
+      FROM public.inboundbundles ib 
+      WHERE ib."inboundId" = i."inboundId"
+    )
+    OR
+    -- OR show lot if bundles exist but at least one is incomplete
+    EXISTS (
+      SELECT 1
+      FROM public.inboundbundles ib
+      WHERE ib."inboundId" = i."inboundId"
+      AND (
+        ib.weight IS NULL 
+        OR ib.weight <= 0 
+      )
+    )
+  )`,
       `NOT EXISTS (
-        SELECT 1
-        FROM public.selectedinbounds si
-        WHERE si."jobNo" = l."jobNo" 
-        AND si."lotNo" = l."lotNo"
-      )`,
+    SELECT 1
+    FROM public.selectedinbounds si
+    WHERE si."jobNo" = l."jobNo" 
+    AND si."lotNo" = l."lotNo"
+  )`,
     ];
-    
+
     const replacements = {};
 
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
-      baseWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      baseWhere.push(
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+      );
       replacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
 
@@ -73,7 +85,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
           MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
         FROM public.lot l
-        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" IS NOT DISTINCT FROM i."exWarehouseLot"
         WHERE ${baseWhereString}
         GROUP BY l."jobNo"
       )
@@ -103,7 +115,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           MIN((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS min_date,
           MAX((l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date) AS max_date
         FROM public.lot l
-        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
+        JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" IS NOT DISTINCT FROM i."exWarehouseLot"
         WHERE ${baseWhereString}
         GROUP BY l."jobNo"
       )
@@ -124,40 +136,54 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     if (paginatedJobNos.length === 0) {
       return { data: [], page, pageSize, totalPages, totalCount };
     }
-    
-    // Build a separate WHERE clause for the details query to filter lots precisely.
-    // Ensure the same strict conditions apply to the detailed fetching.
+
+    // ✅ UPDATED: Use same backward-compatible conditions for details query
     const detailsWhere = [
       `l."jobNo" IN (:paginatedJobNos)`,
       `l."status" = 'Received'`,
       `l."report" = false`,
       `l."isConfirm" = true`,
       `(
-        i."isWeighted" IS NOT TRUE
-        OR
-        EXISTS (
-          SELECT 1
-          FROM public.inboundbundles ib
-          WHERE ib."inboundId" = i."inboundId"
-          AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
-        )
-      )`,
+    -- Show lot if NO bundles exist yet
+    NOT EXISTS (
+      SELECT 1 
+      FROM public.inboundbundles ib 
+      WHERE ib."inboundId" = i."inboundId"
+    )
+    OR
+    -- OR show lot if bundles exist but at least one is incomplete
+    EXISTS (
+      SELECT 1
+      FROM public.inboundbundles ib
+      WHERE ib."inboundId" = i."inboundId"
+      AND (
+        ib.weight IS NULL 
+        OR ib.weight <= 0 
+        OR ib."meltNo" IS NULL 
+        OR TRIM(ib."meltNo") = ''
+        OR ib."stickerWeight" IS NULL 
+        OR ib."stickerWeight" <= 0
+      )
+    )
+  )`,
       `NOT EXISTS (
-        SELECT 1
-        FROM public.selectedinbounds si
-        WHERE si."jobNo" = l."jobNo" 
-        AND si."lotNo" = l."lotNo"
-      )`
+    SELECT 1
+    FROM public.selectedinbounds si
+    WHERE si."jobNo" = l."jobNo" 
+    AND si."lotNo" = l."lotNo"
+  )`,
     ];
-    
+
     const detailsReplacements = { paginatedJobNos };
 
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
-      detailsWhere.push(`REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`);
+      detailsWhere.push(
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+      );
       detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
-    
+
     const detailsWhereString = detailsWhere.join(" AND ");
 
     // Fetch details for the paginated jobs
@@ -168,20 +194,28 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
           l."inbounddate",
           i."inboundId", i."netWeight",
           u.username,
+          -- ✅ ADDED: Include isWeighted flags for debugging/tracking
+          l."isWeighted" as lot_is_weighted,
+          i."isWeighted" as inbound_is_weighted,
           -- Bundle statistics
           COALESCE(bundle_stats.total_bundles, 0) as total_bundles,
           COALESCE(bundle_stats.incomplete_bundles, 0) as incomplete_bundles,
           COALESCE(bundle_stats.complete_bundles, 0) as complete_bundles,
           COALESCE(bundle_stats.any_data_bundles, 0) as any_data_bundles,
-          -- Incomplete status
+          -- Incomplete status logic
           CASE 
-            WHEN COALESCE(bundle_stats.any_data_bundles, 0) > 0 
-                 AND COALESCE(bundle_stats.incomplete_bundles, 0) > 0 
-            THEN true 
-            ELSE false 
-          END as is_incomplete
+  -- ✅ UPDATED: Mark as incomplete if EITHER flag is false OR bundles are incomplete
+  WHEN (l."isWeighted" IS NOT TRUE OR i."isWeighted" IS NOT TRUE)
+       AND COALESCE(bundle_stats.any_data_bundles, 0) > 0 
+       AND COALESCE(bundle_stats.incomplete_bundles, 0) > 0 
+  THEN true
+  WHEN COALESCE(bundle_stats.any_data_bundles, 0) > 0 
+       AND COALESCE(bundle_stats.incomplete_bundles, 0) > 0 
+  THEN true 
+  ELSE false 
+END as is_incomplete
       FROM public.lot l
-      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" = i."exWarehouseLot"
+      JOIN public.inbounds i ON l."jobNo" = i."jobNo" AND l."exWarehouseLot" IS NOT DISTINCT FROM i."exWarehouseLot"
       JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
       JOIN public.users u ON s."userId" = u.userid
       LEFT JOIN (
@@ -217,8 +251,8 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
 
     const safeParseLotNo = (value) => {
       if (value === null || value === undefined) return "N/A";
-      if (typeof value === 'number') return value;
-      if (typeof value === 'string') {
+      if (typeof value === "number") return value;
+      if (typeof value === "string") {
         const parsed = parseInt(value, 10);
         return isNaN(parsed) ? "N/A" : parsed;
       }
@@ -275,7 +309,7 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
         },
         isIncomplete: lot.is_incomplete,
       });
-      
+
       return acc;
     }, {});
 
@@ -304,11 +338,13 @@ const getPendingTasksWithIncompleteStatus = async (page = 1, pageSize = 10, filt
     const finalData = Object.values(groupedByJobNo);
     return { data: finalData, page, pageSize, totalPages, totalCount };
   } catch (error) {
-    console.error("Error fetching pending tasks with incomplete status:", error);
+    console.error(
+      "Error fetching pending tasks with incomplete status:",
+      error
+    );
     throw error;
   }
 };
-
 
 const getDetailsPendingTasksCrew = async (jobNo) => {
   try {
@@ -321,7 +357,7 @@ const getDetailsPendingTasksCrew = async (jobNo) => {
       JOIN public.inbounds i ON i."jobNo" = l."jobNo" AND i."exWarehouseLot" = l."exWarehouseLot"
       WHERE l."jobNo" = :jobNo
         AND l."status" = 'Received' AND l."report" = false AND l."isConfirm" = true
-        AND i."isWeighted" IS NOT TRUE
+        AND (l."isWeighted" IS NOT TRUE)
       ORDER BY l."exWarehouseLot" ASC;
     `;
     return await db.sequelize.query(query, {
@@ -359,13 +395,7 @@ const pendingTasksUserIdSingleDateCrew = async (jobNo) => {
 
 const getCrewPendingStatus = async (userId) => {
   try {
-    // FIX:
-    // We explicitly cast both sides of the comparison to ensure a raw UTC comparison.
-    // CASE WHEN MAX(l."updatedAt") > COALESCE(user_read_time, 1970)
-    
-    // Note: If lastReadTime is stored without a timezone, we cast it to UTC ('YYYY-MM-DD HH:MM:SS+00')
-    // to match updatedAt which is usually timestamptz.
-    
+    // ✅ UPDATED: Check BOTH lot and inbounds isWeighted flags
     const query = `
       WITH pending_updates AS (
         SELECT MAX(l."updatedAt") as "latestUpdate"
@@ -376,11 +406,18 @@ const getCrewPendingStatus = async (userId) => {
           AND l."report" = false
           AND l."isConfirm" = true
           AND (
-            i."isWeighted" IS NOT TRUE
+            l."isWeighted" IS NOT TRUE
             OR EXISTS (
               SELECT 1 FROM public.inboundbundles ib
               WHERE ib."inboundId" = i."inboundId"
-              AND (ib.weight IS NULL OR ib.weight <= 0 OR ib."meltNo" IS NULL OR ib."meltNo" = '')
+              AND (
+                ib.weight IS NULL 
+                OR ib.weight <= 0 
+                OR ib."meltNo" IS NULL 
+                OR ib."meltNo" = ''
+                OR ib."stickerWeight" IS NULL 
+                OR ib."stickerWeight" <= 0
+              )
             )
           )
       )
@@ -407,13 +444,11 @@ const getCrewPendingStatus = async (userId) => {
       return { hasPending: false, lastUpdated: null, lastReadTime: null };
     }
 
-    // Force return as a Date object or null to avoid string parsing issues on client
     return {
       hasPending: result.hasPending === true || result.hasPending === 1,
       lastUpdated: result.lastUpdated ? new Date(result.lastUpdated) : null,
-      lastReadTime: result.lastReadTime ? new Date(result.lastReadTime) : null 
+      lastReadTime: result.lastReadTime ? new Date(result.lastReadTime) : null,
     };
-
   } catch (error) {
     console.error("Error checking crew pending status:", error);
     throw error;
@@ -423,18 +458,19 @@ const getCrewPendingStatus = async (userId) => {
 const updateCrewReadStatus = async (userId, explicitDate) => {
   try {
     const replacements = { userId };
-    
-    // Ensure we insert a clean ISO timestamp if provided
+
     if (explicitDate) {
-      replacements.explicitDate = explicitDate; // e.g., '2025-12-11T01:39:24.314Z'
+      replacements.explicitDate = explicitDate;
     }
 
     const query = `
       INSERT INTO public.user_pending_task_status ("userId", "lastReadTime")
-      VALUES (:userId, ${explicitDate ? ':explicitDate::timestamptz' : 'NOW()'})
+      VALUES (:userId, ${explicitDate ? ":explicitDate::timestamptz" : "NOW()"})
       ON CONFLICT ("userId") 
       DO UPDATE SET 
-        "lastReadTime" = ${explicitDate ? ':explicitDate::timestamptz' : 'NOW()'};
+        "lastReadTime" = ${
+          explicitDate ? ":explicitDate::timestamptz" : "NOW()"
+        };
     `;
 
     await db.sequelize.query(query, {
