@@ -435,4 +435,22 @@ router.get('/pending-tasks/read-status/:userId', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+router.post("/finalize-job", async (req, res) => {
+  try {
+    // Extract filters from body
+    const { jobNo, userId, filters } = req.body;
+    
+    if (!jobNo || !userId) {
+      return res.status(400).json({ error: "jobNo and userId are required." });
+    }
+
+    // Pass filters to the model
+    const result = await pendingTasksModel.finalizeInboundJob(jobNo, userId, filters || {});
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error finalizing job:", error);
+    res.status(500).json({ error: "Failed to finalize job." });
+  }
+});
 module.exports = router;

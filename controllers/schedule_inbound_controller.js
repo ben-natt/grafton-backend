@@ -55,20 +55,45 @@ exports.createScheduleInbound = async (req, res) => {
 
   try {
     for (const jobNo in jobDataMap) {
-      // --- VALIDATION: Check for Duplicate Job No ---
-      const existingJob = await ScheduleInbound.findOne({
-        where: { jobNo: jobNo },
-        transaction: transaction,
-      });
-
-      if (existingJob) {
-        const error = new Error(`Job No ${jobNo} is already scheduled.`);
-        error.code = "DUPLICATE_SCHEDULE";
-        throw error;
-      }
-      // ----------------------------------------------
-
+      
       const { lots } = jobDataMap[jobNo];
+
+      // --- VALIDATION WITH LOGS ---
+      for (const lot of lots) {
+        
+        // Log what we are looking for
+        console.log(`[VALIDATION CHECK] Searching DB for Job: "${jobNo}" AND Lot: "${lot.lotNo}"...`);
+
+        const existingLot = await Lot.findOne({
+          where: {
+            jobNo: jobNo, 
+            lotNo: lot.lotNo, 
+          },
+          transaction: transaction,
+        });
+
+        if (existingLot) {
+          // Log EXACTLY what was found so you can debug
+          console.error("---------------------------------------------------------------");
+          console.error(`[DUPLICATE FOUND] System blocked Job: ${jobNo}, Lot: ${lot.lotNo}`);
+          console.error(`   -> FOUND DB ID:      ${existingLot.id || existingLot.lotId || 'Unknown ID'}`);
+          console.error(`   -> FOUND Job No:     ${existingLot.jobNo}`);
+          console.error(`   -> FOUND Lot No:     ${existingLot.lotNo}`);
+          console.error(`   -> FOUND Status:     ${existingLot.status}`); // Check if this is 'Cancelled' or 'Pending'
+          console.error(`   -> FOUND Created At: ${existingLot.createdAt}`);
+          console.error("---------------------------------------------------------------");
+
+          const error = new Error(
+            `Lot No ${lot.lotNo} is already scheduled for Job No ${jobNo}. (Ref ID: ${existingLot.id || 'N/A'})`
+          );
+          error.code = "DUPLICATE_SCHEDULE";
+          throw error;
+        } else {
+            console.log(`[VALIDATION PASS] No existing record for Job: "${jobNo}", Lot: "${lot.lotNo}". Proceeding.`);
+        }
+      }
+      // ------------------------------------------
+
       for (const lot of lots) {
         if (lot.shape && typeof lot.shape === "string") {
           const shapeLower = lot.shape.toLowerCase();
@@ -88,37 +113,17 @@ exports.createScheduleInbound = async (req, res) => {
         }
       }
 
-      // This logic now uses raw SQL queries, avoiding the model import errors.
+      // Helper table insertions
       for (const lot of lots) {
-        await findOrCreateRaw(
-          "commodities",
-          "commodityName",
-          lot.commodity,
-          transaction
-        );
+        await findOrCreateRaw("commodities", "commodityName", lot.commodity, transaction);
         await findOrCreateRaw("brands", "brandName", lot.brand, transaction);
         await findOrCreateRaw("shapes", "shapeName", lot.shape, transaction);
-        await findOrCreateRaw(
-          "exwarehouselocations",
-          "exWarehouseLocationName",
-          lot.exWarehouseLocation,
-          transaction
-        );
-        await findOrCreateRaw(
-          "exlmewarehouses",
-          "exLmeWarehouseName",
-          lot.exLmeWarehouse,
-          transaction
-        );
-        await findOrCreateRaw(
-          "inboundwarehouses",
-          "inboundWarehouseName",
-          lot.inboundWarehouse,
-          transaction
-        );
+        await findOrCreateRaw("exwarehouselocations", "exWarehouseLocationName", lot.exWarehouseLocation, transaction);
+        await findOrCreateRaw("exlmewarehouses", "exLmeWarehouseName", lot.exLmeWarehouse, transaction);
+        await findOrCreateRaw("inboundwarehouses", "inboundWarehouseName", lot.inboundWarehouse, transaction);
       }
 
-      // Create ScheduleInbound record
+      // Create/Update ScheduleInbound
       const [scheduleInbound] = await ScheduleInbound.upsert(
         {
           jobNo: jobNo,
@@ -148,24 +153,22 @@ exports.createScheduleInbound = async (req, res) => {
     }
 
     await transaction.commit();
-    // --- LOGGING START ---
-    const timestamp = new Date().toLocaleString(); // Current server time
+    // --- LOGGING ---
+    const timestamp = new Date().toLocaleString(); 
 
     for (const jobNo in jobDataMap) {
       const currentLots = jobDataMap[jobNo].lots || [];
       const lotCount = currentLots.length;
-
-      // Extract all exWarehouseLot numbers and join them into a string
       const exWarehouseLotList = currentLots
         .map((lot) => lot.exWarehouseLot)
-        .filter((val) => val) // Filter out null/undefined if any
+        .filter((val) => val) 
         .join(", ");
 
       console.log(
         `[SCHEDULE SUCCESS] User: ${userId} | Job No: ${jobNo} | Total Lots: ${lotCount} | Inbound Date: ${inboundDate} | Ex-Whse Lots: [${exWarehouseLotList}] | Timestamp: ${timestamp}`
       );
     }
-    // --- LOGGING END ---
+    
     res.status(200).json({
       message: "Inbound schedule and lots created/updated successfully!",
     });
@@ -174,7 +177,6 @@ exports.createScheduleInbound = async (req, res) => {
     await transaction.rollback();
     console.error("Database error during scheduling:", dbError);
 
-    // Specific handling for Duplicate Schedule
     if (dbError.code === "DUPLICATE_SCHEDULE") {
       return res.status(409).json({
         message: dbError.message,
@@ -189,7 +191,6 @@ exports.createScheduleInbound = async (req, res) => {
   }
 };
 
-// The uploadExcel function does not need changes. It is included for completeness.
 exports.uploadExcel = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded." });
