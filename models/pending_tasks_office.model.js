@@ -2,7 +2,6 @@
 const db = require("../database");
 
 // ----- INBOUND ROUTES -------
-
 const findInboundTasksOffice = async (
   filters = {},
   page = 1,
@@ -12,13 +11,13 @@ const findInboundTasksOffice = async (
     const offset = (page - 1) * pageSize;
     const replacements = {};
 
-    // --- 1. Base Where Clauses ---
-    // Base filter for LOTS
+    // --- 1. Build Base WHERE Clauses ---
+    // lotWhere: Filters applied to public.lot
+    // reportWhere: Filters applied to public.job_reports (for 0-lot jobs)
     let lotWhere = `l.status = 'Pending'`;
-    // Base filter for REPORTS (Office sees Pending or Accepted reports)
-    let reportWhere = `jr."reportStatus" IN ('pending', 'accepted')`;
+    let reportWhere = `jr."reportStatus" = 'pending'`;
 
-    // --- 2. Search Logic ---
+    // --- 2. SEARCH LOGIC ---
     if (filters.search) {
       const searchTerm = filters.search.trim();
       const searchPattern = `%${searchTerm}%`;
@@ -26,17 +25,17 @@ const findInboundTasksOffice = async (
 
       if (searchTerm.includes("-")) {
         const parts = searchTerm.split("-");
-        // Apply complex search to Lots
+        // Apply to Lots
         lotWhere += ` AND (
           (l."jobNo" ILIKE :searchJobPart AND l."lotNo"::text ILIKE :searchLotPart)
           OR l."jobNo" ILIKE :search
           OR l."exWarehouseLot" ILIKE :search
         )`;
+        // Apply to Reports (Matches JobNo only)
+        reportWhere += ` AND (jr."jobNo" ILIKE :search)`;
+        
         replacements.searchJobPart = `%${parts[0]}%`;
         replacements.searchLotPart = `%${parts[1]}%`;
-        
-        // Reports usually search by JobNo
-        reportWhere += ` AND jr."jobNo" ILIKE :search`;
       } else {
         lotWhere += ` AND (
           l."jobNo" ILIKE :search
@@ -51,39 +50,47 @@ const findInboundTasksOffice = async (
       }
     }
 
-    // --- 3. Date Range Filter ---
+    // --- 3. DATE RANGE FILTER ---
     if (filters.startDate && filters.endDate) {
-      // Filter Lots by Inbound Date
+      // Lot date
       lotWhere += ` AND (l."inbounddate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`;
-      // Filter Reports by Schedule Inbound Date (since reports don't have their own date column usually)
+      // Schedule date (for reports)
       reportWhere += ` AND (s."inboundDate" AT TIME ZONE 'Asia/Singapore')::date BETWEEN :startDate AND :endDate`;
-      
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
     }
 
-    // --- 4. Scheduled By Filter ---
-    if (filters.scheduledBy) {
-      lotWhere += ` AND LOWER(u.username) = LOWER(:scheduledBy)`;
-      reportWhere += ` AND LOWER(u.username) = LOWER(:scheduledBy)`;
-      replacements.scheduledBy = filters.scheduledBy;
-    }
-
-    // --- 5. Lot Specific Filters ---
-    // If these filters exist, we are specifically looking for existing lots.
-    // We will use this flag to decide if we should include empty report-only jobs.
-    const hasLotSpecificFilters = 
-      filters.lotNo || filters.commodity || filters.brand || 
-      filters.shape || filters.quantity;
-
+    // --- 4. EXACT LOT NO FILTER ---
     if (filters.lotNo) {
       const [jobNo, lotNo] = filters.lotNo.split(" - ");
       if (jobNo && lotNo) {
         lotWhere += ` AND l."jobNo" = :exactJobNo AND l."lotNo"::text = :exactLotNo`;
+        // Reports generally don't have specific lot numbers if they are job-level
+        reportWhere += ` AND 1=0`; 
         replacements.exactJobNo = jobNo;
         replacements.exactLotNo = lotNo;
       }
     }
+
+    // --- 5. JOB NO FILTER ---
+    if (filters.jobNo) {
+      lotWhere += ` AND l."jobNo" ILIKE :jobNo`;
+      reportWhere += ` AND jr."jobNo" ILIKE :jobNo`;
+      replacements.jobNo = `%${filters.jobNo}%`;
+    }
+
+    // --- 6. EXTRA JOB NO FILTER (For Phone) ---
+    if (filters.extraJobNo) {
+      lotWhere += ` AND l."jobNo" ILIKE :extraJobNo`;
+      reportWhere += ` AND jr."jobNo" ILIKE :extraJobNo`;
+      replacements.extraJobNo = `%${filters.extraJobNo}%`;
+    }
+
+    // --- 7. CASE-INSENSITIVE COLUMN FILTERS ---
+    // These apply only to Lots. If looking for specific attributes, exclude 0-lot jobs.
+    const hasAttributeFilters = 
+      filters.commodity || filters.brand || filters.shape || filters.quantity;
+
     if (filters.commodity) {
       lotWhere += ` AND LOWER(l.commodity) = LOWER(:commodity)`;
       replacements.commodity = filters.commodity;
@@ -101,71 +108,54 @@ const findInboundTasksOffice = async (
       replacements.quantity = parseInt(filters.quantity, 10);
     }
 
-    // --- 6. Job No Filters (Apply to both) ---
-    if (filters.jobNo) {
-      lotWhere += ` AND l."jobNo" ILIKE :jobNo`;
-      reportWhere += ` AND jr."jobNo" ILIKE :jobNo`;
-      replacements.jobNo = `%${filters.jobNo}%`;
-    }
-    if (filters.extraJobNo) {
-      lotWhere += ` AND l."jobNo" ILIKE :extraJobNo`;
-      reportWhere += ` AND jr."jobNo" ILIKE :extraJobNo`;
-      replacements.extraJobNo = `%${filters.extraJobNo}%`;
+    if (hasAttributeFilters) {
+      reportWhere += ` AND 1=0`;
     }
 
-    // --- 7. Type Filter (Discrepancies) ---
+    // --- 8. SCHEDULED BY ---
+    if (filters.scheduledBy) {
+      lotWhere += ` AND LOWER(u.username) = LOWER(:scheduledBy)`;
+      reportWhere += ` AND LOWER(u.username) = LOWER(:scheduledBy)`;
+      replacements.scheduledBy = filters.scheduledBy;
+    }
+
+    // --- 9. TYPE FILTER (Job/Lot Discrepancy) ---
     if (filters.type) {
       if (filters.type === "Job Discrepancy") {
-        // Must exist in job_reports
-        lotWhere += ` AND EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" IN ('pending', 'accepted'))`;
-        // reportWhere naturally includes these
+        // Show lots belonging to discrepancy jobs
+        lotWhere += ` AND EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
+        // reportWhere stays valid (shows the job itself)
       } else if (filters.type === "Lot Discrepancy") {
-        lotWhere += ` AND l.report = true`;
-        // Exclude job-level reports if looking specifically for lot issues
-        reportWhere += ` AND 1=0`; 
+        lotWhere += ` AND l.report = true AND NOT EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
+        // Hide job-only reports
+        reportWhere += ` AND 1=0`;
+      } else if (filters.type === "Normal") {
+         lotWhere += ` AND l.report = false AND NOT EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
+         reportWhere += ` AND 1=0`;
       }
     }
 
-    // --- 8. Construct Combined Query ---
-    
-    let combinedSql = "";
+    // --- 10. QUERY EXECUTION ---
 
-    if (hasLotSpecificFilters) {
-       // If filtering by specific lot attributes, only search the Lot table
-       combinedSql = `
-        SELECT l."jobNo"
-        FROM public.lot l
-        LEFT JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
-        LEFT JOIN public.users u ON s."userId" = u."userid"
-        WHERE ${lotWhere}
-        GROUP BY l."jobNo"
-       `;
-    } else {
-       // UNION: Find pending jobs in Lot OR pending jobs in Reports (even if 0 lots)
-       combinedSql = `
-        SELECT "jobNo" FROM (
-            SELECT l."jobNo", MIN(l."inbounddate") as "sortDate"
-            FROM public.lot l
-            LEFT JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
-            LEFT JOIN public.users u ON s."userId" = u."userid"
-            WHERE ${lotWhere}
-            GROUP BY l."jobNo"
-
-            UNION
-
-            SELECT jr."jobNo", MIN(s."inboundDate") as "sortDate"
-            FROM public.job_reports jr
-            LEFT JOIN public.scheduleinbounds s ON s."jobNo" = jr."jobNo"
-            LEFT JOIN public.users u ON s."userId" = u."userid"
-            WHERE ${reportWhere}
-            GROUP BY jr."jobNo"
-        ) as combined
-       `;
-    }
-
-    // --- 9. Execute Counts & Pagination ---
-
-    const countQuery = `SELECT COUNT(DISTINCT "jobNo")::int as count FROM (${combinedSql}) as c`;
+    // A. Count Total Jobs (Union of Lots + Reports)
+    const countQuery = `
+      SELECT COUNT(DISTINCT "jobNo")::int as count 
+      FROM (
+          SELECT l."jobNo"
+          FROM public.lot l
+          LEFT JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
+          LEFT JOIN public.users u ON s."userId" = u."userid"
+          WHERE ${lotWhere}
+          
+          UNION
+          
+          SELECT jr."jobNo"
+          FROM public.job_reports jr
+          LEFT JOIN public.scheduleinbounds s ON s."jobNo" = jr."jobNo"
+          LEFT JOIN public.users u ON s."userId" = u."userid"
+          WHERE ${reportWhere}
+      ) as combined
+    `;
     const countResult = await db.sequelize.query(countQuery, {
       replacements,
       type: db.sequelize.QueryTypes.SELECT,
@@ -177,7 +167,7 @@ const findInboundTasksOffice = async (
       return { totalCount: 0, data: {} };
     }
 
-    // Fetch Page Job Nos
+    // B. Get Job Numbers for current Page
     const jobNoQuery = `
       SELECT "jobNo" FROM (
           SELECT l."jobNo", MIN(l."inbounddate") as "minDate"
@@ -193,7 +183,7 @@ const findInboundTasksOffice = async (
           FROM public.job_reports jr
           LEFT JOIN public.scheduleinbounds s ON s."jobNo" = jr."jobNo"
           LEFT JOIN public.users u ON s."userId" = u."userid"
-          WHERE ${reportWhere} ${hasLotSpecificFilters ? 'AND 1=0' : ''}
+          WHERE ${reportWhere}
           GROUP BY jr."jobNo"
       ) as final_jobs
       GROUP BY "jobNo"
@@ -207,13 +197,11 @@ const findInboundTasksOffice = async (
     });
     const jobNos = jobNosResult.map((j) => j.jobNo);
 
-    if (jobNos.length === 0) {
-      return { totalCount: 0, data: {} };
-    }
+    if (jobNos.length === 0) return { totalCount, data: {} };
 
-    // --- 10. Fetch Details ---
+    // --- 11. FETCH DETAILS ---
 
-    // A. Schedules (Base Info for all jobs, critical for 0-lot jobs)
+    // A. Base Schedule Info (Crucial for 0-lot jobs)
     const schedulesQuery = `
       SELECT 
         s."jobNo", 
@@ -224,11 +212,10 @@ const findInboundTasksOffice = async (
       WHERE s."jobNo" IN (:jobNos)
     `;
 
-    // B. Lots Info
+    // B. Lots
     const tasksQuery = `
       SELECT DISTINCT ON (l."lotId")
         l."jobNo",
-        TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
         l."lotId",
         l."lotNo"::text AS "lotNo",
         l."exWarehouseLot" AS "exWLot",
@@ -236,9 +223,10 @@ const findInboundTasksOffice = async (
         l.brand,
         l.shape,
         l."expectedBundleCount" AS quantity,
-        COALESCE(u.username, 'N/A') AS "scheduledBy",
         l.report AS "hasWarning",
-        l."reportDuplicate" AS "showCopyIcon"
+        l."reportDuplicate" AS "showCopyIcon",
+        TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
+        COALESCE(u.username, 'N/A') AS "scheduledBy"
       FROM public.lot l
       LEFT JOIN public.scheduleinbounds s ON s."jobNo" = l."jobNo"
       LEFT JOIN public.users u ON s."userId" = u."userid"
@@ -246,7 +234,7 @@ const findInboundTasksOffice = async (
       ORDER BY l."lotId", l."inbounddate" ASC, l."lotNo"::integer ASC
     `;
 
-    // C. Reports Info
+    // C. Reports
     const reportsQuery = `
       SELECT
         jr."jobNo",
@@ -275,25 +263,25 @@ const findInboundTasksOffice = async (
       }),
     ]);
 
-    // --- 11. Map Data ---
+    // --- 12. CONSTRUCT RESPONSE MAP ---
     const tasksMap = {};
 
-    // 1. Initialize with Schedule Data (Handles 0-lot jobs)
+    // Initialize with Schedules (ensures 0-lot jobs have a placeholder)
     for (const sch of schedulesResult) {
-      tasksMap[sch.jobNo] = {
-        jobNo: sch.jobNo,
-        date: sch.date, // Default date
-        scheduledBy: sch.scheduledBy, // Default user
-        lots: [],
-        reportInfo: null,
-      };
+       tasksMap[sch.jobNo] = {
+         jobNo: sch.jobNo,
+         date: sch.date, 
+         scheduledBy: sch.scheduledBy, 
+         lots: [],
+         reportInfo: null,
+       };
     }
-    // Fallback ensure all jobNos are present
+    // Safety fallback
     for (const j of jobNos) {
       if (!tasksMap[j]) tasksMap[j] = { jobNo: j, lots: [], reportInfo: null };
     }
 
-    // 2. Map Lots
+    // Add Lots
     for (const task of tasksResult) {
       if (tasksMap[task.jobNo]) {
         tasksMap[task.jobNo].lots.push({
@@ -301,13 +289,13 @@ const findInboundTasksOffice = async (
           canEdit: false,
           isEditing: false,
         });
-        // Prefer date/user from Lot if available (more accurate to actual operation)
-        if (task.date) tasksMap[task.jobNo].date = task.date;
-        if (task.scheduledBy) tasksMap[task.jobNo].scheduledBy = task.scheduledBy;
+        // Update date/user from lot if available (might differ slightly)
+        tasksMap[task.jobNo].date = task.date; 
+        tasksMap[task.jobNo].scheduledBy = task.scheduledBy;
       }
     }
 
-    // 3. Map Reports
+    // Add Reports
     for (const report of reportsResult) {
       if (tasksMap[report.jobNo]) {
         tasksMap[report.jobNo].reportInfo = {
@@ -327,6 +315,7 @@ const findInboundTasksOffice = async (
   }
 };
 
+// ----- OUTBOUND ROUTES -------
 const findOutboundTasksOffice = async (
   filters = {},
   page = 1,
@@ -383,7 +372,7 @@ const findOutboundTasksOffice = async (
       }
     }
 
-    // --- 4. NEW: EXTRA JOB NO FILTER FOR PHONE ---
+    // --- 4. EXTRA JOB NO FILTER (For Phone) ---
     if (filters.extraJobNo) {
       whereClauses += ` AND so."outboundJobNo" ILIKE :extraJobNo`;
       replacements.extraJobNo = `%${filters.extraJobNo}%`;
@@ -865,7 +854,7 @@ const addLackingLotToJob = async ({ jobNo, lotDetails }) => {
       lotDetails;
     const insertLotQuery = `
       INSERT INTO public.lot (
-        "jobNo", "lotNo", "scheduleInboundId", "inboundDate", status, report, 
+        "jobNo", "lotNo", "scheduleInboundId", "inbounddate", status, report, 
         "exWarehouseLot", "expectedBundleCount", brand, commodity, shape,
         "createdAt", "updatedAt"
       ) VALUES (
