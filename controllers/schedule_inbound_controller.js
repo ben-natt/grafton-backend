@@ -1,17 +1,20 @@
 const XLSX = require("xlsx");
 const fs = require("fs");
-
-// Import the db object to get the sequelize instance for queries
+const path = require("path");
 const db = require("../database");
 const { sequelize, DataTypes } = db;
 
-// We only need to initialize the models that this controller is directly responsible for: ScheduleInbound and Lot.
 const { ScheduleInbound, Lot } = require("../models/schedule_inbound.model.js")(
   sequelize,
   DataTypes
 );
 
-// This function will find or create a record using raw SQL, mimicking your project's style.
+const LOGS_DIR = path.join(__dirname, "../logs/Scheduled Inbound");
+
+if (!fs.existsSync(LOGS_DIR)) {
+  fs.mkdirSync(LOGS_DIR, { recursive: true });
+}
+
 const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
   if (!name || typeof name !== "string" || name.trim() === "") {
     return;
@@ -36,7 +39,11 @@ const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
 };
 
 exports.createScheduleInbound = async (req, res) => {
-  const userId = req.user.userId;
+  // Safe access to user properties
+  const user = req.user || {};
+  const userId = user.userId;
+  const username = user.username || "Unknown User";
+  const roleId = user.roleId || null;
   const { inboundDate, jobDataMap } = req.body;
 
   if (!jobDataMap || Object.keys(jobDataMap).length === 0) {
@@ -55,7 +62,6 @@ exports.createScheduleInbound = async (req, res) => {
 
   try {
     for (const jobNo in jobDataMap) {
-      // --- VALIDATION: Check for Duplicate Job No ---
       const existingJob = await ScheduleInbound.findOne({
         where: { jobNo: jobNo },
         transaction: transaction,
@@ -88,7 +94,6 @@ exports.createScheduleInbound = async (req, res) => {
         }
       }
 
-      // This logic now uses raw SQL queries, avoiding the model import errors.
       for (const lot of lots) {
         await findOrCreateRaw(
           "commodities",
@@ -118,7 +123,6 @@ exports.createScheduleInbound = async (req, res) => {
         );
       }
 
-      // Create ScheduleInbound record
       const [scheduleInbound] = await ScheduleInbound.upsert(
         {
           jobNo: jobNo,
@@ -148,24 +152,54 @@ exports.createScheduleInbound = async (req, res) => {
     }
 
     await transaction.commit();
-    // --- LOGGING START ---
-    const timestamp = new Date().toLocaleString(); // Current server time
 
-    for (const jobNo in jobDataMap) {
-      const currentLots = jobDataMap[jobNo].lots || [];
-      const lotCount = currentLots.length;
+    // --- LOGGING SECTION (Post-Commit) ---
+    // We wrap this in its own try-catch so logging errors don't crash the response
+    try {
+      const timestamp = new Date().toLocaleString();
+      const isoTimestamp = new Date().toISOString();
 
-      // Extract all exWarehouseLot numbers and join them into a string
-      const exWarehouseLotList = currentLots
-        .map((lot) => lot.exWarehouseLot)
-        .filter((val) => val) // Filter out null/undefined if any
-        .join(", ");
+      // Ensure directory exists again just in case
+      if (!fs.existsSync(LOGS_DIR)) {
+        fs.mkdirSync(LOGS_DIR, { recursive: true });
+      }
 
-      console.log(
-        `[SCHEDULE SUCCESS] User: ${userId} | Job No: ${jobNo} | Total Lots: ${lotCount} | Inbound Date: ${inboundDate} | Ex-Whse Lots: [${exWarehouseLotList}] | Timestamp: ${timestamp}`
-      );
+      for (const jobNo in jobDataMap) {
+        const currentLots = jobDataMap[jobNo].lots || [];
+        const lotCount = currentLots.length;
+
+        const logData = {
+          jobNo: jobNo,
+          updatedBy: {
+            userId: userId,
+            username: username,
+            roleId: roleId,
+          },
+          updateTime: timestamp,
+          isoTimestamp: isoTimestamp,
+          totalLots: lotCount,
+          inboundDate: inboundDate,
+          lotsDetails: currentLots,
+        };
+
+        const logFilePath = path.join(LOGS_DIR, `${jobNo}.json`);
+
+        // Use sync write here to ensure it finishes or throws before we leave,
+        // or keep async but handle error callback. Async is better for performance.
+        fs.writeFile(logFilePath, JSON.stringify(logData, null, 2), (err) => {
+          if (err) {
+            console.error(`[LOG ERROR] Failed to write log for ${jobNo}:`, err);
+          } else {
+            console.log(`[LOG CREATED] ${logFilePath}`);
+          }
+        });
+      }
+    } catch (logError) {
+      console.error("[LOGGING SYSTEM FAILURE]", logError);
+      // We do NOT throw here, so the user still gets a success response for the schedule
     }
     // --- LOGGING END ---
+
     res.status(200).json({
       message: "Inbound schedule and lots created/updated successfully!",
     });
@@ -173,6 +207,15 @@ exports.createScheduleInbound = async (req, res) => {
   } catch (dbError) {
     await transaction.rollback();
     console.error("Database error during scheduling:", dbError);
+
+    // Only rollback if transaction started AND not yet committed
+    if (transaction && !isCommitted) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error("Rollback failed:", rollbackError);
+      }
+    }
 
     // Specific handling for Duplicate Schedule
     if (dbError.code === "DUPLICATE_SCHEDULE") {
@@ -182,11 +225,84 @@ exports.createScheduleInbound = async (req, res) => {
       });
     }
 
-    res.status(500).json({
-      message: "An error occurred during the scheduling process.",
-      error: dbError.message,
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        message: "An error occurred during the scheduling process.",
+        error: dbError.message,
+      });
+    }
   }
+};
+
+// --- MONITORING API ENDPOINTS ---
+exports.getInboundLogs = async (req, res) => {
+  try {
+    // Check if directory exists before reading
+    if (!fs.existsSync(LOGS_DIR)) {
+      return res.status(200).json({ success: true, data: [] }); // Return empty if no logs yet
+    }
+
+    fs.readdir(LOGS_DIR, (err, files) => {
+      if (err) {
+        console.error("Error reading logs directory:", err);
+        return res
+          .status(500)
+          .json({ message: "Unable to scan logs directory" });
+      }
+
+      const logFiles = files.filter((file) => file.endsWith(".json"));
+
+      const fileStats = logFiles
+        .map((file) => {
+          try {
+            const stats = fs.statSync(path.join(LOGS_DIR, file));
+            return {
+              filename: file,
+              jobNo: file.replace(".json", ""),
+              createdAt: stats.birthtime,
+            };
+          } catch (statErr) {
+            return null;
+          }
+        })
+        .filter((item) => item !== null); // Filter out any failed reads
+
+      // Sort by newest first
+      fileStats.sort((a, b) => b.createdAt - a.createdAt);
+
+      res.status(200).json({
+        success: true,
+        data: fileStats,
+      });
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Server error fetching logs", error: error.message });
+  }
+};
+
+exports.getInboundLogDetail = async (req, res) => {
+  const { filename } = req.params;
+  const safeFilename = path.basename(filename); // Security: prevent directory traversal
+  const filePath = path.join(LOGS_DIR, safeFilename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ message: "Log file not found" });
+  }
+
+  fs.readFile(filePath, "utf8", (err, data) => {
+    if (err) {
+      console.error("Error reading log file:", err);
+      return res.status(500).json({ message: "Error reading log file" });
+    }
+    try {
+      const jsonData = JSON.parse(data);
+      res.status(200).json({ success: true, data: jsonData });
+    } catch (parseError) {
+      res.status(500).json({ message: "Error parsing log file content" });
+    }
+  });
 };
 
 // The uploadExcel function does not need changes. It is included for completeness.
