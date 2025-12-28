@@ -67,14 +67,28 @@ exports.createScheduleInbound = async (req, res) => {
         transaction: transaction,
       });
 
-      if (existingJob) {
-        const error = new Error(`Job No ${jobNo} is already scheduled.`);
-        error.code = "DUPLICATE_SCHEDULE";
-        throw error;
-      }
-      // ----------------------------------------------
+        if (existingLot) {
+          // Log EXACTLY what was found so you can debug
+          console.error("---------------------------------------------------------------");
+          console.error(`[DUPLICATE FOUND] System blocked Job: ${jobNo}, Lot: ${lot.lotNo}`);
+          console.error(`   -> FOUND DB ID:      ${existingLot.id || existingLot.lotId || 'Unknown ID'}`);
+          console.error(`   -> FOUND Job No:     ${existingLot.jobNo}`);
+          console.error(`   -> FOUND Lot No:     ${existingLot.lotNo}`);
+          console.error(`   -> FOUND Status:     ${existingLot.status}`); // Check if this is 'Cancelled' or 'Pending'
+          console.error(`   -> FOUND Created At: ${existingLot.createdAt}`);
+          console.error("---------------------------------------------------------------");
 
-      const { lots } = jobDataMap[jobNo];
+          const error = new Error(
+            `Lot No ${lot.lotNo} is already scheduled for Job No ${jobNo}. (Ref ID: ${existingLot.id || 'N/A'})`
+          );
+          error.code = "DUPLICATE_SCHEDULE";
+          throw error;
+        } else {
+            console.log(`[VALIDATION PASS] No existing record for Job: "${jobNo}", Lot: "${lot.lotNo}". Proceeding.`);
+        }
+      }
+      // ------------------------------------------
+
       for (const lot of lots) {
         if (lot.shape && typeof lot.shape === "string") {
           const shapeLower = lot.shape.toLowerCase();
@@ -95,32 +109,12 @@ exports.createScheduleInbound = async (req, res) => {
       }
 
       for (const lot of lots) {
-        await findOrCreateRaw(
-          "commodities",
-          "commodityName",
-          lot.commodity,
-          transaction
-        );
+        await findOrCreateRaw("commodities", "commodityName", lot.commodity, transaction);
         await findOrCreateRaw("brands", "brandName", lot.brand, transaction);
         await findOrCreateRaw("shapes", "shapeName", lot.shape, transaction);
-        await findOrCreateRaw(
-          "exwarehouselocations",
-          "exWarehouseLocationName",
-          lot.exWarehouseLocation,
-          transaction
-        );
-        await findOrCreateRaw(
-          "exlmewarehouses",
-          "exLmeWarehouseName",
-          lot.exLmeWarehouse,
-          transaction
-        );
-        await findOrCreateRaw(
-          "inboundwarehouses",
-          "inboundWarehouseName",
-          lot.inboundWarehouse,
-          transaction
-        );
+        await findOrCreateRaw("exwarehouselocations", "exWarehouseLocationName", lot.exWarehouseLocation, transaction);
+        await findOrCreateRaw("exlmewarehouses", "exLmeWarehouseName", lot.exLmeWarehouse, transaction);
+        await findOrCreateRaw("inboundwarehouses", "inboundWarehouseName", lot.inboundWarehouse, transaction);
       }
 
       const [scheduleInbound] = await ScheduleInbound.upsert(

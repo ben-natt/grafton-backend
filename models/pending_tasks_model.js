@@ -1,3 +1,4 @@
+// [File: pending_tasks_model.js]
 const db = require("../database");
 
 const formatDate = (date) => {
@@ -9,19 +10,82 @@ const formatDate = (date) => {
   return `${day} ${month} ${year}`;
 };
 
+const finalizeInboundJob = async (jobNo, userId, filters = {}) => {
+  const transaction = await db.sequelize.transaction();
+  try {
+    console.log(`[Model] Finalizing Job: ${jobNo} for User: ${userId} with filters:`, filters);
+
+    // 1. Build Filter Clauses
+    // We strictly match the logic in getPendingInboundTasks to ensure we only
+    // confirm what the user currently sees.
+    const replacements = { jobNo };
+    const whereClauses = [
+      `"jobNo" = :jobNo`,
+      `status IN ('Pending', 'Received')`,
+      `report = false`, // Exclude items with active reports
+      `COALESCE("isConfirmed", false) = false`, // Exclude already confirmed items
+      `(COALESCE("reportDuplicate", false) = false OR "isDuplicated" = true)` // Exclude unresolved duplicates
+    ];
+
+    // 2. Apply Optional Filters (if they exist)
+    
+    // Filter by Ex-Warehouse Lot
+    if (filters.exWarehouseLot) {
+      whereClauses.push(`"exWarehouseLot" ILIKE :exWarehouseLot`);
+      replacements.exWarehouseLot = `%${filters.exWarehouseLot}%`;
+    }
+
+    // Filter by Date Range (using 'inbounddate' column)
+    if (filters.startDate && filters.endDate) {
+      whereClauses.push(`"inbounddate"::date >= :startDate::date`);
+      whereClauses.push(`"inbounddate"::date <= :endDate::date`);
+      replacements.startDate = filters.startDate;
+      replacements.endDate = filters.endDate;
+    }
+
+    // 3. Combine Clauses
+    const whereSQL = whereClauses.join(" AND ");
+
+    // 4. Execute Update
+    // Sets isConfirmed = true only for the matching rows
+    await db.sequelize.query(
+      `UPDATE public.lot 
+       SET "isConfirmed" = true, "updatedAt" = NOW() 
+       WHERE ${whereSQL}`,
+      {
+        replacements,
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
+    await transaction.commit();
+    return { success: true };
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error finalizing inbound job:", error);
+    throw error;
+  }
+};
+
 const getPendingInboundTasks = async (
   page = 1,
   pageSize = 10,
   filters = {}
 ) => {
   try {
+    console.log("\n--- [DEBUG] getPendingInboundTasks START ---");
+    console.log(`Page: ${page}, PageSize: ${pageSize}`);
+
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
+    // UPDATED: Filter for status IN ('Pending', 'Received')
     const baseWhere = [
-      `l.status = 'Pending'`,
+      `l.status IN ('Pending', 'Received')`, 
       `l.report = false`,
-      `(l."reportDuplicate" = false OR l."isDuplicated" = true)`,
+      `(COALESCE(l."reportDuplicate", false) = false OR l."isDuplicated" = true)`,
+      `COALESCE(l."isConfirmed", false) = false`
     ];
     const replacements = {};
 
@@ -31,6 +95,7 @@ const getPendingInboundTasks = async (
     }
 
     const baseWhereString = baseWhere.join(" AND ");
+
     const dateOverlapWhere =
       startDate && endDate
         ? `WHERE jr.max_date >= :startDate::date AND jr.min_date <= :endDate::date`
@@ -41,6 +106,7 @@ const getPendingInboundTasks = async (
       replacements.endDate = endDate;
     }
 
+    // 1. Count Query
     const countQuery = `
       WITH jr AS (
         SELECT
@@ -63,10 +129,13 @@ const getPendingInboundTasks = async (
     });
 
     const totalCount = countResult?.count || 0;
+    console.log("[DEBUG] Total Pending/Received Jobs Found:", totalCount);
+
     const totalPages = Math.ceil(totalCount / pageSize);
     if (totalCount === 0)
       return { data: [], page, pageSize, totalPages, totalCount };
 
+    // 2. Job Number Pagination Query
     const jobNoQuery = `
       WITH jr AS (
         SELECT
@@ -90,6 +159,7 @@ const getPendingInboundTasks = async (
     });
 
     const paginatedJobNos = jobNoResults.map((j) => j.jobNo);
+    
     if (paginatedJobNos.length === 0)
       return { data: [], page, pageSize, totalPages, totalCount };
 
@@ -97,19 +167,22 @@ const getPendingInboundTasks = async (
       ? `AND l."exWarehouseLot" ILIKE :exWarehouseLot`
       : "";
 
+    // 3. Details Query
     const detailsQuery = `
       SELECT
         l."lotId", l."lotNo", l."jobNo", l.commodity, l."expectedBundleCount",
         l.brand, l."exWarehouseLot", l."exWarehouseWarrant", l."exLmeWarehouse", l.shape, l.report,
-        l."isDuplicated", l."inbounddate",
+        l."isDuplicated", l."inbounddate", l."isConfirm", 
+        s."scheduleInboundId",
         u.username
       FROM public.lot l
-      JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
-      JOIN public.users u ON s."userId" = u.userid
+      LEFT JOIN public.scheduleinbounds s ON l."scheduleInboundId" = s."scheduleInboundId"
+      LEFT JOIN public.users u ON s."userId" = u.userid
       WHERE l."jobNo" IN (:paginatedJobNos)
-        AND l.status = 'Pending'
+        AND l.status IN ('Pending', 'Received')
         AND l.report = false
-        AND (l."reportDuplicate" = false OR l."isDuplicated" = true)
+        AND COALESCE(l."isConfirmed", false) = false
+        AND (COALESCE(l."reportDuplicate", false) = false OR l."isDuplicated" = true)
         ${lotFilterClause}
       ORDER BY l."inbounddate" ASC, l."jobNo" ASC, l."exWarehouseLot" ASC;
     `;
@@ -123,6 +196,7 @@ const getPendingInboundTasks = async (
       type: db.sequelize.QueryTypes.SELECT,
     });
 
+    // 4. Grouping Reducer
     const groupedByJobNo = detailsForPage.reduce((acc, lot) => {
       const jobNo = lot.jobNo;
       if (!acc[jobNo]) {
@@ -133,45 +207,58 @@ const getPendingInboundTasks = async (
           inboundDates: [],
         };
       }
-      if (lot.inbounddate)
+      
+      if (lot.inbounddate) {
         acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
-      acc[jobNo].lotDetails.push({
-        lotId: lot.lotId,
-        lotNo: lot.lotNo,
-        jobNo: lot.jobNo,
-        commodity: lot.commodity,
-        expectedBundleCount: lot.expectedBundleCount,
-        brand: lot.brand,
-        exWarehouseLot: lot.exWarehouseLot,
-        exWarehouseWarrant: lot.exWarehouseWarrant,
-        exLmeWarehouse: lot.exLmeWarehouse,
-        shape: lot.shape,
-        report: lot.report,
-        isDuplicated: lot.isDuplicated,
-      });
+      }
+
+      // UPDATED: Only push UNCONFIRMED lots.
+      // This ensures that "Received" lots (which have isConfirm=true) result in an empty list,
+      // enabling the "Confirm Finished" UI on the frontend.
+      if (lot.isConfirm !== true) {
+        acc[jobNo].lotDetails.push({
+          lotId: lot.lotId,
+          lotNo: lot.lotNo,
+          jobNo: lot.jobNo,
+          commodity: lot.commodity,
+          expectedBundleCount: lot.expectedBundleCount,
+          brand: lot.brand,
+          exWarehouseLot: lot.exWarehouseLot,
+          exWarehouseWarrant: lot.exWarehouseWarrant,
+          exLmeWarehouse: lot.exLmeWarehouse,
+          shape: lot.shape,
+          report: lot.report,
+          isDuplicated: lot.isDuplicated,
+          isConfirm: lot.isConfirm,
+        });
+      }
+      
       return acc;
     }, {});
 
     Object.values(groupedByJobNo).forEach((group) => {
       if (group.inboundDates.length > 0) {
-        const minDate = new Date(
-          Math.min(...group.inboundDates.map((d) => d.getTime()))
-        );
-        const maxDate = new Date(
-          Math.max(...group.inboundDates.map((d) => d.getTime()))
-        );
-        const minDateString = minDate.toDateString();
-        const maxDateString = maxDate.toDateString();
+        const minDate = new Date(Math.min(...group.inboundDates.map((d) => d.getTime())));
+        const maxDate = new Date(Math.max(...group.inboundDates.map((d) => d.getTime())));
+        
+        if (!isNaN(minDate.getTime())) {
+             const minDateString = minDate.toDateString();
+             const maxDateString = maxDate.toDateString();
 
-        group.userInfo.inboundDate =
-          minDateString === maxDateString
-            ? formatDate(minDate)
-            : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
+             group.userInfo.inboundDate =
+              minDateString === maxDateString
+                ? formatDate(minDate)
+                : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
+        } else {
+             group.userInfo.inboundDate = "Invalid Date";
+        }
       } else {
         group.userInfo.inboundDate = "N/A";
       }
       delete group.inboundDates;
     });
+
+    console.log("[DEBUG] Final Grouped Jobs:", Object.keys(groupedByJobNo).length);
 
     return {
       data: Object.values(groupedByJobNo),
@@ -451,9 +538,12 @@ const reportJobDiscrepancy = async (
   const managedTransaction = !options.transaction;
   const transaction = options.transaction || (await db.sequelize.transaction());
   try {
+    // UPDATED: Allow reporting on Received items too
     const lotsToUpdate = await db.sequelize.query(
       `SELECT "lotId" FROM public.lot 
-       WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
+       WHERE "jobNo" = :jobNo 
+         AND status IN ('Pending', 'Received') 
+         AND report = false`,
       {
         replacements: { jobNo },
         type: db.sequelize.QueryTypes.SELECT,
@@ -478,7 +568,9 @@ const reportJobDiscrepancy = async (
 
     const [updateResult, updateCount] = await db.sequelize.query(
       `UPDATE public.lot SET report = true 
-       WHERE "jobNo" = :jobNo AND status = 'Pending' AND report = false`,
+       WHERE "jobNo" = :jobNo 
+         AND status IN ('Pending', 'Received') 
+         AND report = false`,
       {
         replacements: { jobNo },
         type: db.sequelize.QueryTypes.UPDATE,
@@ -579,11 +671,12 @@ const pendingOutboundTasksUser = async (scheduleOutboundId) => {
 const getSupervisorPendingStatus = async (userId) => {
   try {
     // 1. Get Creation Timestamp (UTC) of latest schedules
+    // UPDATED: Check for Pending OR Received
     const inboundQuery = `
       SELECT MAX(s."createdAt") as "ts" 
       FROM public.scheduleinbounds s
       JOIN public.lot l ON s."scheduleInboundId" = l."scheduleInboundId"
-      WHERE l.status = 'Pending'
+      WHERE l.status IN ('Pending', 'Received')
     `;
 
     const outboundQuery = `
@@ -676,6 +769,7 @@ const notifySupervisorOfNewTask = async (lotId) => {
 };
 module.exports = {
   getPendingInboundTasks,
+  finalizeInboundJob,
   getPendingOutboundTasks,
   updateScheduleOutboundDetails,
   reportJobDiscrepancy,
