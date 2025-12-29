@@ -4,17 +4,20 @@ const path = require("path");
 const db = require("../database");
 const { sequelize, DataTypes } = db;
 
+// Initialize Models
 const { ScheduleInbound, Lot } = require("../models/schedule_inbound.model.js")(
   sequelize,
   DataTypes
 );
 
+// --- SETUP LOGGING DIRECTORY (From Current) ---
 const LOGS_DIR = path.join(__dirname, "../logs/Scheduled Inbound");
 
 if (!fs.existsSync(LOGS_DIR)) {
   fs.mkdirSync(LOGS_DIR, { recursive: true });
 }
 
+// --- HELPER FUNCTION ---
 const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
   if (!name || typeof name !== "string" || name.trim() === "") {
     return;
@@ -38,12 +41,14 @@ const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
   }
 };
 
+// --- MAIN CONTROLLER ---
 exports.createScheduleInbound = async (req, res) => {
-  // Safe access to user properties
+  // Safe access to user properties (From Current - more robust)
   const user = req.user || {};
   const userId = user.userId;
   const username = user.username || "Unknown User";
   const roleId = user.roleId || null;
+
   const { inboundDate, jobDataMap } = req.body;
 
   if (!jobDataMap || Object.keys(jobDataMap).length === 0) {
@@ -62,33 +67,57 @@ exports.createScheduleInbound = async (req, res) => {
 
   try {
     for (const jobNo in jobDataMap) {
-      const existingJob = await ScheduleInbound.findOne({
-        where: { jobNo: jobNo },
-        transaction: transaction,
-      });
+      const { lots } = jobDataMap[jobNo];
+
+      // --- VALIDATION (From Incoming - Granular Lot Check) ---
+      for (const lot of lots) {
+        // Log what we are looking for
+        console.log(
+          `[VALIDATION CHECK] Searching DB for Job: "${jobNo}" AND Lot: "${lot.lotNo}"...`
+        );
+
+        const existingLot = await Lot.findOne({
+          where: {
+            jobNo: jobNo,
+            lotNo: lot.lotNo,
+          },
+          transaction: transaction,
+        });
 
         if (existingLot) {
-          // Log EXACTLY what was found so you can debug
-          console.error("---------------------------------------------------------------");
-          console.error(`[DUPLICATE FOUND] System blocked Job: ${jobNo}, Lot: ${lot.lotNo}`);
-          console.error(`   -> FOUND DB ID:      ${existingLot.id || existingLot.lotId || 'Unknown ID'}`);
+          // Log EXACTLY what was found
+          console.error(
+            "---------------------------------------------------------------"
+          );
+          console.error(
+            `[DUPLICATE FOUND] System blocked Job: ${jobNo}, Lot: ${lot.lotNo}`
+          );
+          console.error(
+            `   -> FOUND DB ID:      ${
+              existingLot.id || existingLot.lotId || "Unknown ID"
+            }`
+          );
           console.error(`   -> FOUND Job No:     ${existingLot.jobNo}`);
           console.error(`   -> FOUND Lot No:     ${existingLot.lotNo}`);
-          console.error(`   -> FOUND Status:     ${existingLot.status}`); // Check if this is 'Cancelled' or 'Pending'
+          console.error(`   -> FOUND Status:     ${existingLot.status}`);
           console.error(`   -> FOUND Created At: ${existingLot.createdAt}`);
-          console.error("---------------------------------------------------------------");
+          console.error(
+            "---------------------------------------------------------------"
+          );
 
           const error = new Error(
-            `Lot No ${lot.lotNo} is already scheduled for Job No ${jobNo}. (Ref ID: ${existingLot.id || 'N/A'})`
+            `Lot No ${lot.lotNo} is already scheduled for Job No ${jobNo}.`
           );
           error.code = "DUPLICATE_SCHEDULE";
           throw error;
         } else {
-            console.log(`[VALIDATION PASS] No existing record for Job: "${jobNo}", Lot: "${lot.lotNo}". Proceeding.`);
+          console.log(
+            `[VALIDATION PASS] No existing record for Job: "${jobNo}", Lot: "${lot.lotNo}". Proceeding.`
+          );
         }
       }
-      // ------------------------------------------
 
+      // --- DATA NORMALIZATION (From Incoming) ---
       for (const lot of lots) {
         if (lot.shape && typeof lot.shape === "string") {
           const shapeLower = lot.shape.toLowerCase();
@@ -108,15 +137,37 @@ exports.createScheduleInbound = async (req, res) => {
         }
       }
 
+      // --- HELPER TABLE INSERTIONS ---
       for (const lot of lots) {
-        await findOrCreateRaw("commodities", "commodityName", lot.commodity, transaction);
+        await findOrCreateRaw(
+          "commodities",
+          "commodityName",
+          lot.commodity,
+          transaction
+        );
         await findOrCreateRaw("brands", "brandName", lot.brand, transaction);
         await findOrCreateRaw("shapes", "shapeName", lot.shape, transaction);
-        await findOrCreateRaw("exwarehouselocations", "exWarehouseLocationName", lot.exWarehouseLocation, transaction);
-        await findOrCreateRaw("exlmewarehouses", "exLmeWarehouseName", lot.exLmeWarehouse, transaction);
-        await findOrCreateRaw("inboundwarehouses", "inboundWarehouseName", lot.inboundWarehouse, transaction);
+        await findOrCreateRaw(
+          "exwarehouselocations",
+          "exWarehouseLocationName",
+          lot.exWarehouseLocation,
+          transaction
+        );
+        await findOrCreateRaw(
+          "exlmewarehouses",
+          "exLmeWarehouseName",
+          lot.exLmeWarehouse,
+          transaction
+        );
+        await findOrCreateRaw(
+          "inboundwarehouses",
+          "inboundWarehouseName",
+          lot.inboundWarehouse,
+          transaction
+        );
       }
 
+      // --- UPSERT PARENT (ScheduleInbound) ---
       const [scheduleInbound] = await ScheduleInbound.upsert(
         {
           jobNo: jobNo,
@@ -131,6 +182,7 @@ exports.createScheduleInbound = async (req, res) => {
 
       const scheduleInboundId = scheduleInbound.scheduleInboundId;
 
+      // --- UPSERT CHILDREN (Lots) ---
       for (const lot of lots) {
         await Lot.upsert(
           {
@@ -147,7 +199,7 @@ exports.createScheduleInbound = async (req, res) => {
 
     await transaction.commit();
 
-    // --- LOGGING SECTION (Post-Commit) ---
+    // --- LOGGING SYSTEM (From Current - Writes JSON Files) ---
     // We wrap this in its own try-catch so logging errors don't crash the response
     try {
       const timestamp = new Date().toLocaleString();
@@ -162,6 +214,7 @@ exports.createScheduleInbound = async (req, res) => {
         const currentLots = jobDataMap[jobNo].lots || [];
         const lotCount = currentLots.length;
 
+        // Prepare data for JSON file
         const logData = {
           jobNo: jobNo,
           updatedBy: {
@@ -178,8 +231,6 @@ exports.createScheduleInbound = async (req, res) => {
 
         const logFilePath = path.join(LOGS_DIR, `${jobNo}.json`);
 
-        // Use sync write here to ensure it finishes or throws before we leave,
-        // or keep async but handle error callback. Async is better for performance.
         fs.writeFile(logFilePath, JSON.stringify(logData, null, 2), (err) => {
           if (err) {
             console.error(`[LOG ERROR] Failed to write log for ${jobNo}:`, err);
@@ -187,29 +238,36 @@ exports.createScheduleInbound = async (req, res) => {
             console.log(`[LOG CREATED] ${logFilePath}`);
           }
         });
+
+        // Optional: Console log summary (From Incoming style)
+        const exWarehouseLotList = currentLots
+          .map((lot) => lot.exWarehouseLot)
+          .filter((val) => val)
+          .join(", ");
+
+        console.log(
+          `[SCHEDULE SUCCESS] Job: ${jobNo} | Lots: ${lotCount} | Ex-Whse: [${exWarehouseLotList}]`
+        );
       }
     } catch (logError) {
       console.error("[LOGGING SYSTEM FAILURE]", logError);
-      // We do NOT throw here, so the user still gets a success response for the schedule
+      // We do NOT throw here, so the user still gets a success response
     }
     // --- LOGGING END ---
 
     res.status(200).json({
       message: "Inbound schedule and lots created/updated successfully!",
     });
-    console.log("Inbound schedule and lots created/updated successfully!");
   } catch (dbError) {
-    await transaction.rollback();
-    console.error("Database error during scheduling:", dbError);
-
     // Only rollback if transaction started AND not yet committed
-    if (transaction && !isCommitted) {
-      try {
-        await transaction.rollback();
-      } catch (rollbackError) {
-        console.error("Rollback failed:", rollbackError);
-      }
+    // This check handles cases where commit might have happened but logging failed (though logging is outside try block usually)
+    try {
+      await transaction.rollback();
+    } catch (rollbackError) {
+      // Transaction might have been already committed or rolled back
     }
+
+    console.error("Database error during scheduling:", dbError);
 
     // Specific handling for Duplicate Schedule
     if (dbError.code === "DUPLICATE_SCHEDULE") {
@@ -228,12 +286,11 @@ exports.createScheduleInbound = async (req, res) => {
   }
 };
 
-// --- MONITORING API ENDPOINTS ---
+// --- MONITORING API ENDPOINTS (From Current) ---
 exports.getInboundLogs = async (req, res) => {
   try {
-    // Check if directory exists before reading
     if (!fs.existsSync(LOGS_DIR)) {
-      return res.status(200).json({ success: true, data: [] }); // Return empty if no logs yet
+      return res.status(200).json({ success: true, data: [] });
     }
 
     fs.readdir(LOGS_DIR, (err, files) => {
@@ -259,7 +316,7 @@ exports.getInboundLogs = async (req, res) => {
             return null;
           }
         })
-        .filter((item) => item !== null); // Filter out any failed reads
+        .filter((item) => item !== null);
 
       // Sort by newest first
       fileStats.sort((a, b) => b.createdAt - a.createdAt);
@@ -299,7 +356,6 @@ exports.getInboundLogDetail = async (req, res) => {
   });
 };
 
-// The uploadExcel function does not need changes. It is included for completeness.
 exports.uploadExcel = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: "No file uploaded." });
@@ -326,6 +382,7 @@ exports.uploadExcel = async (req, res) => {
 
     const jobNoIndex = headers.indexOf("Job No");
     const lotNoIndex = headers.indexOf("Lot No");
+    // ... (Keep existing index mappings) ...
     const nwIndex = headers.indexOf("NW");
     const gwIndex = headers.indexOf("GW");
     const actualWeightIndex = headers.indexOf("Actual Weight");
@@ -359,7 +416,6 @@ exports.uploadExcel = async (req, res) => {
 
       const jobNo = row[jobNoIndex]?.toString().trim() || null;
       if (!jobNo) {
-        console.warn("Row skipped due to missing Job No:", row);
         continue;
       }
 
@@ -369,10 +425,6 @@ exports.uploadExcel = async (req, res) => {
 
       const lotNoValue = parseInt(row[lotNoIndex], 10);
       if (isNaN(lotNoValue)) {
-        console.warn(
-          `Row skipped for Job No ${jobNo} due to invalid Lot No:`,
-          row[lotNoIndex]
-        );
         continue;
       }
 
@@ -397,6 +449,54 @@ exports.uploadExcel = async (req, res) => {
       jobDataMap.get(jobNo).lots.push(lotData);
       totalLotsProcessed++;
     }
+
+    // ============================================================
+    // NEW VALIDATION LOGIC START
+    // ============================================================
+    const allJobNos = Array.from(jobDataMap.keys());
+    const duplicateErrors = [];
+
+    // 1. Only query if we actually have data
+    if (allJobNos.length > 0) {
+      // 2. Fetch ALL existing lots for these Job Numbers from the database
+      // Sequelize "where: { jobNo: [...] }" acts as an IN clause
+      const existingLots = await Lot.findAll({
+        where: {
+          jobNo: allJobNos,
+        },
+        attributes: ["jobNo", "lotNo"], // We only need these columns to check
+        raw: true,
+      });
+
+      // 3. Create a Set for fast lookup (O(1) complexity)
+      // Format: "JOB_NO|LOT_NO"
+      const dbLotSet = new Set(
+        existingLots.map((l) => `${l.jobNo}|${l.lotNo}`)
+      );
+
+      // 4. Check every lot in the Excel file against the DB Set
+      jobDataMap.forEach((value, jobNo) => {
+        value.lots.forEach((lot) => {
+          const key = `${jobNo}|${lot.lotNo}`;
+          if (dbLotSet.has(key)) {
+            duplicateErrors.push(
+              `Job: ${jobNo} / Lot: ${lot.lotNo} already exists in the system.`
+            );
+          }
+        });
+      });
+    }
+
+    // 5. If we found ANY duplicates, block the upload immediately
+    if (duplicateErrors.length > 0) {
+      return res.status(409).json({
+        message: "Upload Blocked: The file contains duplicate data.",
+        errors: duplicateErrors, // Frontend can display this list
+      });
+    }
+    // ============================================================
+    // NEW VALIDATION LOGIC END
+    // ============================================================
 
     const responseData = {};
     jobDataMap.forEach((value, key) => {
