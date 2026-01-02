@@ -25,6 +25,58 @@ const generateUniqueFilename = (dir, jobNo) => {
   return path.join(dir, filename);
 };
 
+const createLogEntry = async (
+  jobNo,
+  userId,
+  actionType,
+  summaryData,
+  detailsData
+) => {
+  try {
+    // 1. Fetch User Details
+    let username = "Unknown";
+    let userRole = "Unknown";
+    try {
+      const userDetails = await usersModel.getUserById(userId);
+      if (userDetails) {
+        username = userDetails.username;
+        userRole = userDetails.rolename;
+      }
+    } catch (e) {
+      console.error("Log User Fetch Error", e);
+    }
+
+    // 2. Prepare Log Content
+    const timestamp = new Date().toLocaleString("en-SG", {
+      timeZone: "Asia/Singapore",
+    });
+
+    const fileContent = {
+      header: {
+        jobNo: jobNo,
+        action: actionType, // Added action type (e.g., "Report Discrepancy", "Confirm Finish")
+        timestamp: timestamp,
+        performedBy: {
+          userId: userId,
+          username: username,
+          userRole: userRole,
+        },
+      },
+      summary: summaryData, // Object containing totalLots, weights, etc.
+      details: detailsData, // Array or Object with specific details
+    };
+
+    // 3. Write File
+    const filePath = generateUniqueFilename(CONFIRM_LOGS_DIR, jobNo);
+    fs.writeFile(filePath, JSON.stringify(fileContent, null, 2), (err) => {
+      if (err) console.error(`Failed to write log for ${jobNo}:`, err);
+      else console.log(`[LOG CREATED] ${filePath}`);
+    });
+  } catch (error) {
+    console.error(`Error generating log for ${jobNo}:`, error);
+  }
+};
+
 // ROUTER TO DO REPORT
 router.post("/tasks-report-confirmation", async (req, res) => {
   try {
@@ -47,6 +99,46 @@ router.post("/tasks-report-confirmation", async (req, res) => {
         .status(404)
         .json({ error: "No reports were created. Please check lotIds." });
     }
+
+    // --- LOGGING START ---
+    (async () => {
+      try {
+        // Fetch Lot Details to group by JobNo and get info for logs
+        const lots = await db.sequelize.query(
+          `SELECT "lotId", "lotNo", "jobNo", "exWarehouseLot", "exWarehouseWarrant" 
+           FROM public.lot WHERE "lotId" IN (:ids)`,
+          {
+            replacements: { ids: lotIds },
+            type: db.sequelize.QueryTypes.SELECT,
+          }
+        );
+
+        const jobsMap = {};
+        lots.forEach((lot) => {
+          if (!jobsMap[lot.jobNo]) jobsMap[lot.jobNo] = [];
+          jobsMap[lot.jobNo].push(lot);
+        });
+
+        for (const jobNo in jobsMap) {
+          const jobLots = jobsMap[jobNo];
+          await createLogEntry(
+            jobNo,
+            reportedBy,
+            "Report Discrepancy (Lot Level)",
+            { totalReportedLots: jobLots.length },
+            jobLots.map((l) => ({
+              lotId: l.lotId,
+              lotNo: l.lotNo,
+              exWarehouseLot: l.exWarehouseLot,
+              issue: "Pending Verification", // Or map specific status if available
+            }))
+          );
+        }
+      } catch (logErr) {
+        console.error("Logging error in report confirmation:", logErr);
+      }
+    })();
+    // --- LOGGING END ---
 
     res.status(200).json({
       message: "Lot reports created successfully.",
@@ -83,6 +175,44 @@ router.post("/tasks-report-duplication", async (req, res) => {
       });
     }
 
+    // --- LOGGING START ---
+    (async () => {
+      try {
+        const lots = await db.sequelize.query(
+          `SELECT "lotId", "lotNo", "jobNo", "exWarehouseLot" 
+           FROM public.lot WHERE "lotId" IN (:ids)`,
+          {
+            replacements: { ids: lotIds },
+            type: db.sequelize.QueryTypes.SELECT,
+          }
+        );
+
+        const jobsMap = {};
+        lots.forEach((lot) => {
+          if (!jobsMap[lot.jobNo]) jobsMap[lot.jobNo] = [];
+          jobsMap[lot.jobNo].push(lot);
+        });
+
+        for (const jobNo in jobsMap) {
+          const jobLots = jobsMap[jobNo];
+          await createLogEntry(
+            jobNo,
+            reportedBy,
+            "Report Duplication",
+            { totalDuplicatedLots: jobLots.length },
+            jobLots.map((l) => ({
+              lotId: l.lotId,
+              lotNo: l.lotNo,
+              exWarehouseLot: l.exWarehouseLot,
+            }))
+          );
+        }
+      } catch (logErr) {
+        console.error("Logging error in report duplication:", logErr);
+      }
+    })();
+    // --- LOGGING END --
+
     res.status(200).json({
       message: "Lot duplicate reports created successfully.",
       createdReports,
@@ -110,165 +240,72 @@ router.post("/tasks-complete-inbound", async (req, res) => {
   try {
     const result = await insertInboundFromLots(selectedLots, userId);
 
+    // --- LOGGING START ---
     (async () => {
       try {
-        // A. Fetch User Details
-        let username = "Unknown";
-        let userRole = "Unknown";
-        try {
-          const userDetails = await usersModel.getUserById(userId);
-          if (userDetails) {
-            username = userDetails.username;
-            userRole = userDetails.rolename;
-          }
-        } catch (e) {
-          console.error("Log User Fetch Error", e);
-        }
-
-        // B. Group Lots by Job Number
         const jobsMap = {};
         const allLotIds = [];
 
         selectedLots.forEach((lot) => {
-          if (!jobsMap[lot.jobNo]) {
-            jobsMap[lot.jobNo] = {
-              jobNo: lot.jobNo,
-              lots: [],
-              grossWeight: 0,
-              netWeight: 0,
-            };
-          }
+          if (!jobsMap[lot.jobNo])
+            jobsMap[lot.jobNo] = { jobNo: lot.jobNo, lots: [] };
           jobsMap[lot.jobNo].lots.push(lot);
-          jobsMap[lot.jobNo].grossWeight += parseFloat(lot.grossWeight) || 0;
-          jobsMap[lot.jobNo].netWeight += parseFloat(lot.netWeight) || 0;
-
           if (lot.lotId) allLotIds.push(lot.lotId);
         });
 
-        // C. Fetch Related Reports (Lot Discrepancies & Duplicates)
-        let lotReportsMap = {};
-        let jobReportsMap = {}; // Maps jobNo to array of reports
-
+        let lotWeightsMap = {};
         if (allLotIds.length > 0) {
-          // Fetch Lot Reports
-          const lotReports = await db.sequelize.query(
-            `SELECT * FROM public.lot_reports WHERE "lotId" IN (:ids)`,
+          const dbLots = await db.sequelize.query(
+            `SELECT "lotId", "grossWeight", "netWeight" FROM public.lot WHERE "lotId" IN (:ids)`,
             {
               replacements: { ids: allLotIds },
               type: db.sequelize.QueryTypes.SELECT,
             }
           );
-
-          // Fetch Duplicate Reports
-          const dupReports = await db.sequelize.query(
-            `SELECT * FROM public.lot_duplicate WHERE "lotId" IN (:ids)`,
-            {
-              replacements: { ids: allLotIds },
-              type: db.sequelize.QueryTypes.SELECT,
-            }
-          );
-
-          // Map them
-          lotReports.forEach((r) => {
-            if (!lotReportsMap[r.lotId]) lotReportsMap[r.lotId] = [];
-            lotReportsMap[r.lotId].push({
-              type: "Discrepancy",
-              status: r.reportStatus,
-              date: r.reportedOn,
-            });
-          });
-          dupReports.forEach((r) => {
-            if (!lotReportsMap[r.lotId]) lotReportsMap[r.lotId] = [];
-            lotReportsMap[r.lotId].push({
-              type: "Duplicate",
-              status: r.reportStatus,
-              date: r.reportedOn,
-            });
+          dbLots.forEach((l) => {
+            lotWeightsMap[l.lotId] = {
+              gross: parseFloat(l.grossWeight) || 0,
+              net: parseFloat(l.netWeight) || 0,
+            };
           });
         }
-
-        // Fetch Job Reports (Discrepancy by Job)
-        const uniqueJobNos = Object.keys(jobsMap);
-        if (uniqueJobNos.length > 0) {
-          const jobReports = await db.sequelize.query(
-            `SELECT * FROM public.job_reports WHERE "jobNo" IN (:jobs)`,
-            {
-              replacements: { jobs: uniqueJobNos },
-              type: db.sequelize.QueryTypes.SELECT,
-            }
-          );
-
-          jobReports.forEach((r) => {
-            if (!jobReportsMap[r.jobNo]) jobReportsMap[r.jobNo] = [];
-            jobReportsMap[r.jobNo].push({
-              type: r.discrepancyType,
-              status: r.reportStatus,
-              reportedAt: r.reportedOn,
-            });
-          });
-        }
-
-        // D. Generate JSON for each Job
-        const timestamp = new Date().toLocaleString("en-SG", {
-          timeZone: "Asia/Singapore",
-        });
 
         for (const jobNo in jobsMap) {
           const jobData = jobsMap[jobNo];
+          let jobTotalGross = 0.0;
+          let jobTotalNet = 0.0;
 
-          // Construct Lot Details List
-          const lotsDetailed = jobData.lots.map((l) => ({
-            lotId: l.lotId,
-            lotNo: l.lotNo,
-            exWarehouseLot: l.exWarehouseLot,
-            exWarehouseWarrant: l.exWarehouseWarrant,
-            bundleCount: l.expectedBundleCount,
-            weights: {
-              gross: l.grossWeight,
-              net: l.netWeight,
-            },
-            reports: lotReportsMap[l.lotId] || null,
-          }));
+          const lotsDetailed = jobData.lots.map((l) => {
+            const dbWeights = lotWeightsMap[l.lotId] || { gross: 0, net: 0 };
+            jobTotalGross += dbWeights.gross;
+            jobTotalNet += dbWeights.net;
 
-          const fileContent = {
-            header: {
-              jobNo: jobNo,
-              confirmedAt: timestamp,
-              confirmedBy: {
-                userId: userId,
-                username: username,
-                userRole: userRole,
-              },
-            },
-            summary: {
+            return {
+              lotId: l.lotId,
+              lotNo: l.lotNo,
+              exWarehouseLot: l.exWarehouseLot,
+              bundleCount: l.expectedBundleCount,
+              weights: { gross: dbWeights.gross, net: dbWeights.net },
+            };
+          });
+
+          await createLogEntry(
+            jobNo,
+            userId,
+            "Confirm Inbound",
+            {
               totalLots: jobData.lots.length,
-              totalGrossWeight: parseFloat(jobData.grossWeight.toFixed(3)),
-              totalNetWeight: parseFloat(jobData.netWeight.toFixed(3)),
+              totalGrossWeight: parseFloat(jobTotalGross.toFixed(3)),
+              totalNetWeight: parseFloat(jobTotalNet.toFixed(3)),
             },
-            jobReports: jobReportsMap[jobNo] || "None", // Job-level discrepancies
-            lotDetails: lotsDetailed, // Lot-level details & reports
-          };
-
-          // E. Write File
-          const filePath = generateUniqueFilename(CONFIRM_LOGS_DIR, jobNo);
-          fs.writeFile(
-            filePath,
-            JSON.stringify(fileContent, null, 2),
-            (err) => {
-              if (err)
-                console.error(
-                  `Failed to write confirmed log for ${jobNo}:`,
-                  err
-                );
-              else console.log(`[LOG CREATED] ${filePath}`);
-            }
+            lotsDetailed
           );
         }
       } catch (logError) {
         console.error("Critical Error in Confirm Inbound Logging:", logError);
       }
     })();
-    // --- END LOGGING ---
+    // --- LOGGING END ---
 
     res.status(200).json({ success: true, inserted: result });
   } catch (error) {

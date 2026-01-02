@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const db = require("../database");
 const { sequelize, DataTypes } = db;
+const usersModel = require("../models/users.model");
 
 // Initialize Models
 const { ScheduleInbound, Lot } = require("../models/schedule_inbound.model.js")(
@@ -11,7 +12,7 @@ const { ScheduleInbound, Lot } = require("../models/schedule_inbound.model.js")(
 );
 
 // --- SETUP LOGGING DIRECTORY (From Current) ---
-const LOGS_DIR = path.join(__dirname, "../logs/Scheduled Inbound");
+const LOGS_DIR = path.join(__dirname, "../logs/Scheduled Inbounds");
 
 if (!fs.existsSync(LOGS_DIR)) {
   fs.mkdirSync(LOGS_DIR, { recursive: true });
@@ -43,11 +44,25 @@ const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
 
 // --- MAIN CONTROLLER ---
 exports.createScheduleInbound = async (req, res) => {
-  // Safe access to user properties (From Current - more robust)
-  const user = req.user || {};
-  const userId = user.userId;
-  const username = user.username || "Unknown User";
-  const roleId = user.roleId || null;
+  // Safe access to user properties
+  const userPayload = req.user || {};
+  const userId = userPayload.userId;
+
+  // [UPDATED] Fetch full user details from DB to get Username and Role for logs
+  let username = "Unknown User";
+  let userRole = "Unknown Role";
+
+  if (userId) {
+    try {
+      const fullUser = await usersModel.getUserById(userId);
+      if (fullUser) {
+        username = fullUser.username;
+        userRole = fullUser.rolename;
+      }
+    } catch (err) {
+      console.warn("Could not fetch user details for logging:", err.message);
+    }
+  }
 
   const { inboundDate, jobDataMap } = req.body;
 
@@ -220,7 +235,7 @@ exports.createScheduleInbound = async (req, res) => {
           updatedBy: {
             userId: userId,
             username: username,
-            roleId: roleId,
+            userRole: userRole,
           },
           updateTime: timestamp,
           isoTimestamp: isoTimestamp,
