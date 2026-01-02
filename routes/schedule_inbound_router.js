@@ -21,4 +21,14 @@ router.post(
 );
 router.post("/create", auth, scheduleInboundController.createScheduleInbound);
 
+// Get list of all logs
+router.get("/logs", auth, scheduleInboundController.getInboundLogs);
+
+// Get specific log content by filename
+router.get(
+  "/logs/:filename",
+  auth,
+  scheduleInboundController.getInboundLogDetail
+);
+
 module.exports = router;

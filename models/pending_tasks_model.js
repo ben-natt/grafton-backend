@@ -13,7 +13,10 @@ const formatDate = (date) => {
 const finalizeInboundJob = async (jobNo, userId, filters = {}) => {
   const transaction = await db.sequelize.transaction();
   try {
-    console.log(`[Model] Finalizing Job: ${jobNo} for User: ${userId} with filters:`, filters);
+    console.log(
+      `[Model] Finalizing Job: ${jobNo} for User: ${userId} with filters:`,
+      filters
+    );
 
     // 1. Build Filter Clauses
     // We strictly match the logic in getPendingInboundTasks to ensure we only
@@ -24,11 +27,11 @@ const finalizeInboundJob = async (jobNo, userId, filters = {}) => {
       `status IN ('Pending', 'Received')`,
       `report = false`, // Exclude items with active reports
       `COALESCE("isConfirmed", false) = false`, // Exclude already confirmed items
-      `(COALESCE("reportDuplicate", false) = false OR "isDuplicated" = true)` // Exclude unresolved duplicates
+      `(COALESCE("reportDuplicate", false) = false OR "isDuplicated" = true)`, // Exclude unresolved duplicates
     ];
 
     // 2. Apply Optional Filters (if they exist)
-    
+
     // Filter by Ex-Warehouse Lot
     if (filters.exWarehouseLot) {
       whereClauses.push(`"exWarehouseLot" ILIKE :exWarehouseLot`);
@@ -82,10 +85,10 @@ const getPendingInboundTasks = async (
 
     // UPDATED: Filter for status IN ('Pending', 'Received')
     const baseWhere = [
-      `l.status IN ('Pending', 'Received')`, 
+      `l.status IN ('Pending', 'Received')`,
       `l.report = false`,
       `(COALESCE(l."reportDuplicate", false) = false OR l."isDuplicated" = true)`,
-      `COALESCE(l."isConfirmed", false) = false`
+      `COALESCE(l."isConfirmed", false) = false`,
     ];
     const replacements = {};
 
@@ -159,7 +162,7 @@ const getPendingInboundTasks = async (
     });
 
     const paginatedJobNos = jobNoResults.map((j) => j.jobNo);
-    
+
     if (paginatedJobNos.length === 0)
       return { data: [], page, pageSize, totalPages, totalCount };
 
@@ -207,7 +210,7 @@ const getPendingInboundTasks = async (
           inboundDates: [],
         };
       }
-      
+
       if (lot.inbounddate) {
         acc[jobNo].inboundDates.push(new Date(lot.inbounddate));
       }
@@ -232,25 +235,29 @@ const getPendingInboundTasks = async (
           isConfirm: lot.isConfirm,
         });
       }
-      
+
       return acc;
     }, {});
 
     Object.values(groupedByJobNo).forEach((group) => {
       if (group.inboundDates.length > 0) {
-        const minDate = new Date(Math.min(...group.inboundDates.map((d) => d.getTime())));
-        const maxDate = new Date(Math.max(...group.inboundDates.map((d) => d.getTime())));
-        
-        if (!isNaN(minDate.getTime())) {
-             const minDateString = minDate.toDateString();
-             const maxDateString = maxDate.toDateString();
+        const minDate = new Date(
+          Math.min(...group.inboundDates.map((d) => d.getTime()))
+        );
+        const maxDate = new Date(
+          Math.max(...group.inboundDates.map((d) => d.getTime()))
+        );
 
-             group.userInfo.inboundDate =
-              minDateString === maxDateString
-                ? formatDate(minDate)
-                : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
+        if (!isNaN(minDate.getTime())) {
+          const minDateString = minDate.toDateString();
+          const maxDateString = maxDate.toDateString();
+
+          group.userInfo.inboundDate =
+            minDateString === maxDateString
+              ? formatDate(minDate)
+              : `${formatDate(minDate)} - ${formatDate(maxDate)}`;
         } else {
-             group.userInfo.inboundDate = "Invalid Date";
+          group.userInfo.inboundDate = "Invalid Date";
         }
       } else {
         group.userInfo.inboundDate = "N/A";
@@ -258,7 +265,10 @@ const getPendingInboundTasks = async (
       delete group.inboundDates;
     });
 
-    console.log("[DEBUG] Final Grouped Jobs:", Object.keys(groupedByJobNo).length);
+    console.log(
+      "[DEBUG] Final Grouped Jobs:",
+      Object.keys(groupedByJobNo).length
+    );
 
     return {
       data: Object.values(groupedByJobNo),
@@ -628,6 +638,8 @@ const reverseInbound = async (inboundId) => {
       success: true,
       message: "Inbound reversed successfully.",
       inboundId: inboundId,
+      jobNo: jobNo,
+      exWarehouseLot: exWarehouseLot,
     };
   } catch (error) {
     await t.rollback();
