@@ -239,7 +239,6 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
         "crewLotNo" = :crewLotNo,
         "updatedAt" = NOW()
       WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
-      AND ("isWeighted" IS NULL OR "isWeighted" = false)
       RETURNING *
     `;
 

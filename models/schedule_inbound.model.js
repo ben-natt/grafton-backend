@@ -1,219 +1,226 @@
 //defines the structure of data and how it relates in the database,
 module.exports = (sequelize, DataTypes) => {
-  const ScheduleInbound = sequelize.define('ScheduleInbound', {
-    scheduleInboundId: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-      field: 'scheduleInboundId',
-    },
-    jobNo: {
-      type: DataTypes.STRING(16),
-      allowNull: false,
-      field: 'jobNo',
-    },
-    inboundDate: {
-      type: DataTypes.DATE,
-      allowNull: true,
-      field: 'inboundDate',
-    },
-    userId: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      field: 'userId',
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-      field: 'createdAt',
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-      field: 'updatedAt',
-    },
-  }, {
-    tableName: 'scheduleinbounds',
-    timestamps: true,
-    updatedAt: 'updatedAt',
-    createdAt: 'createdAt',
-  });
-
-  const Lot = sequelize.define('Lot', {
-    lotId: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-      field: 'lotId',
-    },
-    jobNo: {
-      type: DataTypes.STRING(16),
-      allowNull: false,
-      field: 'jobNo',
-    },
-    lotNo: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      field: 'lotNo',
-    },
-    netWeight: {
-      type: DataTypes.DOUBLE,
-      allowNull: true,
-      field: 'netWeight',
-    },
-    grossWeight: {
-      type: DataTypes.DOUBLE,
-      allowNull: true,
-      field: 'grossWeight',
-    },
-    actualWeight: {
-      type: DataTypes.DOUBLE,
-      allowNull: true,
-      field: 'actualWeight',
-    },
-    exWarehouseLot: {
-      type: DataTypes.STRING(20),
-      allowNull: true,
-      field: 'exWarehouseLot',
-    },
-    exWarehouseWarrant: {
-      type: DataTypes.STRING(20),
-      allowNull: true,
-      field: 'exWarehouseWarrant',
-    },
-    expectedBundleCount: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      field: 'expectedBundleCount',
-    },
-    status: {
-      type: DataTypes.ENUM('Pending', 'scheduled', 'processed'),
-      allowNull: false,
-      defaultValue: 'Pending',
-      field: 'status',
-    },
-    brand: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-      field: 'brand',
-    },
-    commodity: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-      field: 'commodity',
-    },
-    shape: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-      field: 'shape',
-    },
-    exWarehouseLocation: {
-      type: DataTypes.STRING(30),
-      allowNull: true,
-      field: 'exWarehouseLocation',
-    },
-    exLmeWarehouse: {
-      type: DataTypes.STRING(20),
-      allowNull: true,
-      field: 'exLmeWarehouse',
-    },
-    inboundWarehouse: {
-      type: DataTypes.STRING(20),
-      allowNull: true,
-      field: 'inboundWarehouse',
-    },
-    report: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
-      field: 'report',
-    },
-    isConfirm: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
-      field: 'isConfirm',
-    },
-    isWeighted: {
-      type: DataTypes.BOOLEAN,
-      allowNull: true,
-      field: 'isWeighted',
-    },
-    isRelabelled: {
-      type: DataTypes.BOOLEAN,
-      allowNull: true,
-      field: 'isRelabelled',
-    },
-    isRebundled: {
-      type: DataTypes.BOOLEAN,
-      allowNull: true,
-      field: 'isRebundled',
-    },
-    isRepackProvided: {
-      type: DataTypes.BOOLEAN,
-      allowNull: true,
-      field: 'isRepackProvided',
-    },
-    noOfMetalStraps: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      field: 'noOfMetalStraps',
-    },
-    repackDescription: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      field: 'repackDescription',
-    },
-
-    scheduleInboundId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      field: 'scheduleInboundId',
-      references: {
-        model: 'scheduleinbounds',
-        key: 'scheduleInboundId',
+  const ScheduleInbound = sequelize.define(
+    "ScheduleInbound",
+    {
+      scheduleInboundId: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true,
+        field: "scheduleInboundId",
       },
-      onDelete: 'CASCADE',
+      jobNo: {
+        type: DataTypes.STRING(16),
+        allowNull: false,
+        field: "jobNo",
+      },
+      inboundDate: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "inboundDate",
+      },
+      userId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "userId",
+      },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "createdAt",
+      },
+      updatedAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "updatedAt",
+      },
     },
-    createdAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-      field: 'createdAt',
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      allowNull: false,
-      defaultValue: DataTypes.NOW,
-      field: 'updatedAt',
-    },
-      inbounddate: {
-      type: DataTypes.DATE,
-      allowNull: true,
-      field: 'inbounddate',
-  },
+    {
+      tableName: "scheduleinbounds",
+      timestamps: true,
+      updatedAt: "updatedAt",
+      createdAt: "createdAt",
+    }
+  );
 
-  }, {
-    tableName: 'lot',
-    timestamps: true,
-    updatedAt: 'updatedAt',
-    createdAt: 'createdAt',
-  });
+  const Lot = sequelize.define(
+    "Lot",
+    {
+      lotId: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true,
+        field: "lotId",
+      },
+      jobNo: {
+        type: DataTypes.STRING(16),
+        allowNull: false,
+        field: "jobNo",
+      },
+      lotNo: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "lotNo",
+      },
+      netWeight: {
+        type: DataTypes.DOUBLE,
+        allowNull: true,
+        field: "netWeight",
+      },
+      grossWeight: {
+        type: DataTypes.DOUBLE,
+        allowNull: true,
+        field: "grossWeight",
+      },
+      actualWeight: {
+        type: DataTypes.DOUBLE,
+        allowNull: true,
+        field: "actualWeight",
+      },
+      exWarehouseLot: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: "exWarehouseLot",
+      },
+      exWarehouseWarrant: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: "exWarehouseWarrant",
+      },
+      expectedBundleCount: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "expectedBundleCount",
+      },
+      status: {
+        type: DataTypes.ENUM("Pending", "scheduled", "processed"),
+        allowNull: false,
+        defaultValue: "Pending",
+        field: "status",
+      },
+      brand: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        field: "brand",
+      },
+      commodity: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        field: "commodity",
+      },
+      shape: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+        field: "shape",
+      },
+      exWarehouseLocation: {
+        type: DataTypes.STRING(30),
+        allowNull: true,
+        field: "exWarehouseLocation",
+      },
+      exLmeWarehouse: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: "exLmeWarehouse",
+      },
+      inboundWarehouse: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: "inboundWarehouse",
+      },
+      report: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "report",
+      },
+      isConfirm: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: "isConfirm",
+      },
+      isWeighted: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        field: "isWeighted",
+      },
+      isRelabelled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        field: "isRelabelled",
+      },
+      isRebundled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        field: "isRebundled",
+      },
+      isRepackProvided: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        field: "isRepackProvided",
+      },
+      noOfMetalStraps: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        field: "noOfMetalStraps",
+      },
+      repackDescription: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        field: "repackDescription",
+      },
+
+      scheduleInboundId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        field: "scheduleInboundId",
+        references: {
+          model: "scheduleinbounds",
+          key: "scheduleInboundId",
+        },
+        onDelete: "CASCADE",
+      },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "createdAt",
+      },
+      updatedAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+        field: "updatedAt",
+      },
+      inbounddate: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "inbounddate",
+      },
+    },
+    {
+      tableName: "lot",
+      timestamps: true,
+      updatedAt: "updatedAt",
+      createdAt: "createdAt",
+    }
+  );
 
   // This is one to many relationship
   ScheduleInbound.hasMany(Lot, {
-    foreignKey: 'scheduleInboundId',
-    sourceKey: 'scheduleInboundId',
-    as: 'lot',
-    onDelete: 'CASCADE',
+    foreignKey: "scheduleInboundId",
+    sourceKey: "scheduleInboundId",
+    as: "lot",
+    onDelete: "CASCADE",
   });
   // This is many to one relationship
   Lot.belongsTo(ScheduleInbound, {
-    foreignKey: 'scheduleInboundId',
-    targetKey: 'scheduleInboundId',
-    as: 'scheduleInbound',
+    foreignKey: "scheduleInboundId",
+    targetKey: "scheduleInboundId",
+    as: "scheduleInbound",
   });
 
   return { ScheduleInbound, Lot };
