@@ -1,6 +1,12 @@
 const nodemailer = require("nodemailer");
 
-async function sendEmail(email, otp) {
+/**
+ * Sends an email with an OTP.
+ * @param {string} email - The recipient's email address.
+ * @param {string} otp - The OTP code.
+ * @param {string} type - The type of email ('register' or 'reset').
+ */
+async function sendEmail(email, otp, type) {
     const transporter = nodemailer.createTransport({
         host: "mail.natt.world",
         port: 465,
@@ -10,10 +16,23 @@ async function sendEmail(email, otp) {
         },
     });
 
+    // Determine Subject and Title based on the type
+    let subject = "";
+    let title = "";
+
+    if (type === 'reset') {
+        subject = "Reset your Password with NATT";
+        title = "Reset Password now!";
+    } else {
+        // Default to registration ('register')
+        subject = "Welcome to NATT - Verification Code";
+        title = "Join us now!";
+    }
+
     const mailOptions = {
         from: `"UBTS · NATT" <${process.env.NODEMAIL_USER}>`,
         to: email,
-        subject: "Reset your Password with NATT",
+        subject: subject,
         html: `
         <div style="font-family: Arial, sans-serif;">
             <table style="width: 100%; background-color: #f9f9f9; padding: 20px;">
@@ -27,7 +46,7 @@ async function sendEmail(email, otp) {
                             </tr>
                             <tr>
                                 <td style="text-align: center; padding-top: 20px;">
-                                    <h2 style="color: #334257; font-size: 22px;">Join us now!</h2>
+                                    <h2 style="color: #334257; font-size: 22px;">${title}</h2>
                                     <p style="font-size: 18px; margin-bottom: 5px;">The 4-digit code</p>
                                     <h2 style="font-size: 50px; margin: 0; color: #0077C8; letter-spacing: 4px;">
                                         ${otp}
@@ -69,7 +88,7 @@ async function sendEmail(email, otp) {
         `,
     };
 
-    console.log(`Sending OTP ${otp} to ${email}`);
+    console.log(`Sending OTP ${otp} to ${email} (Type: ${type})`);
     try {
         await transporter.sendMail(mailOptions);
         console.log(`Email successfully sent to: ${email}`);
