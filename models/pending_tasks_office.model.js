@@ -33,7 +33,7 @@ const findInboundTasksOffice = async (
         )`;
         // Apply to Reports (Matches JobNo only)
         reportWhere += ` AND (jr."jobNo" ILIKE :search)`;
-        
+
         replacements.searchJobPart = `%${parts[0]}%`;
         replacements.searchLotPart = `%${parts[1]}%`;
       } else {
@@ -66,7 +66,7 @@ const findInboundTasksOffice = async (
       if (jobNo && lotNo) {
         lotWhere += ` AND l."jobNo" = :exactJobNo AND l."lotNo"::text = :exactLotNo`;
         // Reports generally don't have specific lot numbers if they are job-level
-        reportWhere += ` AND 1=0`; 
+        reportWhere += ` AND 1=0`;
         replacements.exactJobNo = jobNo;
         replacements.exactLotNo = lotNo;
       }
@@ -88,7 +88,7 @@ const findInboundTasksOffice = async (
 
     // --- 7. CASE-INSENSITIVE COLUMN FILTERS ---
     // These apply only to Lots. If looking for specific attributes, exclude 0-lot jobs.
-    const hasAttributeFilters = 
+    const hasAttributeFilters =
       filters.commodity || filters.brand || filters.shape || filters.quantity;
 
     if (filters.commodity) {
@@ -130,8 +130,8 @@ const findInboundTasksOffice = async (
         // Hide job-only reports
         reportWhere += ` AND 1=0`;
       } else if (filters.type === "Normal") {
-         lotWhere += ` AND l.report = false AND NOT EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
-         reportWhere += ` AND 1=0`;
+        lotWhere += ` AND l.report = false AND NOT EXISTS (SELECT 1 FROM public.job_reports jr WHERE jr."jobNo" = l."jobNo" AND jr."reportStatus" = 'pending')`;
+        reportWhere += ` AND 1=0`;
       }
     }
 
@@ -268,13 +268,13 @@ const findInboundTasksOffice = async (
 
     // Initialize with Schedules (ensures 0-lot jobs have a placeholder)
     for (const sch of schedulesResult) {
-       tasksMap[sch.jobNo] = {
-         jobNo: sch.jobNo,
-         date: sch.date, 
-         scheduledBy: sch.scheduledBy, 
-         lots: [],
-         reportInfo: null,
-       };
+      tasksMap[sch.jobNo] = {
+        jobNo: sch.jobNo,
+        date: sch.date,
+        scheduledBy: sch.scheduledBy,
+        lots: [],
+        reportInfo: null,
+      };
     }
     // Safety fallback
     for (const j of jobNos) {
@@ -290,7 +290,7 @@ const findInboundTasksOffice = async (
           isEditing: false,
         });
         // Update date/user from lot if available (might differ slightly)
-        tasksMap[task.jobNo].date = task.date; 
+        tasksMap[task.jobNo].date = task.date;
         tasksMap[task.jobNo].scheduledBy = task.scheduledBy;
       }
     }
@@ -730,19 +730,50 @@ const getDuplicateReportUsername = async (lotId) => {
 };
 
 const pendingTasksUpdateQuantity = async (lotId, expectedBundleCount) => {
+  const transaction = await db.sequelize.transaction();
   try {
-    const query = `
-      UPDATE public.lot
-      SET "expectedBundleCount" = :expectedBundleCount
-      WHERE "lotId" = :lotId
-      RETURNING *;
-    `;
-    const result = await db.sequelize.query(query, {
-      replacements: { lotId, expectedBundleCount },
-      type: db.sequelize.QueryTypes.UPDATE,
-    });
-    return result[0];
+    // 1. Fetch Previous Data (for logging)
+    const oldData = await db.sequelize.query(
+      `SELECT "expectedBundleCount", "jobNo", "lotNo", "exWarehouseLot" 
+       FROM public.lot WHERE "lotId" = :lotId`,
+      {
+        replacements: { lotId },
+        type: db.sequelize.QueryTypes.SELECT,
+        plain: true,
+        transaction,
+      }
+    );
+
+    if (!oldData) {
+      await transaction.rollback();
+      throw new Error("Lot not found.");
+    }
+
+    // 2. Perform Update
+    const result = await db.sequelize.query(
+      `UPDATE public.lot 
+       SET "expectedBundleCount" = :expectedBundleCount, "updatedAt" = NOW() 
+       WHERE "lotId" = :lotId 
+       RETURNING *`,
+      {
+        replacements: { lotId, expectedBundleCount },
+        type: db.sequelize.QueryTypes.UPDATE,
+        transaction,
+      }
+    );
+
+    await transaction.commit();
+
+    // 3. Return Combined Result
+    return {
+      success: true,
+      updatedRecord: result[0][0],
+      previousBundleCount: oldData.expectedBundleCount, // Include old count
+      jobNo: oldData.jobNo,
+      lotNo: oldData.lotNo,
+    };
   } catch (error) {
+    await transaction.rollback();
     console.error("Error updating quantity:", error);
     throw error;
   }

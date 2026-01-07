@@ -1,4 +1,79 @@
 const db = require("../database");
+const fs = require("fs");
+const path = require("path");
+const usersModel = require("../models/users.model"); // Ensure this path is correct relative to stock.model.js
+
+// --- LOGGING CONFIG (EDITED LOGS) ---
+const EDIT_LOGS_DIR = path.join(__dirname, "../logs/Edited");
+if (!fs.existsSync(EDIT_LOGS_DIR)) {
+  fs.mkdirSync(EDIT_LOGS_DIR, { recursive: true });
+}
+
+// --- HELPER: Generate Unique Filename ---
+const generateUniqueFilename = (dir, jobNo) => {
+  let filename = `${jobNo}.json`;
+  let counter = 1;
+  while (fs.existsSync(path.join(dir, filename))) {
+    filename = `${jobNo}_${counter}.json`;
+    counter++;
+  }
+  return path.join(dir, filename);
+};
+
+// --- HELPER: Create Log Entry for Edits ---
+const createEditLogEntry = async (
+  jobNo,
+  userId,
+  actionType,
+  summaryData,
+  detailsData
+) => {
+  try {
+    // 1. Fetch User Details
+    let username = "Unknown";
+    let userRole = "Unknown";
+    try {
+      if (userId) {
+        const userDetails = await usersModel.getUserById(userId);
+        if (userDetails) {
+          username = userDetails.username;
+          userRole = userDetails.rolename;
+        }
+      }
+    } catch (e) {
+      console.error("Log User Fetch Error", e);
+    }
+
+    // 2. Prepare Log Content
+    const timestamp = new Date().toLocaleString("en-SG", {
+      timeZone: "Asia/Singapore",
+    });
+
+    const fileContent = {
+      header: {
+        jobNo: jobNo,
+        action: actionType,
+        timestamp: timestamp,
+        performedBy: {
+          userId: userId || "N/A",
+          username: username,
+          userRole: userRole,
+        },
+      },
+      summary: summaryData,
+      details: detailsData,
+    };
+
+    // 3. Write File
+    const filePath = generateUniqueFilename(EDIT_LOGS_DIR, jobNo);
+    fs.writeFile(filePath, JSON.stringify(fileContent, null, 2), (err) => {
+      if (err) console.error(`Failed to write log for ${jobNo}:`, err);
+      else console.log(`[LOG CREATED] ${filePath}`);
+    });
+  } catch (error) {
+    console.error(`Error generating log for ${jobNo}:`, error);
+  }
+};
 
 const getAllStock = async () => {
   try {
@@ -689,10 +764,51 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
   }
 };
 
-const EditInformation = async (inboundId, updateData) => {
+const EditInformation = async (inboundId, updateData, userId) => {
+  console.log(`[EditInfo] Processing Update for ID: ${inboundId}`, updateData);
+
   try {
+    // --- STEP 1: PRE-FETCH CURRENT DATA FOR LOGGING ---
+    const preFetchQuery = `
+      SELECT 
+        i."jobNo", i."lotNo", i."inboundId",
+        i."noOfBundle", i."barcodeNo",
+        c."commodityName" AS "commodity",
+        b."brandName" AS "brand",
+        s."shapeName" AS "shape",
+        el."exLmeWarehouseName" AS "exLMEWarehouse",
+        i."exWarehouseLot",
+        i."exWarehouseWarrant",
+        eloc."exWarehouseLocationName" AS "exWarehouseLocation",
+        iw."inboundWarehouseName" AS "inboundWarehouse",
+        i."grossWeight", i."netWeight", i."actualWeight",
+        i."isRelabelled", i."isRebundled", i."isRepackProvided"
+      FROM public.inbounds i
+      LEFT JOIN public.commodities c ON i."commodityId" = c."commodityId"
+      LEFT JOIN public.brands b ON i."brandId" = b."brandId"
+      LEFT JOIN public.shapes s ON i."shapeId" = s."shapeId"
+      LEFT JOIN public.exlmewarehouses el ON i."exLmeWarehouseId" = el."exLmeWarehouseId"
+      LEFT JOIN public.exwarehouselocations eloc ON i."exWarehouseLocationId" = eloc."exWarehouseLocationId"
+      LEFT JOIN public.inboundwarehouses iw ON i."inboundWarehouseId" = iw."inboundWarehouseId"
+      WHERE i."inboundId" = :inboundId
+    `;
+
+    const currentDataResult = await db.sequelize.query(preFetchQuery, {
+      replacements: { inboundId: parseInt(inboundId) }, // Ensure integer
+      type: db.sequelize.QueryTypes.SELECT,
+      plain: true,
+    });
+
+    if (!currentDataResult) {
+      console.error(
+        `[EditInfo] Inbound ID ${inboundId} not found in database.`
+      );
+      return { success: false, message: "Record not found." };
+    }
+
+    // --- STEP 2: PREPARE UPDATE CLAUSES ---
     const setClauses = [];
-    const replacements = { inboundId };
+    const replacements = { inboundId: parseInt(inboundId) };
 
     for (const key in updateData) {
       // Map frontend keys to DB columns
@@ -747,11 +863,11 @@ const EditInformation = async (inboundId, updateData) => {
           dbColumnName = "isRepackProvided";
           break;
         default:
-          console.warn(`Unknown key: ${key}`);
+          console.warn(`[EditInfo] Unknown key skipped: ${key}`);
           continue;
       }
 
-      // Lookup IDs if needed
+      // 1. Handle Lookup Fields (Foreign Keys)
       if (
         [
           "commodityId",
@@ -762,6 +878,16 @@ const EditInformation = async (inboundId, updateData) => {
           "inboundWarehouseId",
         ].includes(dbColumnName)
       ) {
+        // [FIX]: If value is null/empty, set DB column to NULL directly
+        if (
+          !updateData[key] ||
+          updateData[key] === "null" ||
+          updateData[key] === ""
+        ) {
+          setClauses.push(`"${dbColumnName}" = NULL`);
+          continue;
+        }
+
         let lookupTable, lookupNameCol, lookupIdCol;
         switch (dbColumnName) {
           case "commodityId":
@@ -795,20 +921,26 @@ const EditInformation = async (inboundId, updateData) => {
             lookupIdCol = "inboundWarehouseId";
             break;
         }
+
         const lookupQuery = `SELECT "${lookupIdCol}" FROM public."${lookupTable}" WHERE "${lookupNameCol}" = :value LIMIT 1;`;
         const lookupResult = await db.sequelize.query(lookupQuery, {
           type: db.sequelize.QueryTypes.SELECT,
           replacements: { value: updateData[key] },
         });
+
         if (lookupResult.length > 0) {
           setClauses.push(`"${dbColumnName}" = :${key}_id`);
           replacements[`${key}_id`] = lookupResult[0][lookupIdCol];
         } else {
-          console.warn(`Lookup failed for ${key}: ${updateData[key]}`);
+          console.warn(
+            `[EditInfo] Lookup failed for ${key}: '${updateData[key]}' - Setting to NULL (Safe Fallback)`
+          );
+          // OPTIONAL: Fallback to NULL if lookup fails instead of skipping
+          // setClauses.push(`"${dbColumnName}" = NULL`);
           continue;
         }
       }
-      // Handle boolean fields
+      // 2. Handle Boolean Fields
       else if (
         ["isRelabelled", "isRebundled", "isRepackProvided"].includes(
           dbColumnName
@@ -817,16 +949,15 @@ const EditInformation = async (inboundId, updateData) => {
         setClauses.push(`"${dbColumnName}" = :${key}`);
         replacements[key] = updateData[key] === "Yes";
       }
-      // Direct mapping for simple fields
+      // 3. Handle Simple Fields (Text/Number)
       else {
         setClauses.push(`"${dbColumnName}" = :${key}`);
         replacements[key] = updateData[key];
       }
     }
 
-    console.log("Set Clauses:", setClauses);
-
     if (setClauses.length === 0) {
+      console.error("[EditInfo] No valid fields to update.");
       return { success: false, message: "No valid fields to update." };
     }
 
@@ -835,13 +966,55 @@ const EditInformation = async (inboundId, updateData) => {
             SET ${setClauses.join(", ")}, "updatedAt" = NOW()
             WHERE "inboundId" = :inboundId;
         `;
-    console.log("Update Query:", query);
+
+    console.log(`[EditInfo] Executing Update Query...`);
     const [results, metadata] = await db.sequelize.query(query, {
       replacements,
       type: db.sequelize.QueryTypes.UPDATE,
     });
 
-    if (metadata.rowCount > 0) {
+    // Check rowCount safely (Postgres returns metadata.rowCount)
+    const affectedRows = metadata
+      ? metadata.rowCount !== undefined
+        ? metadata.rowCount
+        : metadata
+      : 0;
+    console.log(`[EditInfo] Rows Affected: ${affectedRows}`);
+
+    if (affectedRows > 0) {
+      // --- STEP 3: LOGGING ---
+      if (currentDataResult) {
+        const jobNo = currentDataResult.jobNo || "UnknownJob";
+
+        // Identify changes
+        const changes = [];
+        for (const key in updateData) {
+          const oldVal =
+            currentDataResult[key] !== null
+              ? String(currentDataResult[key])
+              : "";
+          const newVal =
+            updateData[key] !== null ? String(updateData[key]) : "";
+          if (oldVal !== newVal) {
+            changes.push(key);
+          }
+        }
+
+        await createEditLogEntry(
+          jobNo,
+          userId,
+          "Edit Lot Information",
+          {
+            lotNo: currentDataResult.lotNo,
+            fieldsChanged: changes,
+          },
+          {
+            previousData: currentDataResult,
+            updatedRequest: updateData,
+          }
+        );
+      }
+
       return {
         success: true,
         message: "Lot information updated successfully.",
@@ -849,7 +1022,7 @@ const EditInformation = async (inboundId, updateData) => {
     } else {
       return {
         success: false,
-        message: "No lot found with the given inboundId or no changes made.",
+        message: "No rows updated. Data might be identical to existing record.",
       };
     }
   } catch (error) {
