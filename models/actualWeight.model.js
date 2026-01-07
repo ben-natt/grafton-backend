@@ -16,7 +16,7 @@ const findRelatedId = async (
         const inboundQuery = `
           SELECT "inboundId" 
           FROM public.inbounds 
-          WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+          WHERE "jobNo" = :jobNo AND "crewLotNo" = :lotNo
           LIMIT 1
         `;
 
@@ -33,7 +33,7 @@ const findRelatedId = async (
         const lotQuery = `
           SELECT "lotId" 
           FROM public.lot 
-          WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+          WHERE "jobNo" = :jobNo AND "crewLotNo" = :lotNo
           LIMIT 1
         `;
 
@@ -69,7 +69,7 @@ const findRelatedId = async (
     if (isLotId) {
       // If lotId is provided, find corresponding inboundId
       const lotQuery = `
-        SELECT "jobNo", "lotNo" 
+        SELECT "jobNo", "crewLotNo" 
         FROM public.lot 
         WHERE "lotId" = :providedId
         LIMIT 1
@@ -85,12 +85,12 @@ const findRelatedId = async (
       const inboundQuery = `
         SELECT "inboundId" 
         FROM public.inbounds 
-        WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+        WHERE "jobNo" = :jobNo AND "crewLotNo" = :lotNo
         LIMIT 1
       `;
 
       const [inbound] = await db.sequelize.query(inboundQuery, {
-        replacements: { jobNo: lot.jobNo, lotNo: lot.lotNo },
+        replacements: { jobNo: lot.jobNo, lotNo: lot.crewLotNo },
         type: db.sequelize.QueryTypes.SELECT,
       });
 
@@ -98,7 +98,7 @@ const findRelatedId = async (
     } else {
       // If inboundId is provided, find corresponding lotId
       const inboundQuery = `
-        SELECT "jobNo", "lotNo" 
+        SELECT "jobNo", "crewLotNo" 
         FROM public.inbounds 
         WHERE "inboundId" = :providedId
         LIMIT 1
@@ -114,12 +114,12 @@ const findRelatedId = async (
       const lotQuery = `
         SELECT "lotId" 
         FROM public.lot 
-        WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+        WHERE "jobNo" = :jobNo AND "crewLotNo" = :lotNo
         LIMIT 1
       `;
 
       const [lot] = await db.sequelize.query(lotQuery, {
-        replacements: { jobNo: inbound.jobNo, lotNo: inbound.lotNo },
+        replacements: { jobNo: inbound.jobNo, lotNo: inbound.crewLotNo },
         type: db.sequelize.QueryTypes.SELECT,
       });
 
@@ -197,7 +197,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
     } else {
       // For lotId, we still need to find the corresponding inbound record for validation
       const lotQuery = `
-        SELECT "jobNo", "lotNo" 
+        SELECT "jobNo", "crewLotNo" 
         FROM public.lot 
         WHERE "lotId" = :idValue
       `;
@@ -211,12 +211,12 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
 
       // Now find the corresponding inbound record with isWeighted condition
       const inboundQuery = `
-        SELECT "jobNo", "lotNo" 
+        SELECT "jobNo", "crewLotNo" 
         FROM public.inbounds 
-        WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+        WHERE "jobNo" = :jobNo AND "crewLotNo" = :crewLotNo
       `;
       const [inbound] = await db.sequelize.query(inboundQuery, {
-        replacements: { jobNo: lot.jobNo, lotNo: lot.lotNo },
+        replacements: { jobNo: lot.jobNo, crewLotNo: lot.crewLotNo },
         type: db.sequelize.QueryTypes.SELECT,
         transaction,
       });
@@ -239,7 +239,6 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
         "crewLotNo" = :crewLotNo,
         "updatedAt" = NOW()
       WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
-      AND ("isWeighted" IS NULL OR "isWeighted" = false)
       RETURNING *
     `;
 
@@ -1183,9 +1182,9 @@ const checkOutboundScheduleStatus = async (
         // If we only have lotId, we need to find the corresponding jobNo/lotNo first
         // This requires looking up the lot details from your lots table
 
-        // First, find the jobNo and lotNo from the lotId
+        // First, find the jobNo and crewLotNo from the lotId
         const lotQuery = `
-          SELECT "jobNo", "lotNo" 
+          SELECT "jobNo", "crewLotNo" 
           FROM lot
           WHERE "lotId" = ?
         `;
@@ -1240,7 +1239,7 @@ const getHistoricalBundlesByJobAndLot = async (jobNo, lotNo) => {
     const sourceTransactionQuery = `
       SELECT "inboundId"
       FROM public.outboundtransactions
-      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo
+      WHERE "jobNo" = :jobNo AND "crewLotNo" = :lotNo
       ORDER BY "createdAt" DESC
       LIMIT 1;
     `;

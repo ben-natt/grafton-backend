@@ -1,6 +1,93 @@
 const express = require("express");
 const router = express.Router();
+const fs = require("fs");
+const path = require("path");
+const usersModel = require("../models/users.model");
 const actualWeightModel = require("../models/actualWeight.model");
+
+// --- LOGGING CONFIGURATION ---
+const ACTUAL_WEIGHT_LOGS_DIR = path.join(__dirname, "../logs/Actual Weight");
+if (!fs.existsSync(ACTUAL_WEIGHT_LOGS_DIR)) {
+  fs.mkdirSync(ACTUAL_WEIGHT_LOGS_DIR, { recursive: true });
+}
+
+// Helper: Generate Unique Filename (JobNo-CrewLotNo.json)
+const generateUniqueFilename = (dir, jobNo, lotNo) => {
+  // Sanitize filename parts
+  const safeJob = (jobNo || "UNKNOWN").replace(/[^a-z0-9]/gi, "-");
+
+  // Use "UNKNOWN" if lotNo is null/undefined/empty
+  const safeLot =
+    lotNo != null && lotNo !== ""
+      ? lotNo.toString().replace(/[^a-z0-9]/gi, "-")
+      : "UNKNOWN";
+
+  // Use DASH separator as requested
+  const baseName = `${safeJob}-${safeLot}`;
+
+  let filename = `${baseName}.json`;
+  let counter = 1;
+
+  while (fs.existsSync(path.join(dir, filename))) {
+    filename = `${baseName}_${counter}.json`;
+    counter++;
+  }
+  return path.join(dir, filename);
+};
+
+// Helper: Create Log Entry
+const createLogEntry = async (jobNo, lotNo, userId, actionType, logDetails) => {
+  try {
+    // 1. Fetch User Details
+    let username = "Unknown";
+    let userRole = "Unknown";
+    try {
+      if (userId && userId !== "N/A") {
+        const userDetails = await usersModel.getUserById(userId);
+        if (userDetails) {
+          username = userDetails.username;
+          userRole = userDetails.rolename; // Assuming rolename is the field
+        }
+      }
+    } catch (e) {
+      console.error("Log User Fetch Error", e);
+    }
+
+    // 2. Prepare Log Content
+    const timestamp = new Date().toLocaleString("en-SG", {
+      timeZone: "Asia/Singapore",
+    });
+
+    const fileContent = {
+      header: {
+        jobNumber: jobNo,
+        lotNumber: lotNo,
+        timestamp: timestamp,
+        performedBy: {
+          userId: userId || "N/A",
+          username: username,
+          // userRole: userRole, // Optional: include if needed
+        },
+      },
+      action: actionType,
+      data: logDetails,
+    };
+
+    // 3. Write File
+    const filePath = generateUniqueFilename(
+      ACTUAL_WEIGHT_LOGS_DIR,
+      jobNo,
+      lotNo
+    );
+    fs.writeFile(filePath, JSON.stringify(fileContent, null, 2), (err) => {
+      if (err) console.error(`Failed to write log for ${jobNo}-${lotNo}:`, err);
+      else console.log(`[LOG CREATED] ${filePath}`);
+    });
+  } catch (error) {
+    console.error(`Error generating log for ${jobNo}-${lotNo}:`, error);
+  }
+};
+// --- END LOGGING CONFIGURATION ---
 
 // Save actual weight for inbound or lot
 router.post("/actual/save-weight", async (req, res) => {
@@ -9,6 +96,7 @@ router.post("/actual/save-weight", async (req, res) => {
     lotId,
     jobNo,
     lotNo,
+    crewLotNo,
     actualWeight,
     bundles,
     strictValidation,
@@ -134,6 +222,35 @@ router.post("/actual/save-weight", async (req, res) => {
         }
       }
     }
+
+    // --- LOGGING IMPLEMENTATION ---
+    // Extract data for logging.
+    // Note: 'lotNo' in the request usually refers to the Crew Lot Number (e.g. 1, 2, 3)
+    const logDetails = {
+      scale: scaleNo || null,
+      tareWeight: tareWeight || null,
+      bundles: bundles.map((b) => ({
+        bundleNo: b.bundleNo,
+        grossWeight: b.weight,
+        producerWeight: b.stickerWeight,
+        meltNo: b.meltNo,
+      })),
+    };
+
+    const filenameLotNo =
+      crewLotNo !== undefined && crewLotNo !== null && crewLotNo !== ""
+        ? crewLotNo
+        : lotNo;
+
+    // Trigger log creation asynchronously
+    createLogEntry(
+      jobNo,
+      filenameLotNo, // This is the Crew Lot No
+      userId,
+      "Save Actual Weight",
+      logDetails
+    );
+    // --- END LOGGING ---
 
     res.status(200).json({
       success: true,
@@ -433,6 +550,40 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
       resolvedBy // Pass resolvedBy to the model function
     );
 
+    // --- LOGGING IMPLEMENTATION ---
+    try {
+      // 1. Fetch JobNo and LotNo (Crew Lot No) needed for the filename
+      // We only have lotId in the request, so we must query the DB
+      const lotQuery = `SELECT "jobNo", "crewLotNo", "exWarehouseLot" FROM public.lot WHERE "lotId" = :lotId`;
+      const [lotDetails] = await actualWeightModel.db.sequelize.query(
+        lotQuery,
+        {
+          replacements: { lotId },
+          type: actualWeightModel.db.sequelize.QueryTypes.SELECT,
+        }
+      );
+
+      if (lotDetails) {
+        createLogEntry(
+          lotDetails.jobNo,
+          lotDetails.lotNo, // Crew Lot No
+          lotDetails.exWarehouseLot,
+          resolvedBy, // User ID
+          "Duplicate Bundles (Copy Weights)",
+          {
+            sourceExWarehouseLot: sourceExWLot,
+            targetExWarehouseLot: targetExWLot,
+            targetLotId: lotId,
+            resultMessage: result.message, // Contains "Successfully duplicated X bundles..."
+          }
+        );
+      }
+    } catch (logError) {
+      // Don't fail the response if logging fails, just print error
+      console.error("Failed to create log for duplicate bundles:", logError);
+    }
+    // --- END LOGGING ---
+
     res.status(200).json({
       success: true,
       message: "Bundles duplicated and status updated successfully",
@@ -452,7 +603,7 @@ router.post("/actual/duplicate-bundles", async (req, res) => {
 // save lotNo
 router.post("/actual/update-crew-lotno", async (req, res) => {
   try {
-    const { inboundId, lotId, crewLotNo } = req.body;
+    const { inboundId, lotId, crewLotNo, userId } = req.body;
 
     let finalIdValue = null;
     let isInbound = true;
@@ -497,6 +648,34 @@ router.post("/actual/update-crew-lotno", async (req, res) => {
 
     // Response formatting
     if (updateResult) {
+      // --- LOGGING IMPLEMENTATION ---
+      // Extract needed info from the result (Model returns { inbound: ..., lot: ... })
+      // We need jobNo and exWarehouseLot. The updateResult should contain the returned rows.
+      let logJobNo = "Unknown";
+      let logExWLot = "Unknown";
+
+      const record =
+        (updateResult.inbound && updateResult.inbound[0]) ||
+        (updateResult.lot && updateResult.lot[0]);
+
+      if (record) {
+        logJobNo = record.jobNo;
+        logExWLot = record.exWarehouseLot;
+      }
+
+      createLogEntry(
+        logJobNo,
+        crewLotNo, // The new lot number
+        logExWLot,
+        userId,
+        "Update Crew Lot No",
+        {
+          newLotNo: crewLotNo,
+          updatedInbound: !!updateResult.inbound,
+          updatedLot: !!updateResult.lot,
+        }
+      );
+      // --- END LOGGING ---
       res.json({
         success: true,
         message: `Crew Lot No successfully updated to ${crewLotNo} in both tables.`,

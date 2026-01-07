@@ -586,13 +586,12 @@ router.post("/quantity/update", async (req, res) => {
 });
 
 router.post("/lot-inbound/get", async (req, res) => {
-  const { jobNo, lotNo, exWLot } = req.body;
-  if (!jobNo || !lotNo || !exWLot)
+  const { jobNo, exWLot } = req.body;
+  if (!jobNo || !exWLot)
     return res.status(400).json({ error: "Missing fields" });
   try {
     const result = await pendingTasksOfficeModel.getLotInboundDate(
       jobNo,
-      lotNo,
       exWLot
     );
     if (!result) return res.status(404).json({ error: "Lot not found" });
@@ -603,14 +602,13 @@ router.post("/lot-inbound/get", async (req, res) => {
 });
 
 router.post("/lot-inbound/update", async (req, res) => {
-  const { jobNo, lotNo, exWarehouseLot, inboundDate, userId } = req.body;
-  if (!jobNo || !lotNo || !exWarehouseLot || !inboundDate || !userId) {
+  const { jobNo, exWarehouseLot, inboundDate, userId } = req.body;
+  if (!jobNo || !exWarehouseLot || !inboundDate || !userId) {
     return res.status(400).json({ error: "Missing required fields." });
   }
   try {
     const result = await pendingTasksOfficeModel.updateLotInboundDate(
       jobNo,
-      lotNo,
       exWarehouseLot,
       inboundDate,
       userId
@@ -622,7 +620,7 @@ router.post("/lot-inbound/update", async (req, res) => {
       userId,
       "Update Inbound Date",
       { newDate: inboundDate },
-      { lotNo: lotNo, exWarehouseLot: exWarehouseLot }
+      { exWarehouseLot: exWarehouseLot }
     );
 
     res

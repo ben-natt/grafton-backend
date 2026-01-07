@@ -584,7 +584,7 @@ const createGrnAndTransactions = async (formData) => {
             "deliveryDate"
         ) VALUES (
             :outboundId, :inboundId, :jobNo, :lotNo, :shape, :commodity, :brand,
-            :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, :scheduledReleaseDate, :storageReleaseLocation,
+            :exLmeWarehouse, :grossWeight, :netWeight, :actualWeight, :releaseDate, :storageReleaseLocation,
             :noOfBundle, :scheduleOutboundId, :releaseWarehouse, :lotReleaseWeight,
             :transportVendor, :outboundType, :exportDate, :stuffingDate, :containerNo, :sealNo,
             :driverName, :driverIdentityNo, :truckPlateNo, :warehouseStaff, :warehouseSupervisor,

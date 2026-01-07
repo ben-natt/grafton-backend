@@ -2,18 +2,26 @@ const XLSX = require("xlsx");
 const { v4: uuidv4 } = require("uuid");
 const { sequelize, DataTypes } = require("../database");
 const { Op, fn, col, where } = require("sequelize");
+const fs = require("fs");
+const path = require("path");
+const usersModel = require("../models/users.model");
+
 const {
   ScheduleOutbound,
   SelectedInbounds,
-  ScheduleInbound,
-  Lot,
+  StuffingPhotos,
   Inbounds,
   Brand,
   Commodity,
   Shape,
 } = require("../models/schedule_outbound.model")(sequelize, DataTypes);
-const fs = require("fs");
-const auth = require("../middleware/auth");
+
+// --- SETUP LOGGING DIRECTORY ---
+const LOGS_DIR = path.join(__dirname, "../logs/Scheduled Outbounds");
+
+if (!fs.existsSync(LOGS_DIR)) {
+  fs.mkdirSync(LOGS_DIR, { recursive: true });
+}
 
 function excelDateToJSDate(excelDate) {
   if (excelDate === null || excelDate === undefined || excelDate === "")

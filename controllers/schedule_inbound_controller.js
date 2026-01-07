@@ -84,54 +84,6 @@ exports.createScheduleInbound = async (req, res) => {
     for (const jobNo in jobDataMap) {
       const { lots } = jobDataMap[jobNo];
 
-      // --- VALIDATION (From Incoming - Granular Lot Check) ---
-      for (const lot of lots) {
-        // Log what we are looking for
-        console.log(
-          `[VALIDATION CHECK] Searching DB for Job: "${jobNo}" AND Lot: "${lot.lotNo}"...`
-        );
-
-        const existingLot = await Lot.findOne({
-          where: {
-            jobNo: jobNo,
-            lotNo: lot.lotNo,
-          },
-          transaction: transaction,
-        });
-
-        if (existingLot) {
-          // Log EXACTLY what was found
-          console.error(
-            "---------------------------------------------------------------"
-          );
-          console.error(
-            `[DUPLICATE FOUND] System blocked Job: ${jobNo}, Lot: ${lot.lotNo}`
-          );
-          console.error(
-            `   -> FOUND DB ID:      ${
-              existingLot.id || existingLot.lotId || "Unknown ID"
-            }`
-          );
-          console.error(`   -> FOUND Job No:     ${existingLot.jobNo}`);
-          console.error(`   -> FOUND Lot No:     ${existingLot.lotNo}`);
-          console.error(`   -> FOUND Status:     ${existingLot.status}`);
-          console.error(`   -> FOUND Created At: ${existingLot.createdAt}`);
-          console.error(
-            "---------------------------------------------------------------"
-          );
-
-          const error = new Error(
-            `Lot No ${lot.lotNo} is already scheduled for Job No ${jobNo}.`
-          );
-          error.code = "DUPLICATE_SCHEDULE";
-          throw error;
-        } else {
-          console.log(
-            `[VALIDATION PASS] No existing record for Job: "${jobNo}", Lot: "${lot.lotNo}". Proceeding.`
-          );
-        }
-      }
-
       // --- DATA NORMALIZATION (From Incoming) ---
       for (const lot of lots) {
         if (lot.shape && typeof lot.shape === "string") {
@@ -198,6 +150,9 @@ exports.createScheduleInbound = async (req, res) => {
       const scheduleInboundId = scheduleInbound.scheduleInboundId;
 
       // --- UPSERT CHILDREN (Lots) ---
+      // [NOTE] Without lotNo, we can't easily "Update" existing lots via upsert
+      // unless we rely on IDs which we don't have from Excel.
+      // These will be created as NEW rows.
       for (const lot of lots) {
         await Lot.upsert(
           {
@@ -396,8 +351,13 @@ exports.uploadExcel = async (req, res) => {
     const dataRows = jsonData.slice(1);
 
     const jobNoIndex = headers.indexOf("Job No");
-    const lotNoIndex = headers.indexOf("Lot No");
-    // ... (Keep existing index mappings) ...
+    const forbiddenLotNoIndex = headers.indexOf("Lot No");
+    if (forbiddenLotNoIndex !== -1) {
+      return res.status(400).json({
+        errorCode: "REMOVE_LOT_NO_COLUMN", // Special error code for frontend
+        message: "Please remove the 'Lot No' column from the Excel file.",
+      });
+    }
     const nwIndex = headers.indexOf("NW");
     const gwIndex = headers.indexOf("GW");
     const actualWeightIndex = headers.indexOf("Actual Weight");
@@ -438,14 +398,8 @@ exports.uploadExcel = async (req, res) => {
         jobDataMap.set(jobNo, { lots: [] });
       }
 
-      const lotNoValue = parseInt(row[lotNoIndex], 10);
-      if (isNaN(lotNoValue)) {
-        continue;
-      }
-
       const lotData = {
         jobNo: jobNo,
-        lotNo: lotNoValue,
         netWeight: parseFloat(row[nwIndex]) || null,
         grossWeight: parseFloat(row[gwIndex]) || null,
         actualWeight: parseFloat(row[actualWeightIndex]) || null,
@@ -479,23 +433,23 @@ exports.uploadExcel = async (req, res) => {
         where: {
           jobNo: allJobNos,
         },
-        attributes: ["jobNo", "lotNo"], // We only need these columns to check
+        attributes: ["jobNo", "exWarehouseLot"], // We only need these columns to check
         raw: true,
       });
 
       // 3. Create a Set for fast lookup (O(1) complexity)
       // Format: "JOB_NO|LOT_NO"
       const dbLotSet = new Set(
-        existingLots.map((l) => `${l.jobNo}|${l.lotNo}`)
+        existingLots.map((l) => `${l.jobNo}|${l.exWarehouseLot}`)
       );
 
       // 4. Check every lot in the Excel file against the DB Set
       jobDataMap.forEach((value, jobNo) => {
         value.lots.forEach((lot) => {
-          const key = `${jobNo}|${lot.lotNo}`;
+          const key = `${jobNo}|${lot.exWarehouseLot}`;
           if (dbLotSet.has(key)) {
             duplicateErrors.push(
-              `Job: ${jobNo} / Lot: ${lot.lotNo} already exists in the system.`
+              `Job: ${jobNo} / Ex-W-Lot: ${lot.exWarehouseLot} already exists in the system.`
             );
           }
         });
