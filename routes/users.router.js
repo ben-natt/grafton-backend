@@ -87,8 +87,9 @@ router.post("/send-otp", async (req, res) => {
     const otp = generateOtp();
     const expiresAt = Date.now() + OTP_EXPIRATION_MINUTES * 60 * 1000; // 10 minutes expiration
 
-    // Pass a subject to the sendEmail function for clarity
-    const emailSent = await sendEmail(email, otp, "Your Registration OTP");
+    // Pass 'register' as the 3rd argument for the registration template
+    const emailSent = await sendEmail(email, otp, "register");
+    
     if (emailSent) {
       otpStore[email] = { otp, expiresAt, verified: false };
       console.log(`Registration OTP sent to ${email}: ${otp}`);
@@ -173,7 +174,9 @@ router.post("/forgot-password-otp", async (req, res) => {
       lastSent: Date.now(),
     };
 
-    await sendEmail(email, otp, "Password Reset OTP");
+    // Pass 'reset' as the 3rd argument for the password reset template
+    await sendEmail(email, otp, "reset");
+    
     console.log(`Password reset OTP sent to ${email}: ${otp}`);
 
     res
