@@ -16,7 +16,7 @@ models.Lot = sequelize.define(
       type: DataTypes.STRING(16),
       field: "jobNo",
     },
-    lotNo: {
+    crewLotNo: {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
@@ -171,7 +171,7 @@ models.Inbound = sequelize.define(
       type: DataTypes.STRING(16),
       allowNull: false,
     },
-    lotNo: {
+    crewLotNo: {
       type: DataTypes.INTEGER,
       allowNull: false,
     },

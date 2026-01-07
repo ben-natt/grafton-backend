@@ -14,6 +14,83 @@ const {
 const { Op } = require("sequelize");
 const { v4: uuidv4 } = require("uuid");
 const router = express.Router();
+const usersModel = require("../models/users.model");
+
+// --- LOGGING CONFIGURATION ---
+const REPACK_LOGS_DIR = path.join(__dirname, "../logs/Repack");
+if (!fs.existsSync(REPACK_LOGS_DIR)) {
+  fs.mkdirSync(REPACK_LOGS_DIR, { recursive: true });
+}
+
+// Helper: Generate Unique Filename (JobNo-CrewLotNo.json)
+const generateUniqueFilename = (dir, jobNo, lotNo) => {
+  // Sanitize filename parts
+  const safeJob = (jobNo || "UNKNOWN").replace(/[^a-z0-9]/gi, "-");
+
+  // Use "UNKNOWN" if lotNo is null/undefined/empty
+  const safeLot =
+    lotNo != null && lotNo !== ""
+      ? lotNo.toString().replace(/[^a-z0-9]/gi, "-")
+      : "UNKNOWN";
+
+  // Use DASH separator as requested
+  const baseName = `${safeJob}-${safeLot}`;
+
+  let filename = `${baseName}.json`;
+  let counter = 1;
+
+  while (fs.existsSync(path.join(dir, filename))) {
+    filename = `${baseName}_${counter}.json`;
+    counter++;
+  }
+  return path.join(dir, filename);
+};
+
+// Helper: Create Log Entry
+const createLogEntry = async (jobNo, lotNo, userId, actionType, logDetails) => {
+  try {
+    // 1. Fetch User Details
+    let username = "Unknown";
+    try {
+      if (userId && userId !== "N/A") {
+        const userDetails = await usersModel.getUserById(userId);
+        if (userDetails) {
+          username = userDetails.username;
+        }
+      }
+    } catch (e) {
+      console.error("Log User Fetch Error", e);
+    }
+
+    // 2. Prepare Log Content
+    const timestamp = new Date().toLocaleString("en-SG", {
+      timeZone: "Asia/Singapore",
+    });
+
+    const fileContent = {
+      header: {
+        jobNumber: jobNo,
+        lotNumber: lotNo,
+        timestamp: timestamp,
+        performedBy: {
+          userId: userId || "N/A",
+          username: username,
+        },
+      },
+      action: actionType,
+      data: logDetails,
+    };
+
+    // 3. Write File
+    const filePath = generateUniqueFilename(REPACK_LOGS_DIR, jobNo, lotNo);
+    fs.writeFile(filePath, JSON.stringify(fileContent, null, 2), (err) => {
+      if (err) console.error(`Failed to write log for ${jobNo}-${lotNo}:`, err);
+      else console.log(`[LOG CREATED] ${filePath}`);
+    });
+  } catch (error) {
+    console.error(`Error generating log for ${jobNo}-${lotNo}:`, error);
+  }
+};
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -94,15 +171,15 @@ const getChangedFields = (existingData, newData) => {
   return changes;
 };
 
-// Helper function to get IDs from jobNo and lotNo
-const getIdsFromJobAndLot = async (jobNo, lotNo) => {
+// Helper function to get IDs from jobNo and crewLotNo
+const getIdsFromJobAndLot = async (jobNo, crewLotNo) => {
   const [inbound, lot] = await Promise.all([
     Inbound.findOne({
-      where: { jobNo, lotNo },
+      where: { jobNo, crewLotNo },
       attributes: ["inboundId"],
     }),
     Lot.findOne({
-      where: { jobNo, lotNo },
+      where: { jobNo, crewLotNo },
       attributes: ["lotId"],
     }),
   ]);
@@ -122,7 +199,7 @@ const findRelatedId = async (providedId, isLotId) => {
     const inbound = await Inbound.findOne({
       where: {
         jobNo: lot.jobNo,
-        lotNo: lot.lotNo,
+        crewLotNo: lot.crewLotNo,
       },
     });
     return inbound ? inbound.inboundId : null;
@@ -133,7 +210,7 @@ const findRelatedId = async (providedId, isLotId) => {
     const lot = await Lot.findOne({
       where: {
         jobNo: inbound.jobNo,
-        lotNo: inbound.lotNo,
+        crewLotNo: inbound.crewLotNo,
       },
     });
     return lot ? lot.lotId : null;
@@ -146,7 +223,7 @@ const handleRepack = async (req, res, isMobile = false) => {
       inboundId,
       lotId,
       jobNo,
-      lotNo,
+      crewLotNo,
       noOfBundle,
       isRelabelled,
       isRebundled,
@@ -158,13 +235,14 @@ const handleRepack = async (req, res, isMobile = false) => {
       existingBeforeImages,
       existingAfterImages,
       pieceEntries,
+      userId,
     } = req.body;
 
     // Validate required fields
-    if ((!inboundId && !lotId && (!jobNo || !lotNo)) || !noOfBundle) {
+    if ((!inboundId && !lotId && (!jobNo || !crewLotNo)) || !noOfBundle) {
       return res.status(400).json({
         error:
-          "Missing required fields: either inboundId or lotId or (jobNo+lotNo), and noOfBundle",
+          "Missing required fields: either inboundId or lotId or (jobNo+crewLotNo), and noOfBundle",
       });
     }
 
@@ -173,9 +251,9 @@ const handleRepack = async (req, res, isMobile = false) => {
     let isLotRepack = false;
     let parentRecord;
 
-    // Resolve IDs if jobNo and lotNo are provided
-    if (jobNo && lotNo && (!inboundId || !lotId)) {
-      const ids = await getIdsFromJobAndLot(jobNo, lotNo);
+    // Resolve IDs if jobNo and crewLotNo are provided
+    if (jobNo && crewLotNo && (!inboundId || !lotId)) {
+      const ids = await getIdsFromJobAndLot(jobNo, crewLotNo);
       resolvedInboundId = ids.inboundId;
       resolvedLotId = ids.lotId;
     } else {
@@ -336,6 +414,9 @@ const handleRepack = async (req, res, isMobile = false) => {
       }
     }
 
+    let uploadedBeforeImages = [];
+    let uploadedAfterImages = [];
+
     // Handle image uploads if isRepackProvided is true
     if (isRepackProvidedBool) {
       let keepBeforeImages = [];
@@ -373,14 +454,14 @@ const handleRepack = async (req, res, isMobile = false) => {
 
       if (beforeFiles.length > 0) {
         const parentJobNo = parentRecord.jobNo;
-        const parentLotNo = parentRecord.lotNo;
+        const parentCrewLotNo = parentRecord.crewLotNo;
 
         for (const file of beforeFiles) {
-          const uniqueName = `${parentJobNo}-${parentLotNo}-${noOfBundle}/before-${uuidv4()}${path.extname(
+          const uniqueName = `${parentJobNo}-${parentCrewLotNo}-${noOfBundle}/before-${uuidv4()}${path.extname(
             file.originalname
           )}`;
           const newPath = path.join(
-            __dirname, 
+            __dirname,
             `../uploads/img/repacked/${uniqueName}`
           );
 
@@ -425,10 +506,10 @@ const handleRepack = async (req, res, isMobile = false) => {
 
       if (afterFiles.length > 0) {
         const parentJobNo = parentRecord.jobNo;
-        const parentLotNo = parentRecord.lotNo;
+        const parentCrewLotNo = parentRecord.crewLotNo;
 
         for (const file of afterFiles) {
-          const uniqueName = `${parentJobNo}-${parentLotNo}-${noOfBundle}/after-${uuidv4()}${path.extname(
+          const uniqueName = `${parentJobNo}-${parentCrewLotNo}-${noOfBundle}/after-${uuidv4()}${path.extname(
             file.originalname
           )}`;
           const newPath = path.join(
@@ -581,6 +662,50 @@ const handleRepack = async (req, res, isMobile = false) => {
       await Promise.all(updatePromises);
     }
 
+    // --- LOGGING IMPLEMENTATION ---
+    const logDetails = {
+      bundleNo: parseInt(noOfBundle),
+      repackData: {
+        isRelabelled: isRelabelledBool,
+        isRebundled: isRebundledBool,
+        isRepackProvided: isRepackProvidedBool,
+        noOfMetalStrap: metalStrapValue,
+        repackDescription: repackDescription || null,
+        incompleteBundle: incompleteBundleBool,
+        noOfPieces: noOfPiecesInt,
+        pieceEntries: incomingPieces,
+      },
+      images: {
+        newlyUploadedBefore: uploadedBeforeImages,
+        newlyUploadedAfter: uploadedAfterImages,
+        existingBeforeKept: existingBeforeImages
+          ? JSON.parse(existingBeforeImages).map((i) => i.imageUrl)
+          : [],
+        existingAfterKept: existingAfterImages
+          ? JSON.parse(existingAfterImages).map((i) => i.imageUrl)
+          : [],
+      },
+    };
+
+    // Determine filename parts for logging (JobNo and Crew Lot No)
+    const logJobNo = parentRecord.jobNo || jobNo;
+    const logLotNo =
+      parentRecord.crewLotNo !== undefined &&
+      parentRecord.crewLotNo !== null &&
+      parentRecord.crewLotNo !== ""
+        ? parentRecord.crewLotNo
+        : parentRecord.lotNo || crewLotNo;
+
+    // Trigger log creation asynchronously
+    createLogEntry(
+      logJobNo,
+      logLotNo,
+      userId,
+      "Bundle Repack Update",
+      logDetails
+    );
+    // --- END LOGGING ---
+
     // Return the saved bundle
     const savedBundle = await InboundBundle.findByPk(
       inboundBundle.inboundBundleId,
@@ -645,7 +770,7 @@ router.post(
 router.get("/bundle-repack/:type/:id/:bundleNo", async (req, res) => {
   try {
     const { type, id, bundleNo } = req.params;
-    const { jobNo, lotNo } = req.query;
+    const { jobNo, crewLotNo } = req.query;
 
     if (!["inbound", "lot"].includes(type)) {
       return res
@@ -667,9 +792,9 @@ router.get("/bundle-repack/:type/:id/:bundleNo", async (req, res) => {
         whereClause.inboundId = parseInt(id);
         // Try to find related lotId
         const inbound = await Inbound.findByPk(parseInt(id));
-        if (inbound && inbound.jobNo && inbound.lotNo) {
+        if (inbound && inbound.jobNo && inbound.crewLotNo) {
           const lot = await Lot.findOne({
-            where: { jobNo: inbound.jobNo, lotNo: inbound.lotNo },
+            where: { jobNo: inbound.jobNo, crewLotNo: inbound.crewLotNo },
           });
           if (lot) {
             whereClause = {
@@ -682,9 +807,9 @@ router.get("/bundle-repack/:type/:id/:bundleNo", async (req, res) => {
         whereClause.lotId = parseInt(id);
         // Try to find related inboundId
         const lot = await Lot.findByPk(parseInt(id));
-        if (lot && lot.jobNo && lot.lotNo) {
+        if (lot && lot.jobNo && lot.crewLotNo) {
           const inbound = await Inbound.findOne({
-            where: { jobNo: lot.jobNo, lotNo: lot.lotNo },
+            where: { jobNo: lot.jobNo, crewLotNo: lot.crewLotNo },
           });
           if (inbound) {
             whereClause = {
@@ -697,11 +822,11 @@ router.get("/bundle-repack/:type/:id/:bundleNo", async (req, res) => {
           }
         }
       }
-    } else if (jobNo && lotNo) {
-      // Use jobNo and lotNo to find records
+    } else if (jobNo && crewLotNo) {
+      // Use jobNo and crewLotNo to find records
       const [inbound, lot] = await Promise.all([
-        Inbound.findOne({ where: { jobNo, lotNo } }),
-        Lot.findOne({ where: { jobNo, lotNo } }),
+        Inbound.findOne({ where: { jobNo, crewLotNo } }),
+        Lot.findOne({ where: { jobNo, crewLotNo } }),
       ]);
 
       if (inbound && lot) {
@@ -786,7 +911,7 @@ router.get("/bundle-repack/:type/:id/:bundleNo", async (req, res) => {
 router.get("/check-repack/:type/:id/:bundleNo", async (req, res) => {
   try {
     const { type, id, bundleNo } = req.params;
-    const { jobNo, lotNo } = req.query;
+    const { jobNo, crewLotNo } = req.query;
 
     if (!["inbound", "lot"].includes(type)) {
       return res
@@ -802,9 +927,9 @@ router.get("/check-repack/:type/:id/:bundleNo", async (req, res) => {
         whereClause.inboundId = parseInt(id);
         // Try to find related lotId
         const inbound = await Inbound.findByPk(parseInt(id));
-        if (inbound && inbound.jobNo && inbound.lotNo) {
+        if (inbound && inbound.jobNo && inbound.crewLotNo) {
           const lot = await Lot.findOne({
-            where: { jobNo: inbound.jobNo, lotNo: inbound.lotNo },
+            where: { jobNo: inbound.jobNo, crewLotNo: inbound.crewLotNo },
           });
           if (lot) {
             whereClause = {
@@ -817,9 +942,9 @@ router.get("/check-repack/:type/:id/:bundleNo", async (req, res) => {
         whereClause.lotId = parseInt(id);
         // Try to find related inboundId
         const lot = await Lot.findByPk(parseInt(id));
-        if (lot && lot.jobNo && lot.lotNo) {
+        if (lot && lot.jobNo && lot.crewLotNo) {
           const inbound = await Inbound.findOne({
-            where: { jobNo: lot.jobNo, lotNo: lot.lotNo },
+            where: { jobNo: lot.jobNo, crewLotNo: lot.crewLotNo },
           });
           if (inbound) {
             whereClause = {
@@ -832,10 +957,10 @@ router.get("/check-repack/:type/:id/:bundleNo", async (req, res) => {
           }
         }
       }
-    } else if (jobNo && lotNo) {
+    } else if (jobNo && crewLotNo) {
       const [inbound, lot] = await Promise.all([
-        Inbound.findOne({ where: { jobNo, lotNo } }),
-        Lot.findOne({ where: { jobNo, lotNo } }),
+        Inbound.findOne({ where: { jobNo, crewLotNo } }),
+        Lot.findOne({ where: { jobNo, crewLotNo } }),
       ]);
 
       if (inbound && lot) {

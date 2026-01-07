@@ -20,10 +20,6 @@ const getPendingTasksWithIncompleteStatus = async (
     const { startDate, endDate, exWarehouseLot } = filters;
     const offset = (page - 1) * pageSize;
 
-    // ✅ UPDATED: Check isWeighted in BOTH lot and inbounds tables for backward compatibility
-    // This handles data where:
-    // 1. OLD DATA: Only lot.isWeighted was updated (inbounds.isWeighted = false)
-    // 2. NEW DATA: Both lot.isWeighted and inbounds.isWeighted are updated
     const baseWhere = [
       `l."status" = 'Received'`,
       `l."report" = false`,

@@ -243,7 +243,7 @@ const findInboundTasksOffice = async (
         (jr."reportStatus" = 'resolved') as "isFinalized",
         u.username as "supervisorUsername"
       FROM public.job_reports jr
-      JOIN public.users u ON jr."reportedById" = u.userid
+      LEFT JOIN public.users u ON jr."reportedById" = u.userid
       WHERE jr."jobNo" IN (:jobNos) 
       AND (jr."reportStatus" = 'pending' OR jr."reportStatus" = 'accepted')
     `;
@@ -1104,19 +1104,19 @@ const getOfficePendingStatus = async (userId) => {
   }
 };
 
-const getLotInboundDate = async (jobNo, lotNo, exWarehouseLot) => {
+const getLotInboundDate = async (jobNo, exWarehouseLot) => {
   try {
     const query = `
       SELECT 
         TO_CHAR("inbounddate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YYYY') AS "inboundDate"
       FROM public.lot
-      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo AND "exWarehouseLot" = :exWarehouseLot
+      WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
       ORDER BY "updatedAt" DESC
       LIMIT 1;
     `;
 
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo, lotNo, exWarehouseLot },
+      replacements: { jobNo, exWarehouseLot },
       type: db.sequelize.QueryTypes.SELECT,
     });
     return result[0] || null;
@@ -1126,21 +1126,16 @@ const getLotInboundDate = async (jobNo, lotNo, exWarehouseLot) => {
   }
 };
 
-const updateLotInboundDate = async (
-  jobNo,
-  lotNo,
-  exWarehouseLot,
-  inboundDate
-) => {
+const updateLotInboundDate = async (jobNo, exWarehouseLot, inboundDate) => {
   try {
     const query = `
       UPDATE public.lot
       SET "inbounddate" = :inboundDate, "updatedAt" = NOW()
-      WHERE "jobNo" = :jobNo AND "lotNo" = :lotNo AND "exWarehouseLot" = :exWarehouseLot
+      WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :exWarehouseLot
       RETURNING *;
     `;
     const result = await db.sequelize.query(query, {
-      replacements: { jobNo, lotNo, exWarehouseLot, inboundDate },
+      replacements: { jobNo, exWarehouseLot, inboundDate },
       type: db.sequelize.QueryTypes.UPDATE,
     });
     return result[0];

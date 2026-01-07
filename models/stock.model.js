@@ -9,6 +9,11 @@ if (!fs.existsSync(EDIT_LOGS_DIR)) {
   fs.mkdirSync(EDIT_LOGS_DIR, { recursive: true });
 }
 
+const OUTBOUND_LOGS_DIR = path.join(__dirname, "../logs/Scheduled Outbounds");
+if (!fs.existsSync(OUTBOUND_LOGS_DIR)) {
+  fs.mkdirSync(OUTBOUND_LOGS_DIR, { recursive: true });
+}
+
 // --- HELPER: Generate Unique Filename ---
 const generateUniqueFilename = (dir, jobNo) => {
   let filename = `${jobNo}.json`;
@@ -750,6 +755,118 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
     }
 
     await t.commit();
+
+    // ========================================================
+    // --- START LOGGING SYSTEM (Scheduled Outbounds) ---
+    // ========================================================
+    try {
+      // 1. Fetch full user details from DB to get Username and Role for logs
+      let username = "Unknown User";
+      let userRole = "Unknown Role";
+
+      if (userId) {
+        try {
+          const fullUser = await usersModel.getUserById(userId);
+          if (fullUser) {
+            username = fullUser.username;
+            userRole = fullUser.rolename;
+          }
+        } catch (err) {
+          console.warn(
+            "Could not fetch user details for logging:",
+            err.message
+          );
+        }
+      }
+
+      // 2. Prepare uploaded photos paths if available
+      const uploadedPhotoPaths = files.map(
+        (f) => `/uploads/img/stuffing_photos/${f.filename}`
+      );
+
+      // 3. Prepare JSON Data
+      const logData = {
+        jobNo: jobNumber,
+        outboundJobNo: jobNumber,
+        action: "Schedule Outbound Created",
+        updatedBy: {
+          userId: userId,
+          username: username,
+          userRole: userRole,
+        },
+        updateTime: new Date().toLocaleString(),
+        isoTimestamp: new Date().toISOString(),
+        scheduleDetails: {
+          releaseDate: releaseStartDate,
+          releaseEndDate: releaseEndDate,
+          lotReleaseWeight,
+          outboundType,
+          exportDate,
+          stuffingDate,
+          containerNo,
+          sealNo,
+          deliveryDate,
+          storageReleaseLocation,
+          releaseWarehouse,
+          transportVendor,
+          tareWeight,
+          uom,
+          selectedLots: parsedLots,
+        },
+        uploadedPhotos: uploadedPhotoPaths,
+      };
+
+      // 4. Determine Filename based on DB Sequence [UPDATED LOGIC]
+      let logFilename = `${jobNumber}.json`;
+
+      try {
+        // Count how many times this Job No exists in the table (including the one just committed)
+        const countQuery = `SELECT COUNT(*)::int as "count" FROM public.scheduleoutbounds WHERE "outboundJobNo" = :jobNumber`;
+        const countResult = await db.sequelize.query(countQuery, {
+          replacements: { jobNumber },
+          type: db.sequelize.QueryTypes.SELECT,
+        });
+
+        // Get the count (e.g., 1 for the first one, 2 for the second)
+        const count = countResult[0]?.count || 1;
+
+        // If count > 1, it means the job number existed previously, so we append the sequence
+        // Example: JOB123.json (1st), JOB123-2.json (2nd), JOB123-3.json (3rd)
+        if (count > 1) {
+          logFilename = `${jobNumber}-${count}.json`;
+        }
+      } catch (seqError) {
+        console.warn(
+          "[LOG SEQ ERROR] Failed to fetch DB sequence, using timestamp fallback:",
+          seqError
+        );
+        // Fallback to timestamp if DB count fails
+        logFilename = `${jobNumber}_${Date.now()}.json`;
+      }
+
+      const logFilePath = path.join(OUTBOUND_LOGS_DIR, logFilename);
+
+      // 5. Write to File
+      fs.writeFile(logFilePath, JSON.stringify(logData, null, 2), (err) => {
+        if (err) {
+          console.error(
+            `[LOG ERROR] Failed to write outbound log for ${jobNumber}:`,
+            err
+          );
+        } else {
+          console.log(`[LOG CREATED] ${logFilePath}`);
+        }
+      });
+    } catch (logError) {
+      console.error(
+        "[LOGGING SYSTEM FAILURE] Error creating outbound log:",
+        logError
+      );
+    }
+    // ========================================================
+    // --- END LOGGING SYSTEM ---
+    // ========================================================
+
     return {
       success: true,
       message: "Schedule created successfully.",
