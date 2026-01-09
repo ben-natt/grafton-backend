@@ -38,7 +38,7 @@ const createEditLogEntry = async (
     let username = "Unknown";
     let userRole = "Unknown";
     try {
-      if (userId) {
+      if (userId && userId !== "N/A") {
         const userDetails = await usersModel.getUserById(userId);
         if (userDetails) {
           username = userDetails.username;
