@@ -223,6 +223,11 @@ router.get("/scheduled-inbound", async (req, res) => {
 // router.js
 
 router.get("/scheduled-outbound", async (req, res) => {
+  // --- DEBUG LOG START ---
+  console.log('\n!!! ROUTER HIT: /scheduled-outbound (Activities Router) !!!');
+  console.log('Incoming Filters:', JSON.stringify(req.query, null, 2));
+  // --- DEBUG LOG END ---
+
   try {
     const filters = {
       commodity: req.query.commodity,
@@ -257,6 +262,10 @@ router.get("/scheduled-outbound", async (req, res) => {
       page,
       pageSize,
     });
+    
+    // --- DEBUG RESULT LOG ---
+    console.log(`>> Sending back ${scheduledOutbounds.data.length} records out of ${scheduledOutbounds.total} total.`);
+    
     res.json(scheduledOutbounds);
   } catch (error) {
     console.error("Error fetching scheduled outbound records:", error);
