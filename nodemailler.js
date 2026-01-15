@@ -77,7 +77,7 @@ async function sendEmail(email, otp, type) {
                         <table align="center" style="width: 100%; max-width: 600px; text-align: center; padding-top: 20px;">
                             <tr>
                                 <td style="font-size: 12px; color: #999999;">
-                                    2022 - 2025 © NATT.WORLD, All rights reserved.
+                                    2022 - 2026 © NATT.WORLD, All rights reserved.
                                 </td>
                             </tr>
                         </table>

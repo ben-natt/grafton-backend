@@ -212,7 +212,7 @@ const findInboundTasksOffice = async (
       WHERE s."jobNo" IN (:jobNos)
     `;
 
-    // B. Lots
+   // B. Lots
     const tasksQuery = `
       SELECT DISTINCT ON (l."lotId")
         l."jobNo",
@@ -224,6 +224,11 @@ const findInboundTasksOffice = async (
         l.shape,
         l."expectedBundleCount" AS quantity,
         l.report AS "hasWarning",
+        -- NEW FIELD: Check if there is a specific pending lot report
+        EXISTS (
+          SELECT 1 FROM public.lot_reports lr 
+          WHERE lr."lotId" = l."lotId" AND lr."reportStatus" = 'pending'
+        ) AS "hasSpecificLotReport", 
         l."reportDuplicate" AS "showCopyIcon",
         TO_CHAR(l."inbounddate" AT TIME ZONE 'Asia/Singapore', 'DD/MM/YY') AS "date",
         COALESCE(u.username, 'N/A') AS "scheduledBy"
