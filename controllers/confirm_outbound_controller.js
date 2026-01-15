@@ -2,7 +2,67 @@ const outboundModel = require("../models/confirm_outbound.model");
 const pendingTasksModel = require("../models/pending_tasks_model");
 const pdfService = require("../pdf.services");
 const fs = require("fs").promises;
+const fsSync = require("fs");
 const path = require("path");
+const usersModel = require("../models/users.model");
+
+const LOGS_DIR = path.join(__dirname, "../logs/Confirmed Outbounds");
+if (!fsSync.existsSync(LOGS_DIR)) {
+  fsSync.mkdirSync(LOGS_DIR, { recursive: true });
+}
+
+const generateUniqueFilename = (dir, jobNo) => {
+  const safeJob = (jobNo || "UNKNOWN").replace(/[^a-z0-9]/gi, "-");
+  let baseName = `${safeJob}`;
+  let filename = `${baseName}.json`;
+  let counter = 1;
+
+  while (fsSync.existsSync(path.join(dir, filename))) {
+    filename = `${baseName}_${counter}.json`;
+    counter++;
+  }
+  return path.join(dir, filename);
+};
+
+const createLogEntry = async (jobNo, userId, actionType, logDetails) => {
+  try {
+    let username = "Unknown";
+    try {
+      if (userId) {
+        const idToFetch = typeof userId === "object" ? userId.id : userId;
+        const userDetails = await usersModel.getUserById(idToFetch);
+        if (userDetails) {
+          username = userDetails.username;
+        }
+      }
+    } catch (e) {
+      console.error("Log User Fetch Error", e);
+    }
+
+    const timestamp = new Date().toLocaleString("en-SG", {
+      timeZone: "Asia/Singapore",
+    });
+
+    const fileContent = {
+      header: {
+        outboundJobNo: jobNo,
+        timestamp: timestamp,
+        performedBy: {
+          userId: userId || "N/A",
+          username: username,
+        },
+      },
+      action: actionType,
+      data: logDetails,
+    };
+
+    const filePath = generateUniqueFilename(LOGS_DIR, jobNo);
+    await fs.writeFile(filePath, JSON.stringify(fileContent, null, 2));
+    console.log(`[LOG CREATED] ${filePath}`);
+  } catch (error) {
+    console.error(`Error generating log for ${jobNo}:`, error);
+  }
+};
 
 const getConfirmationDetails = async (req, res) => {
   try {
@@ -52,7 +112,6 @@ const confirmOutbound = async (req, res) => {
       });
     }
 
-    console.log("CONTROLLER: Confirming outbound selection is valid.");
     res.status(200).json({
       message: "Selection confirmed. Proceed to GRN generation.",
       data: {
@@ -106,6 +165,8 @@ const updateOutboundDetails = async (req, res) => {
       sealNo,
       tareWeight,
       uom,
+      outboundJobNo,
+      userId,
     } = req.body;
 
     if (!selectedInboundId) {
@@ -124,6 +185,28 @@ const updateOutboundDetails = async (req, res) => {
       }
     );
 
+    // --- LOGGING ---
+    if (outboundJobNo) {
+      const logDetails = {
+        updateType: "Container/Shipping Details",
+        changes: {
+          selectedInboundId,
+          releaseDate,
+          containerNo,
+          sealNo,
+          tareWeight,
+          uom,
+        },
+      };
+      createLogEntry(
+        outboundJobNo,
+        userId,
+        "Update Outbound Details",
+        logDetails
+      );
+    }
+    // --- END LOGGING ---
+
     res.status(200).json({ message: "Outbound details updated successfully." });
   } catch (error) {
     console.error("Error updating outbound details:", error);
@@ -137,14 +220,10 @@ const getUserSignature = async (req, res) => {
     if (!userId) {
       return res.status(400).json({ error: "User ID is required." });
     }
-
     const signature = await outboundModel.getUserSignature(userId);
-
     if (signature) {
-      // If found, send the signature back as a base64 string
       res.status(200).json({ signature: signature.toString("base64") });
     } else {
-      // This is not an error; it's expected if the user has never signed.
       res.status(404).json({ message: "Signature not found for this user." });
     }
   } catch (error) {
@@ -163,6 +242,13 @@ const createGrnAndTransactions = async (req, res) => {
       warehouseStaffSignature,
       warehouseSupervisorSignature,
       scheduleOutboundId,
+      outboundJobNo,
+      isWeightVisible,
+      containerNo,
+      sealNo,
+      releaseDate,
+      tareWeight,
+      uom,
     } = grnDataFromRequest;
 
     // --- Photo Limit Validation ---
@@ -172,7 +258,6 @@ const createGrnAndTransactions = async (req, res) => {
         ? stuffingPhotos.length
         : 0;
 
-    // Get the count of photos already in the database for this schedule
     const existingPhotosCount =
       await outboundModel.countStuffingPhotosByScheduleId(scheduleOutboundId);
 
@@ -182,11 +267,9 @@ const createGrnAndTransactions = async (req, res) => {
         details: `A maximum of ${PHOTO_LIMIT} photos is allowed. You already have ${existingPhotosCount} saved and are trying to add ${newPhotosCount}.`,
       });
     }
-    // --- End Validation ---
 
     if (warehouseSupervisorSignature) {
       const savedSignature = await outboundModel.getUserSignature(userId);
-
       if (!savedSignature) {
         const signatureBuffer = Buffer.from(
           warehouseSupervisorSignature,
@@ -196,7 +279,6 @@ const createGrnAndTransactions = async (req, res) => {
       }
     }
 
-    // Convert all signatures from base64 to Buffer before passing to the model
     if (driverSignature) {
       grnDataFromRequest.driverSignature = Buffer.from(
         driverSignature,
@@ -216,7 +298,7 @@ const createGrnAndTransactions = async (req, res) => {
       );
     }
 
-    // --- Image Handling Logic --- (rest of the function continues as before)
+    let newlyUploadedPaths = [];
     if (stuffingPhotos && Array.isArray(stuffingPhotos)) {
       const photoUrls = [];
       const uploadDir = path.join(
@@ -237,12 +319,66 @@ const createGrnAndTransactions = async (req, res) => {
         photoUrls.push(imageUrl);
       }
       grnDataFromRequest.stuffingPhotos = photoUrls;
+      newlyUploadedPaths = photoUrls;
     }
 
     const scheduleId = parseInt(grnDataFromRequest.jobIdentifier, 10);
 
-    const { createdOutbound, lotsForPdf } =
-      await outboundModel.createGrnAndTransactions(grnDataFromRequest);
+    const {
+      createdOutbound,
+      lotsForPdf,
+      deletedPhotoUrls = [], 
+    } = await outboundModel.createGrnAndTransactions(grnDataFromRequest);
+
+    // --- LOGGING IMPLEMENTATION ---
+    const loggedLots = lotsForPdf.map((lot) => ({
+      lotNo: `${lot.jobNo}-${lot.lotNo}`,
+      brand: lot.brand,
+      commodity: lot.commodity,
+      grossWeight: lot.grossWeight,
+      netWeight: lot.netWeight,
+      actualWeight: lot.actualWeight,
+      noOfBundle: lot.noOfBundle,
+    }));
+
+    // Ensure we log "N/A" only if values are explicitly missing/undefined, not just empty strings
+    const logContainerNo =
+      containerNo !== undefined && containerNo !== null ? containerNo : "N/A";
+    const logSealNo = sealNo !== undefined && sealNo !== null ? sealNo : "N/A";
+
+    const logDetails = {
+      grnInfo: {
+        grnNo: createdOutbound.grnNo,
+        outboundId: createdOutbound.outboundId,
+        scheduleId: scheduleId,
+      },
+      containerDetails: {
+        containerNo: logContainerNo,
+        sealNo: logSealNo,
+        releaseDate: releaseDate,
+        tareWeight: tareWeight,
+        uom: uom,
+      },
+      settings: {
+        isWeightVisible: isWeightVisible,
+      },
+      photos: {
+        newlyAddedCount: newPhotosCount,
+        existingCountBefore: existingPhotosCount,
+        newlyUploadedPaths: newlyUploadedPaths,
+        deletedCount: deletedPhotoUrls.length,
+        deletedPhotoUrls: deletedPhotoUrls,
+      },
+      selectedLots: loggedLots,
+    };
+
+    createLogEntry(
+      outboundJobNo,
+      userId,
+      "GRN Generated / Outbound Confirmed",
+      logDetails
+    );
+    // --- END LOGGING ---
 
     const scheduleInfo = await pendingTasksModel.pendingOutboundTasksUser(
       scheduleId
@@ -263,13 +399,20 @@ const createGrnAndTransactions = async (req, res) => {
     ];
 
     const multipleBrands = uniqueBrands.length > 1;
-
     const singleBrandForHeader =
       uniqueBrands.length === 1 ? uniqueBrands[0] : "";
 
+    // IMPORTANT: Ensure Container/Seal appear in PDF if they are in the request but not yet in DB schedule info
+    const finalContainerNo =
+      containerNo && containerNo.trim() !== ""
+        ? containerNo
+        : scheduleInfo.containerNo;
+    const finalSealNo =
+      sealNo && sealNo.trim() !== "" ? sealNo : scheduleInfo.sealNo;
+
     const containerAndSealNo =
-      scheduleInfo.containerNo && scheduleInfo.sealNo
-        ? `${scheduleInfo.containerNo} / ${scheduleInfo.sealNo}`
+      finalContainerNo && finalSealNo
+        ? `${finalContainerNo} / ${finalSealNo}`
         : "N/A";
 
     const parseAndFix = (val, decimals = 2) => {
@@ -277,7 +420,6 @@ const createGrnAndTransactions = async (req, res) => {
       return !isNaN(num) ? num.toFixed(decimals) : (0).toFixed(decimals);
     };
 
-    // FIX: Use the releaseDate from the request for the PDF, don't use new Date().
     const releaseDateForPdf = new Date(grnDataFromRequest.releaseDate);
 
     const pdfData = {
@@ -313,9 +455,9 @@ const createGrnAndTransactions = async (req, res) => {
         return {
           lotNo: `${lot.jobNo}-${lot.lotNo}`,
           bundles: lot.noOfBundle,
-          grossWeightMt: parseAndFix(lot.grossWeight, 2), // Not used in PDF but kept for consistency
+          grossWeightMt: parseAndFix(lot.grossWeight, 2),
           netWeightMt: parseAndFix(lot.netWeight, 2),
-          actualWeightMt: parseAndFix(displayWeight, 2), // This will be drawn in the Gross Weight space
+          actualWeightMt: parseAndFix(displayWeight, 2),
           brand: lot.brand,
         };
       }),
@@ -358,15 +500,12 @@ const createGrnAndTransactions = async (req, res) => {
   } catch (error) {
     console.error(error);
     if (!res.headersSent) {
-      // Check for our custom duplicate error
       if (error.isDuplicate) {
         return res.status(409).json({
-          // 409 Conflict is a good status code for this
           error: "GRN Generation Failed",
           details: error.message,
         });
       } else {
-        // Added else to prevent sending two responses
         res.status(500).json({
           error: "Failed to create GRN.",
           details: error.message,
@@ -385,15 +524,3 @@ module.exports = {
   getUserSignature,
   createGrnAndTransactions,
 };
-
-// const getOperators = async (req, res) => {
-//   try {
-//     const users = await outboundModel.getOperators();
-//     const staff = users.filter((user) => user.roleId === 1);
-//     const supervisors = users.filter((user) => user.roleId === 2);
-
-//     res.status(200).json({ staff, supervisors });
-//   } catch (error) {
-//     res.status(500).json({ error: "Failed to fetch operators." });
-//   }
-// };

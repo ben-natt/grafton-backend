@@ -262,9 +262,9 @@ exports.getAllBrands = async (req, res) => {
     const [results] = await sequelize.query(
       'SELECT "brandName" FROM public.brands ORDER BY "brandName" ASC'
     );
-    
+
     // Map the result to a simple array of strings
-    const brands = results.map(row => row.brandName);
+    const brands = results.map((row) => row.brandName);
     res.status(200).json(brands);
   } catch (error) {
     console.error("Error fetching brands:", error);
@@ -346,7 +346,9 @@ exports.uploadExcel = async (req, res) => {
   // 1. Initial Check: Was a file actually received?
   if (!req.file) {
     console.error("[UPLOAD ERROR] No file received in request.");
-    return res.status(400).json({ message: "No file uploaded. Please select an Excel file." });
+    return res
+      .status(400)
+      .json({ message: "No file uploaded. Please select an Excel file." });
   }
 
   console.log(`[UPLOAD START] Processing file: ${req.file.originalname}`);
@@ -356,7 +358,7 @@ exports.uploadExcel = async (req, res) => {
     const workbook = XLSX.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    
+
     // Convert to 2D array (header: 1) for manual header validation
     const jsonData = XLSX.utils.sheet_to_json(worksheet, {
       raw: false,
@@ -366,8 +368,12 @@ exports.uploadExcel = async (req, res) => {
 
     // 3. Validation: Empty File
     if (jsonData.length < 2) {
-      console.error(`[UPLOAD ERROR] File ${req.file.originalname} has no data rows.`);
-      return res.status(400).json({ message: "Excel file is empty or missing data rows." });
+      console.error(
+        `[UPLOAD ERROR] File ${req.file.originalname} has no data rows.`
+      );
+      return res
+        .status(400)
+        .json({ message: "Excel file is empty or missing data rows." });
     }
 
     const headers = jsonData[0];
@@ -400,7 +406,12 @@ exports.uploadExcel = async (req, res) => {
 
     // 5. Parse Rows into jobDataMap
     for (const row of dataRows) {
-      if (!row || row.length === 0 || row.every(cell => cell === null || cell === "")) continue;
+      if (
+        !row ||
+        row.length === 0 ||
+        row.every((cell) => cell === null || cell === "")
+      )
+        continue;
 
       const jobNo = row[jobNoIndex]?.toString().trim() || null;
       if (!jobNo) continue;
@@ -437,15 +448,16 @@ exports.uploadExcel = async (req, res) => {
         where: {
           jobNo: allJobNos,
         },
-        attributes: ["jobNo", "exWarehouseLot"], // We only need these columns to check
+        attributes: ["jobNo", "exWarehouseLot"],
         raw: true,
       });
 
-      // 3. Create a Set for fast lookup (O(1) complexity)
-      // Format: "JOB_NO|LOT_NO"
       const dbLotSet = new Set(
         existingLots.map((l) => `${l.jobNo}|${l.exWarehouseLot}`)
       );
+
+      // ✅ FIX: Initialize the array here before using it
+      const duplicateErrors = [];
 
       jobDataMap.forEach((value, jobNo) => {
         value.lots.forEach((lot) => {
@@ -459,7 +471,9 @@ exports.uploadExcel = async (req, res) => {
       });
 
       if (duplicateErrors.length > 0) {
-        console.error(`[UPLOAD BLOCKED] Found ${duplicateErrors.length} duplicate entries.`);
+        console.error(
+          `[UPLOAD BLOCKED] Found ${duplicateErrors.length} duplicate entries.`
+        );
         return res.status(409).json({
           message: "The file contains data that already exists in the system.",
           errors: duplicateErrors,
@@ -469,14 +483,15 @@ exports.uploadExcel = async (req, res) => {
 
     // 7. Success Response
     const responseData = Object.fromEntries(jobDataMap);
-    console.log(`[UPLOAD SUCCESS] Processed ${totalLotsProcessed} lots for ${allJobNos.length} jobs.`);
-    
+    console.log(
+      `[UPLOAD SUCCESS] Processed ${totalLotsProcessed} lots for ${allJobNos.length} jobs.`
+    );
+
     res.status(200).json({
       message: "Excel data parsed successfully. Ready for scheduling.",
       lotCount: totalLotsProcessed,
       data: responseData,
     });
-
   } catch (error) {
     console.error("[CRITICAL UPLOAD ERROR]:", error);
     res.status(500).json({
@@ -487,7 +502,8 @@ exports.uploadExcel = async (req, res) => {
     // 8. Cleanup: Always delete the temporary file from /uploads/excel
     if (req.file && req.file.path) {
       fs.unlink(req.file.path, (err) => {
-        if (err) console.error("[CLEANUP ERROR] Failed to delete temp file:", err);
+        if (err)
+          console.error("[CLEANUP ERROR] Failed to delete temp file:", err);
       });
     }
   }
