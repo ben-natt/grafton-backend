@@ -134,20 +134,38 @@ router.put("/update/:inboundId", async (req, res) => {
   const inboundIdRaw = req.params.inboundId;
   console.log(`[Router] Received update request for ID: ${inboundIdRaw}`);
 
-  // Safe User Extraction
-  let userId = null;
-  try {
-    if (req.headers.authorization) {
+  // 1. Create a copy of the body to avoid mutating req.body directly
+  const updateData = { ...req.body };
+
+  // 2. Robust User Extraction Strategy
+  // Priority: 1. Middleware (req.user) -> 2. Header Token -> 3. Request Body
+  let userId = req.user?.userId;
+
+  // If not found in middleware, try manual token decode
+  if (!userId && req.headers.authorization) {
+    try {
       const token = req.headers.authorization.split(" ")[1];
       const decoded = require("jsonwebtoken").decode(token);
-      if (decoded) userId = decoded.userId;
+      if (decoded && decoded.userId) {
+        userId = decoded.userId;
+      }
+    } catch (e) {
+      console.warn("Could not extract user from token:", e.message);
     }
-  } catch (e) {
-    console.warn("Could not extract user from token for logging:", e.message);
   }
 
-  const inboundId = inboundIdRaw.trim(); // Trim whitespace
-  const updateData = req.body;
+  // If still not found, try extracting from the body
+  if (!userId && updateData.userId) {
+    userId = updateData.userId;
+  }
+
+  // 3. Remove userId from updateData
+  // This ensures 'userId' is NOT treated as a database field change in the logs
+  if (updateData.userId) {
+    delete updateData.userId;
+  }
+
+  const inboundId = inboundIdRaw.trim();
 
   if (!inboundId) {
     return res.status(400).json({ error: "Missing inboundId in URL" });

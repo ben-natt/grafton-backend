@@ -11,6 +11,11 @@ if (!fs.existsSync(ACTUAL_WEIGHT_LOGS_DIR)) {
   fs.mkdirSync(ACTUAL_WEIGHT_LOGS_DIR, { recursive: true });
 }
 
+const LOTTING_LOGS_DIR = path.join(__dirname, "../logs/Lotting");
+if (!fs.existsSync(LOTTING_LOGS_DIR)) {
+  fs.mkdirSync(LOTTING_LOGS_DIR, { recursive: true });
+}
+
 // Helper: Generate Unique Filename (JobNo-CrewLotNo.json)
 const generateUniqueFilename = (dir, jobNo, lotNo) => {
   // Sanitize filename parts
@@ -35,8 +40,14 @@ const generateUniqueFilename = (dir, jobNo, lotNo) => {
   return path.join(dir, filename);
 };
 
-// Helper: Create Log Entry
-const createLogEntry = async (jobNo, lotNo, userId, actionType, logDetails) => {
+const createLogEntry = async (
+  jobNo,
+  lotNo,
+  userId,
+  actionType,
+  logDetails,
+  targetDir = ACTUAL_WEIGHT_LOGS_DIR // Add targetDir with default value
+) => {
   try {
     // 1. Fetch User Details
     let username = "Unknown";
@@ -46,7 +57,7 @@ const createLogEntry = async (jobNo, lotNo, userId, actionType, logDetails) => {
         const userDetails = await usersModel.getUserById(userId);
         if (userDetails) {
           username = userDetails.username;
-          userRole = userDetails.rolename; // Assuming rolename is the field
+          userRole = userDetails.rolename;
         }
       }
     } catch (e) {
@@ -66,7 +77,6 @@ const createLogEntry = async (jobNo, lotNo, userId, actionType, logDetails) => {
         performedBy: {
           userId: userId || "N/A",
           username: username,
-          // userRole: userRole, // Optional: include if needed
         },
       },
       action: actionType,
@@ -74,11 +84,8 @@ const createLogEntry = async (jobNo, lotNo, userId, actionType, logDetails) => {
     };
 
     // 3. Write File
-    const filePath = generateUniqueFilename(
-      ACTUAL_WEIGHT_LOGS_DIR,
-      jobNo,
-      lotNo
-    );
+    // Use targetDir instead of hardcoded ACTUAL_WEIGHT_LOGS_DIR
+    const filePath = generateUniqueFilename(targetDir, jobNo, lotNo);
     fs.writeFile(filePath, JSON.stringify(fileContent, null, 2), (err) => {
       if (err) console.error(`Failed to write log for ${jobNo}-${lotNo}:`, err);
       else console.log(`[LOG CREATED] ${filePath}`);
@@ -663,17 +670,21 @@ router.post("/actual/update-crew-lotno", async (req, res) => {
         logExWLot = record.exWarehouseLot;
       }
 
+      const previousLotNo = updateResult.previousCrewLotNo || "N/A";
+
       createLogEntry(
         logJobNo,
-        crewLotNo, // The new lot number
-        logExWLot,
+        crewLotNo, // The new lot number,
         userId,
         "Update Crew Lot No",
         {
+          previousLotNo: previousLotNo,
           newLotNo: crewLotNo,
           updatedInbound: !!updateResult.inbound,
           updatedLot: !!updateResult.lot,
-        }
+          exWarehouseLot: logExWLot,
+        },
+        LOTTING_LOGS_DIR
       );
       // --- END LOGGING ---
       res.json({

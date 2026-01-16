@@ -174,12 +174,12 @@ const checkDuplicateCrewLotNo = async (
 const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
   const transaction = await db.sequelize.transaction();
   try {
-    let jobNo, exWarehouseLot;
+    let jobNo, exWarehouseLot, oldCrewLotNo;
 
     if (isInbound) {
       // Find from inbound table with isWeighted condition
       const inboundQuery = `
-        SELECT "jobNo", "exWarehouseLot" 
+        SELECT "jobNo", "exWarehouseLot", "crewLotNo" 
         FROM public.inbounds 
         WHERE "inboundId" = :idValue 
 
@@ -194,6 +194,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
         throw new Error("Inbound record not found or already weighted");
       jobNo = inbound.jobNo;
       exWarehouseLot = inbound.exWarehouseLot;
+      oldCrewLotNo = inbound.crewLotNo;
     } else {
       // For lotId, we still need to find the corresponding inbound record for validation
       const lotQuery = `
@@ -208,10 +209,10 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
       });
 
       if (!lot) throw new Error("Lot record not found");
-
+      oldCrewLotNo = lot.crewLotNo;
       // Now find the corresponding inbound record with isWeighted condition
       const inboundQuery = `
-        SELECT "jobNo", "crewLotNo" 
+        SELECT "jobNo", "crewLotNo", "exWarehouseLot" 
         FROM public.inbounds 
         WHERE "jobNo" = :jobNo AND "crewLotNo" = :crewLotNo
       `;
@@ -276,6 +277,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
     return {
       inbound: inboundResult || null,
       lot: lotResult || null,
+      previousCrewLotNo: oldCrewLotNo,
     };
   } catch (error) {
     await transaction.rollback();

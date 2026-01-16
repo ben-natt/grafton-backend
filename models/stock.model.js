@@ -38,7 +38,7 @@ const createEditLogEntry = async (
     let username = "Unknown";
     let userRole = "Unknown";
     try {
-      if (userId) {
+      if (userId && userId !== "N/A") {
         const userDetails = await usersModel.getUserById(userId);
         if (userDetails) {
           username = userDetails.username;
@@ -303,7 +303,7 @@ const getLotSummary = async (jobNo, lotNo) => {
     // Query 1: Get the details for the specific AVAILABLE lot you clicked on
     const detailsQuery = `
       SELECT
-        i."jobNo" AS "JobNo", i."lotNo" AS "LotNo", i."noOfBundle" AS "NoOfBundle",
+        i."jobNo" AS "JobNo", i."noOfBundle" AS "NoOfBundle",
         i."crewLotNo" AS "CrewLotNo",
         i."inboundId", i."barcodeNo" AS "Barcode", c."commodityName" AS "Commodity", b."brandName" AS "Brand",
         s."shapeName" AS "Shape", exlme."exLmeWarehouseName" AS "ExLMEWarehouse",
@@ -473,7 +473,7 @@ const getLotDetails = async (filters) => {
 
         whereClauses.push(`(
             REGEXP_REPLACE(i."jobNo", '[^a-zA-Z0-9]', '', 'g') ILIKE :jobNoSearch
-            AND i."lotNo" = :lotNoSearch
+            AND i."crewLotNo" = :lotNoSearch
         )`);
       } else {
         const normalizedSearch = filters.search.replace(/[^a-zA-Z0-9]/g, "");
@@ -556,7 +556,7 @@ const getLotDetails = async (filters) => {
 
     const dataQuery = `
       SELECT
-        i."inboundId" as id, i."jobNo" AS "JobNo", i."lotNo" AS "LotNo",
+        i."inboundId" as id, i."jobNo" AS "JobNo",
         i."crewLotNo", i."isWeighted",
         i."exWarehouseLot" AS "Ex-WarehouseLot", elme."exLmeWarehouseName" AS "ExLMEWarehouse",
         c."commodityName" AS "Metal", b."brandName" AS "Brand", s."shapeName" AS "Shape",
@@ -888,7 +888,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
     // --- STEP 1: PRE-FETCH CURRENT DATA FOR LOGGING ---
     const preFetchQuery = `
       SELECT 
-        i."jobNo", i."lotNo", i."inboundId",
+        i."jobNo", i."crewLotNo", i."inboundId",
         i."noOfBundle", i."barcodeNo",
         c."commodityName" AS "commodity",
         b."brandName" AS "brand",
@@ -911,7 +911,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
     `;
 
     const currentDataResult = await db.sequelize.query(preFetchQuery, {
-      replacements: { inboundId: parseInt(inboundId) }, // Ensure integer
+      replacements: { inboundId: parseInt(inboundId) },
       type: db.sequelize.QueryTypes.SELECT,
       plain: true,
     });
@@ -984,7 +984,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
           continue;
       }
 
-      // 1. Handle Lookup Fields (Foreign Keys)
+      // 1. Handle Lookup Fields (Foreign Keys) with "Find or Create"
       if (
         [
           "commodityId",
@@ -1039,6 +1039,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
             break;
         }
 
+        // A. Try to find existing ID
         const lookupQuery = `SELECT "${lookupIdCol}" FROM public."${lookupTable}" WHERE "${lookupNameCol}" = :value LIMIT 1;`;
         const lookupResult = await db.sequelize.query(lookupQuery, {
           type: db.sequelize.QueryTypes.SELECT,
@@ -1049,12 +1050,41 @@ const EditInformation = async (inboundId, updateData, userId) => {
           setClauses.push(`"${dbColumnName}" = :${key}_id`);
           replacements[`${key}_id`] = lookupResult[0][lookupIdCol];
         } else {
-          console.warn(
-            `[EditInfo] Lookup failed for ${key}: '${updateData[key]}' - Setting to NULL (Safe Fallback)`
+          // B. If not found, CREATE new record (Fixes "Others" Issue)
+          console.log(
+            `[EditInfo] Value '${updateData[key]}' not found in ${lookupTable}. Creating new entry...`
           );
-          // OPTIONAL: Fallback to NULL if lookup fails instead of skipping
-          // setClauses.push(`"${dbColumnName}" = NULL`);
-          continue;
+
+          try {
+            const insertQuery = `
+              INSERT INTO public."${lookupTable}" ("${lookupNameCol}", "createdAt", "updatedAt")
+              VALUES (:value, NOW(), NOW())
+              RETURNING "${lookupIdCol}";
+            `;
+
+            const insertResult = await db.sequelize.query(insertQuery, {
+              type: db.sequelize.QueryTypes.INSERT,
+              replacements: { value: updateData[key] },
+            });
+
+            // Retrieve the new ID safely
+            // Sequelize return format for INSERT can vary: [[{ id: 1 }], 1] or similar
+            const newId = insertResult[0][0][lookupIdCol];
+
+            if (newId) {
+              setClauses.push(`"${dbColumnName}" = :${key}_new_id`);
+              replacements[`${key}_new_id`] = newId;
+            } else {
+              throw new Error("Failed to retrieve new ID after insert");
+            }
+          } catch (insertError) {
+            console.error(
+              `[EditInfo] Failed to create new ${key}:`,
+              insertError
+            );
+            // Skip updating this field if creation fails to prevent crashing the whole request
+            continue;
+          }
         }
       }
       // 2. Handle Boolean Fields
@@ -1090,7 +1120,6 @@ const EditInformation = async (inboundId, updateData, userId) => {
       type: db.sequelize.QueryTypes.UPDATE,
     });
 
-    // Check rowCount safely (Postgres returns metadata.rowCount)
     const affectedRows = metadata
       ? metadata.rowCount !== undefined
         ? metadata.rowCount
@@ -1102,8 +1131,6 @@ const EditInformation = async (inboundId, updateData, userId) => {
       // --- STEP 3: LOGGING ---
       if (currentDataResult) {
         const jobNo = currentDataResult.jobNo || "UnknownJob";
-
-        // Identify changes
         const changes = [];
         for (const key in updateData) {
           const oldVal =
@@ -1122,7 +1149,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
           userId,
           "Edit Lot Information",
           {
-            lotNo: currentDataResult.lotNo,
+            lotNo: currentDataResult.crewLotNo, // Use crewLotNo for log details
             fieldsChanged: changes,
           },
           {
@@ -1279,7 +1306,8 @@ const getAllLotsForExport = async () => {
     const dataQuery = `
         SELECT
             i."jobNo" AS "JobNo",
-            i."lotNo" AS "LotNo",
+            i."crewLotNo" AS "LotNo",
+            i."actualWeight",
             i."exWarehouseLot" AS "ExWarehouseLot",
             c."commodityName" AS "Metal",
             b."brandName" AS "Brand",
@@ -1296,7 +1324,7 @@ const getAllLotsForExport = async () => {
         JOIN public.shapes s ON i."shapeId" = s."shapeId"
         LEFT JOIN public.brands b ON i."brandId" = b."brandId"
         LEFT JOIN public.inboundwarehouses iw ON iw."inboundWarehouseId" = i."inboundWarehouseId"
-        ORDER BY i."inboundId" ASC;
+        ORDER BY i."jobNo", i."crewLotNo" ASC;
     `;
 
     const items = await db.sequelize.query(dataQuery, {
@@ -1326,11 +1354,11 @@ async function getIndividualBundleSheet(jobNo, exWarehouseLot) {
       s."shapeName", 
       b."brandName", 
       w."inboundWarehouseName",
-      i."jobNo" || ' - ' || LPAD(i."crewLotNo"::text, 3, '0') AS "lotNoWarrantNo", 
+      i."jobNo" || '-' || LPAD(i."crewLotNo"::text, 3, '0') AS "lotNoWarrantNo", 
       i."exWarehouseLot",
       ib."bundleNo" AS "bundleNo", 
       ib."meltNo" AS "heatCastNo",
-      i."jobNo" || ' - ' || LPAD(i."crewLotNo"::text, 3, '0') || '-' || LPAD(ib."bundleNo"::text, 2, '0') AS "batchNo",
+      i."jobNo" || '-' || LPAD(i."crewLotNo"::text, 3, '0') || '-' || LPAD(ib."bundleNo"::text, 2, '0') AS "batchNo",
       ib."stickerWeight" AS "producerGW", 
       ib."stickerWeight" AS "producerNW", 
       ib."weight" AS "weighedGW"
