@@ -238,6 +238,24 @@ const handleRepack = async (req, res, isMobile = false) => {
       userId,
     } = req.body;
 
+    if (
+      (!userId || userId === "null" || userId === "undefined") &&
+      req.headers.authorization
+    ) {
+      try {
+        const jwt = require("jsonwebtoken");
+        const decoded = jwt.decode(token);
+        if (decoded && decoded.userId) {
+          userId = decoded.userId;
+        }
+      } catch (e) {
+        console.warn("Could not extract user from token in repack:", e.message);
+      }
+    }
+
+    // Ensure userId is not string "null"/"undefined" or "N/A"
+    if (userId === "null" || userId === "undefined") userId = null;
+
     // Validate required fields
     if ((!inboundId && !lotId && (!jobNo || !crewLotNo)) || !noOfBundle) {
       return res.status(400).json({
@@ -465,6 +483,11 @@ const handleRepack = async (req, res, isMobile = false) => {
             `../uploads/img/repacked/${uniqueName}`
           );
 
+          // Define the relative path to store in DB and Log
+          const dbImagePath = `uploads/img/repacked/${uniqueName}`;
+
+          uploadedBeforeImages.push(dbImagePath);
+
           fs.mkdirSync(path.dirname(newPath), { recursive: true });
           fs.renameSync(file.path, newPath);
 
@@ -478,7 +501,7 @@ const handleRepack = async (req, res, isMobile = false) => {
                 ? parseInt(resolvedLotId)
                 : null,
             inboundBundleId: inboundBundle.inboundBundleId,
-            imageUrl: `uploads/img/repacked/${uniqueName}`,
+            imageUrl: dbImagePath,
             createdAt: new Date(),
             updatedAt: new Date(),
           });
@@ -517,8 +540,12 @@ const handleRepack = async (req, res, isMobile = false) => {
             `../uploads/img/repacked/${uniqueName}`
           );
 
+          const dbImagePath = `uploads/img/repacked/${uniqueName}`;
+
           fs.mkdirSync(path.dirname(newPath), { recursive: true });
           fs.renameSync(file.path, newPath);
+
+          uploadedAfterImages.push(dbImagePath);
 
           await AfterImage.create({
             inboundId:
@@ -530,7 +557,7 @@ const handleRepack = async (req, res, isMobile = false) => {
                 ? parseInt(resolvedLotId)
                 : null,
             inboundBundleId: inboundBundle.inboundBundleId,
-            imageUrl: `uploads/img/repacked/${uniqueName}`,
+            imageUrl: dbImagePath,
             createdAt: new Date(),
             updatedAt: new Date(),
           });
@@ -678,12 +705,6 @@ const handleRepack = async (req, res, isMobile = false) => {
       images: {
         newlyUploadedBefore: uploadedBeforeImages,
         newlyUploadedAfter: uploadedAfterImages,
-        existingBeforeKept: existingBeforeImages
-          ? JSON.parse(existingBeforeImages).map((i) => i.imageUrl)
-          : [],
-        existingAfterKept: existingAfterImages
-          ? JSON.parse(existingAfterImages).map((i) => i.imageUrl)
-          : [],
       },
     };
 

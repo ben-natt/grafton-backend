@@ -31,4 +31,6 @@ router.get(
   scheduleInboundController.getInboundLogDetail
 );
 
+router.get("/brands", auth, scheduleInboundController.getAllBrands);
+
 module.exports = router;

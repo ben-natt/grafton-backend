@@ -368,7 +368,7 @@ const createGrnAndTransactions = async (formData) => {
   const {
     selectedInboundIds,
     stuffingPhotos,
-    existingImageUrls,
+    existingImageUrls = [],
     containerNo,
     sealNo,
     scheduleOutboundId,
@@ -443,6 +443,7 @@ const createGrnAndTransactions = async (formData) => {
 
     const createdOutbound = outboundResult[0][0];
     const newOutboundId = createdOutbound.outboundId;
+    let deletedPhotoUrls = [];
 
     // 1. Delete photos that are in the DB for this schedule but NOT in the "keep" list
     if (
@@ -450,43 +451,40 @@ const createGrnAndTransactions = async (formData) => {
       Array.isArray(existingImageUrls) &&
       existingImageUrls.length > 0
     ) {
-      // User kept *some* photos, so delete the ones *not* in this list
+      // User kept *some* photos, delete the others
       const deletePhotosQuery = `
         DELETE FROM public.stuffing_photos
         WHERE "scheduleoutboundId" = :scheduleOutboundId
-          AND "outboundId" IS NULL -- Only delete ones not yet processed
-          AND "imageUrl" NOT IN (:existingImageUrls);
+          AND "imageUrl" NOT IN (:existingImageUrls)
+        RETURNING "imageUrl"; 
       `;
-      await db.sequelize.query(deletePhotosQuery, {
+      // Use QueryTypes.SELECT to capture the returned rows from PostgreSQL
+      const deletedRows = await db.sequelize.query(deletePhotosQuery, {
         replacements: {
           scheduleOutboundId: scheduleOutboundId,
           existingImageUrls: existingImageUrls,
         },
-        type: db.sequelize.QueryTypes.DELETE,
+        type: db.sequelize.QueryTypes.SELECT,
         transaction: t,
       });
-    } else if (
-      existingImageUrls &&
-      Array.isArray(existingImageUrls) &&
-      existingImageUrls.length === 0
-    ) {
-      // User deleted *all* existing photos
+      deletedPhotoUrls = deletedRows.map((r) => r.imageUrl);
+    } else {
       const deleteAllPhotosQuery = `
         DELETE FROM public.stuffing_photos
         WHERE "scheduleoutboundId" = :scheduleOutboundId
-          AND "outboundId" IS NULL; -- Safety check
+        RETURNING "imageUrl";
       `;
-      await db.sequelize.query(deleteAllPhotosQuery, {
+      // Removed: AND "outboundId" IS NULL
+
+      const deletedRows = await db.sequelize.query(deleteAllPhotosQuery, {
         replacements: { scheduleOutboundId: scheduleOutboundId },
-        type: db.sequelize.QueryTypes.DELETE,
+        type: db.sequelize.QueryTypes.SELECT,
         transaction: t,
       });
+      deletedPhotoUrls = deletedRows.map((r) => r.imageUrl);
     }
-    // Note: If existingImageUrls is null/undefined, we do nothing (preserves old behavior if something goes wrong)
 
-    // 2. Update the remaining existing photos to link them to the new outboundId
-    // This REPLACES the old `updateExistingPhotosQuery`
-    if (existingImageUrls && existingImageUrls.length > 0) {
+    if (existingImageUrls.length > 0) {
       const updateRemainingPhotosQuery = `
         UPDATE public.stuffing_photos
         SET "outboundId" = :outboundId, "updatedAt" = NOW()
@@ -514,7 +512,7 @@ const createGrnAndTransactions = async (formData) => {
         replacements: {
           containerNo,
           sealNo,
-          scheduleOutboundId: scheduleOutboundId, // Use original scheduleOutboundId
+          scheduleOutboundId: scheduleOutboundId, //
         },
         type: db.sequelize.QueryTypes.UPDATE,
         transaction: t,
@@ -610,6 +608,7 @@ const createGrnAndTransactions = async (formData) => {
         outboundedDate: createdOutbound.outboundedDate,
       },
       lotsForPdf: lotsToProcess,
+      deletedPhotoUrls,
     };
   } catch (error) {
     // This single catch block will handle rollback for ANY error inside the try block.

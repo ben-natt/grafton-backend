@@ -880,11 +880,22 @@ const getAllScheduleOutbound = async ({
       });
     }
     if (filters.startDate && filters.endDate) {
-      whereClauses.push(`
-          (si."releaseDate" AT TIME ZONE 'Asia/Singapore')::date <= :endDate::date
-          AND
-          (si."releaseEndDate" AT TIME ZONE 'Asia/Singapore')::date >= :startDate::date
-        `);
+      // FIX: Robust logic handles NULL end dates AND flipped start/end dates
+      whereClauses.push(`(
+          -- 1. Job Start (earliest date) <= Filter End
+          LEAST(
+              (si."releaseDate" AT TIME ZONE 'Asia/Singapore')::date,
+              (COALESCE(si."releaseEndDate", si."releaseDate") AT TIME ZONE 'Asia/Singapore')::date
+          ) <= :endDate::date
+          
+          AND 
+          
+          -- 2. Job End (latest date) >= Filter Start
+          GREATEST(
+              (si."releaseDate" AT TIME ZONE 'Asia/Singapore')::date,
+              (COALESCE(si."releaseEndDate", si."releaseDate") AT TIME ZONE 'Asia/Singapore')::date
+          ) >= :startDate::date
+      )`);
       replacements.startDate = filters.startDate;
       replacements.endDate = filters.endDate;
     }
