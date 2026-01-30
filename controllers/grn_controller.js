@@ -33,7 +33,7 @@ const createLogEntry = async (
   userId,
   actionType,
   summaryData,
-  detailsData
+  detailsData,
 ) => {
   try {
     let username = "Unknown";
@@ -91,7 +91,7 @@ const grnController = {
         pageSize: parseInt(req.query.pageSize) || 25,
         totalCount,
         totalPages: Math.ceil(
-          totalCount / (parseInt(req.query.pageSize) || 25)
+          totalCount / (parseInt(req.query.pageSize) || 25),
         ),
       });
     } catch (error) {
@@ -114,11 +114,11 @@ const grnController = {
 
       const pdfPath = path.join(__dirname, "..", result.grnImage);
 
-      if (fs.existsSync(pdfPath)) {
+      if (fsSync.existsSync(pdfPath)) {
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader(
           "Content-Disposition",
-          `inline; filename="${path.basename(pdfPath)}"`
+          `inline; filename="${path.basename(pdfPath)}"`,
         );
         res.sendFile(pdfPath);
       } else {
@@ -147,12 +147,12 @@ const grnController = {
 
       const imagePath = path.join(__dirname, "..", result.grnPreviewImage);
 
-      if (fs.existsSync(imagePath)) {
+      if (fsSync.existsSync(imagePath)) {
         res.setHeader("Content-Type", "image/png");
         res.sendFile(imagePath);
       } else {
         console.error(
-          `CONTROLLER ERROR: Image file not found at path: ${imagePath}`
+          `CONTROLLER ERROR: Image file not found at path: ${imagePath}`,
         );
         res
           .status(404)
@@ -195,7 +195,7 @@ const grnController = {
         return res.status(404).json({
           error: "Database records not found.",
           details: `Could not find GRNs for the following internal IDs: ${missingDbRecords.join(
-            ", "
+            ", ",
           )}`,
         });
       }
@@ -209,8 +209,8 @@ const grnController = {
           continue;
         }
         const pdfPath = path.join(__dirname, "..", record.grnImage);
-        if (fs.existsSync(pdfPath)) {
-          pdfBuffers.push(fs.readFileSync(pdfPath));
+        if (fsSync.existsSync(pdfPath)) {
+          pdfBuffers.push(fsSync.readFileSync(pdfPath));
         } else {
           missingFiles.push(record.grnNo);
         }
@@ -229,7 +229,7 @@ const grnController = {
         const pdf = await PDFDocument.load(pdfBytes);
         const copiedPages = await mergedPdf.copyPages(
           pdf,
-          pdf.getPageIndices()
+          pdf.getPageIndices(),
         );
         copiedPages.forEach((page) => mergedPdf.addPage(page));
       }
@@ -239,7 +239,7 @@ const grnController = {
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(
         "Content-Disposition",
-        'attachment; filename="GRN_Compilation.pdf"'
+        'attachment; filename="GRN_Compilation.pdf"',
       );
       res.send(Buffer.from(mergedPdfBytes));
     } catch (error) {
@@ -301,26 +301,26 @@ const grnController = {
       if (formData.driverSignature) {
         formData.driverSignature = Buffer.from(
           formData.driverSignature,
-          "base64"
+          "base64",
         );
       }
       if (formData.warehouseStaffSignature) {
         formData.warehouseStaffSignature = Buffer.from(
           formData.warehouseStaffSignature,
-          "base64"
+          "base64",
         );
       }
       if (formData.warehouseSupervisorSignature) {
         formData.warehouseSupervisorSignature = Buffer.from(
           formData.warehouseSupervisorSignature,
-          "base64"
+          "base64",
         );
       }
 
       // 3. Execute Update
       const { pdf, previewImage } = await grnModel.updateAndRegenerateGrn(
         outboundId,
-        formData
+        formData,
       );
 
       // 4. LOGGING SYSTEM
@@ -349,7 +349,7 @@ const grnController = {
         if (formData.updatedBrands && previousDetails.lots) {
           updatedDataSnapshot.lots = previousDetails.lots.map((lot) => {
             const update = formData.updatedBrands.find(
-              (u) => u.outboundTransactionId === lot.outboundTransactionId
+              (u) => u.outboundTransactionId === lot.outboundTransactionId,
             );
             if (update) {
               return { ...lot, brand: update.newBrand };
@@ -382,14 +382,14 @@ const grnController = {
         if (formData.updatedBrands && previousDetails.lots) {
           formData.updatedBrands.forEach((update) => {
             const originalLot = previousDetails.lots.find(
-              (l) => l.outboundTransactionId === update.outboundTransactionId
+              (l) => l.outboundTransactionId === update.outboundTransactionId,
             );
             if (
               originalLot &&
               (originalLot.brand || "") !== (update.newBrand || "")
             ) {
               changedFields.push(
-                `Brand updated for Job ${originalLot.jobNo} - Lot ${originalLot.lotNo}`
+                `Brand updated for Job ${originalLot.jobNo} - Lot ${originalLot.lotNo}`,
               );
             }
           });
@@ -412,7 +412,7 @@ const grnController = {
             userId,
             "GRN Edited",
             summaryData,
-            detailsData
+            detailsData,
           );
         }
       } catch (logError) {

@@ -31,7 +31,7 @@ const createEditLogEntry = async (
   userId,
   actionType,
   summaryData,
-  detailsData
+  detailsData,
 ) => {
   try {
     // 1. Fetch User Details
@@ -286,10 +286,10 @@ const getFilterOptions = async () => {
       jobNos: jobNos.map((item) => item.jobNo),
       exLMEWarehouse: exlmewarehouse.map((item) => item.exLmeWarehouseName),
       exWarehouseLocation: exWarehouseLocation.map(
-        (item) => item.exWarehouseLocationName
+        (item) => item.exWarehouseLocationName,
       ),
       inboundWarehouse: inboundWarehouse.map(
-        (item) => item.inboundWarehouseName
+        (item) => item.inboundWarehouseName,
       ),
     };
   } catch (error) {
@@ -437,7 +437,7 @@ const getLotDetails = async (filters) => {
     }
     if (filters.exWarehouseLocation) {
       whereClauses.push(
-        'exwhl."exWarehouseLocationName" = :exWarehouseLocation'
+        'exwhl."exWarehouseLocationName" = :exWarehouseLocation',
       );
       replacements.exWarehouseLocation = filters.exWarehouseLocation;
     }
@@ -592,7 +592,7 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
     "Creating schedule outbound with data:",
     scheduleData,
     "and userId:",
-    userId
+    userId,
   );
   try {
     const {
@@ -774,14 +774,14 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
         } catch (err) {
           console.warn(
             "Could not fetch user details for logging:",
-            err.message
+            err.message,
           );
         }
       }
 
       // 2. Prepare uploaded photos paths if available
       const uploadedPhotoPaths = files.map(
-        (f) => `/uploads/img/stuffing_photos/${f.filename}`
+        (f) => `/uploads/img/stuffing_photos/${f.filename}`,
       );
 
       // 3. Prepare JSON Data
@@ -838,7 +838,7 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
       } catch (seqError) {
         console.warn(
           "[LOG SEQ ERROR] Failed to fetch DB sequence, using timestamp fallback:",
-          seqError
+          seqError,
         );
         // Fallback to timestamp if DB count fails
         logFilename = `${jobNumber}_${Date.now()}.json`;
@@ -851,7 +851,7 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
         if (err) {
           console.error(
             `[LOG ERROR] Failed to write outbound log for ${jobNumber}:`,
-            err
+            err,
           );
         } else {
           console.log(`[LOG CREATED] ${logFilePath}`);
@@ -860,7 +860,7 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
     } catch (logError) {
       console.error(
         "[LOGGING SYSTEM FAILURE] Error creating outbound log:",
-        logError
+        logError,
       );
     }
     // ========================================================
@@ -876,7 +876,7 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
     await t.rollback();
     console.error("Error in createScheduleOutbound transaction:", error);
     throw new Error(
-      "Failed to create outbound schedule due to a database error."
+      "Failed to create outbound schedule due to a database error.",
     );
   }
 };
@@ -918,7 +918,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
 
     if (!currentDataResult) {
       console.error(
-        `[EditInfo] Inbound ID ${inboundId} not found in database.`
+        `[EditInfo] Inbound ID ${inboundId} not found in database.`,
       );
       return { success: false, message: "Record not found." };
     }
@@ -1052,7 +1052,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
         } else {
           // B. If not found, CREATE new record (Fixes "Others" Issue)
           console.log(
-            `[EditInfo] Value '${updateData[key]}' not found in ${lookupTable}. Creating new entry...`
+            `[EditInfo] Value '${updateData[key]}' not found in ${lookupTable}. Creating new entry...`,
           );
 
           try {
@@ -1080,7 +1080,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
           } catch (insertError) {
             console.error(
               `[EditInfo] Failed to create new ${key}:`,
-              insertError
+              insertError,
             );
             // Skip updating this field if creation fails to prevent crashing the whole request
             continue;
@@ -1090,7 +1090,7 @@ const EditInformation = async (inboundId, updateData, userId) => {
       // 2. Handle Boolean Fields
       else if (
         ["isRelabelled", "isRebundled", "isRepackProvided"].includes(
-          dbColumnName
+          dbColumnName,
         )
       ) {
         setClauses.push(`"${dbColumnName}" = :${key}`);
@@ -1128,6 +1128,34 @@ const EditInformation = async (inboundId, updateData, userId) => {
     console.log(`[EditInfo] Rows Affected: ${affectedRows}`);
 
     if (affectedRows > 0) {
+      if (
+        updateData.exWarehouseLot &&
+        currentDataResult.jobNo &&
+        currentDataResult.exWarehouseLot
+      ) {
+        // Only update if the value actually changed
+        if (updateData.exWarehouseLot !== currentDataResult.exWarehouseLot) {
+          try {
+            const syncLotQuery = `
+                  UPDATE public.lot
+                  SET "exWarehouseLot" = :newExWarehouseLot, "updatedAt" = NOW()
+                  WHERE "jobNo" = :jobNo AND "exWarehouseLot" = :oldExWarehouseLot;
+              `;
+            await db.sequelize.query(syncLotQuery, {
+              replacements: {
+                newExWarehouseLot: updateData.exWarehouseLot,
+                jobNo: currentDataResult.jobNo,
+                oldExWarehouseLot: currentDataResult.exWarehouseLot,
+              },
+              type: db.sequelize.QueryTypes.UPDATE,
+            });
+            console.log(`[EditInfo] Synced exWarehouseLot to 'lot' table.`);
+          } catch (err) {
+            console.error(`[EditInfo] Failed to sync 'lot' table:`, err);
+          }
+        }
+      }
+
       // --- STEP 3: LOGGING ---
       if (currentDataResult) {
         const jobNo = currentDataResult.jobNo || "UnknownJob";
@@ -1149,13 +1177,13 @@ const EditInformation = async (inboundId, updateData, userId) => {
           userId,
           "Edit Lot Information",
           {
-            lotNo: currentDataResult.crewLotNo, // Use crewLotNo for log details
+            lotNo: currentDataResult.crewLotNo,
             fieldsChanged: changes,
           },
           {
             previousData: currentDataResult,
             updatedRequest: updateData,
-          }
+          },
         );
       }
 

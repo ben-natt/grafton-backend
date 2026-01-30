@@ -53,7 +53,7 @@ async function generateGrnPdf(data) {
       y,
       width,
       height,
-      signatureName
+      signatureName,
     ) => {
       if (!signatureData) {
         return;
@@ -77,7 +77,7 @@ async function generateGrnPdf(data) {
             // Convert buffer to string, then decode from base64.
             signatureBuffer = Buffer.from(
               signatureData.toString("utf-8"),
-              "base64"
+              "base64",
             );
           }
         } else {
@@ -154,7 +154,7 @@ async function generateGrnPdf(data) {
     const uomValue = data.uom;
 
     for (const lot of data.lots) {
-      if (startY < 270) break;
+      if (startY < 260) break;
       drawText(lot.lotNo, 48, startY);
 
       if (data.uom != "" && data.uom != null) {
@@ -191,7 +191,7 @@ async function generateGrnPdf(data) {
       112,
       60,
       15,
-      "Warehouse Staff"
+      "Warehouse Staff",
     );
     await embedSignature(
       data.warehouseSupervisorSignature,
@@ -199,7 +199,7 @@ async function generateGrnPdf(data) {
       112,
       60,
       15,
-      "Warehouse Supervisor"
+      "Warehouse Supervisor",
     );
 
     const pdfBytes = await pdfDoc.save();
@@ -214,7 +214,7 @@ async function generateGrnPdf(data) {
     const outputPath = path.join(grnDir, pdfFileName);
     const previewImagePath = path.join(
       previewDir,
-      `${previewImageFileName}.png`
+      `${previewImageFileName}.png`,
     );
 
     await fs.writeFile(outputPath, pdfBytes);
@@ -231,7 +231,7 @@ async function generateGrnPdf(data) {
 
     const generatedImagePath = path.join(
       previewDir,
-      `${previewImageFileName}-1.png`
+      `${previewImageFileName}-1.png`,
     );
     if (
       await fs

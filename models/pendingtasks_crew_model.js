@@ -14,7 +14,7 @@ const formatDate = (date) => {
 const getPendingTasksWithIncompleteStatus = async (
   page = 1,
   pageSize = 10,
-  filters = {}
+  filters = {},
 ) => {
   try {
     const { startDate, endDate, exWarehouseLot } = filters;
@@ -56,7 +56,7 @@ const getPendingTasksWithIncompleteStatus = async (
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
       baseWhere.push(
-        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`,
       );
       replacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
@@ -175,7 +175,7 @@ const getPendingTasksWithIncompleteStatus = async (
     if (exWarehouseLot) {
       const sanitizedSearchTerm = exWarehouseLot.replace(/[-/]/g, "");
       detailsWhere.push(
-        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`
+        `REPLACE(REPLACE(l."exWarehouseLot", '-', ''), '/', '') ILIKE :exWarehouseLot`,
       );
       detailsReplacements.exWarehouseLot = `%${sanitizedSearchTerm}%`;
     }
@@ -312,10 +312,10 @@ END as is_incomplete
     Object.values(groupedByJobNo).forEach((group) => {
       if (group.inboundDates.length > 0) {
         const minDate = new Date(
-          Math.min(...group.inboundDates.map((d) => d.getTime()))
+          Math.min(...group.inboundDates.map((d) => d.getTime())),
         );
         const maxDate = new Date(
-          Math.max(...group.inboundDates.map((d) => d.getTime()))
+          Math.max(...group.inboundDates.map((d) => d.getTime())),
         );
 
         const minDateString = minDate.toDateString();
@@ -336,7 +336,7 @@ END as is_incomplete
   } catch (error) {
     console.error(
       "Error fetching pending tasks with incomplete status:",
-      error
+      error,
     );
     throw error;
   }

@@ -35,7 +35,7 @@ const reportConfirmation = async (lotIds, reportedBy = null, options = {}) => {
           replacements: { lotId },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
-        }
+        },
       );
     }
 
@@ -135,7 +135,7 @@ const insertInboundFromLots = async (lotsArray, userId, options = {}) => {
 
       if (existing.length > 0) {
         console.log(
-          `[InsertInbound] Skipped ${lot.jobNo}-${lot.lotNo}, already exists.`
+          `[InsertInbound] Skipped ${lot.jobNo}-${lot.lotNo}, already exists.`,
         );
 
         // Even if it exists, ensure the Lot status is updated to 'Received' to clean up Pending list
@@ -145,7 +145,7 @@ const insertInboundFromLots = async (lotsArray, userId, options = {}) => {
             replacements: { lotId },
             type: db.sequelize.QueryTypes.UPDATE,
             transaction,
-          }
+          },
         );
         continue;
       }
@@ -159,7 +159,7 @@ const insertInboundFromLots = async (lotsArray, userId, options = {}) => {
             replacements: { id: lot.scheduleInboundId },
             type: db.sequelize.QueryTypes.SELECT,
             transaction,
-          }
+          },
         );
         if (scheduleRes.length > 0) schedulerUserId = scheduleRes[0].userId;
       }
@@ -173,7 +173,7 @@ const insertInboundFromLots = async (lotsArray, userId, options = {}) => {
           replacements: { lotId },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
-        }
+        },
       );
 
       // 5. Robust INSERT with Subqueries (Lookups happen inside SQL)
@@ -240,7 +240,7 @@ const insertInboundFromLots = async (lotsArray, userId, options = {}) => {
           replacements: { lotId },
           type: db.sequelize.QueryTypes.SELECT,
           transaction,
-        }
+        },
       );
 
       if (bundleCheck.length > 0) {
@@ -250,7 +250,7 @@ const insertInboundFromLots = async (lotsArray, userId, options = {}) => {
             replacements: { lotId },
             type: db.sequelize.QueryTypes.UPDATE,
             transaction,
-          }
+          },
         );
         // Note: The newly created inbound might need update, but usually the bundle sync handles this separately.
         insertedInbound.isWeighted = true;
