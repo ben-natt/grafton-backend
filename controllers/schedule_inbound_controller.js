@@ -11,7 +11,7 @@ const { ScheduleInbound, Lot } = require("../models/schedule_inbound.model.js")(
   DataTypes
 );
 
-// --- SETUP LOGGING DIRECTORY (From Current) ---
+// --- SETUP LOGGING DIRECTORY ---
 const LOGS_DIR = path.join(__dirname, "../logs/Scheduled Inbounds");
 
 if (!fs.existsSync(LOGS_DIR)) {
@@ -48,7 +48,6 @@ exports.createScheduleInbound = async (req, res) => {
   const userPayload = req.user || {};
   const userId = userPayload.userId;
 
-  // [UPDATED] Fetch full user details from DB to get Username and Role for logs
   let username = "Unknown User";
   let userRole = "Unknown Role";
 
@@ -84,7 +83,7 @@ exports.createScheduleInbound = async (req, res) => {
     for (const jobNo in jobDataMap) {
       const { lots } = jobDataMap[jobNo];
 
-      // --- DATA NORMALIZATION (From Incoming) ---
+      // --- DATA NORMALIZATION ---
       for (const lot of lots) {
         if (lot.shape && typeof lot.shape === "string") {
           const shapeLower = lot.shape.toLowerCase();
@@ -134,7 +133,7 @@ exports.createScheduleInbound = async (req, res) => {
         );
       }
 
-      // --- UPSERT PARENT (ScheduleInbound) ---
+      // --- UPSERT PARENT ---
       const [scheduleInbound] = await ScheduleInbound.upsert(
         {
           jobNo: jobNo,
@@ -149,10 +148,7 @@ exports.createScheduleInbound = async (req, res) => {
 
       const scheduleInboundId = scheduleInbound.scheduleInboundId;
 
-      // --- UPSERT CHILDREN (Lots) ---
-      // [NOTE] Without lotNo, we can't easily "Update" existing lots via upsert
-      // unless we rely on IDs which we don't have from Excel.
-      // These will be created as NEW rows.
+      // --- UPSERT CHILDREN ---
       for (const lot of lots) {
         await Lot.upsert(
           {
@@ -169,13 +165,11 @@ exports.createScheduleInbound = async (req, res) => {
 
     await transaction.commit();
 
-    // --- LOGGING SYSTEM (From Current - Writes JSON Files) ---
-    // We wrap this in its own try-catch so logging errors don't crash the response
+    // --- LOGGING SYSTEM ---
     try {
       const timestamp = new Date().toLocaleString();
       const isoTimestamp = new Date().toISOString();
 
-      // Ensure directory exists again just in case
       if (!fs.existsSync(LOGS_DIR)) {
         fs.mkdirSync(LOGS_DIR, { recursive: true });
       }
@@ -184,7 +178,6 @@ exports.createScheduleInbound = async (req, res) => {
         const currentLots = jobDataMap[jobNo].lots || [];
         const lotCount = currentLots.length;
 
-        // Prepare data for JSON file
         const logData = {
           jobNo: jobNo,
           updatedBy: {
@@ -208,20 +201,9 @@ exports.createScheduleInbound = async (req, res) => {
             console.log(`[LOG CREATED] ${logFilePath}`);
           }
         });
-
-        // Optional: Console log summary (From Incoming style)
-        const exWarehouseLotList = currentLots
-          .map((lot) => lot.exWarehouseLot)
-          .filter((val) => val)
-          .join(", ");
-
-        console.log(
-          `[SCHEDULE SUCCESS] Job: ${jobNo} | Lots: ${lotCount} | Ex-Whse: [${exWarehouseLotList}]`
-        );
       }
     } catch (logError) {
       console.error("[LOGGING SYSTEM FAILURE]", logError);
-      // We do NOT throw here, so the user still gets a success response
     }
     // --- LOGGING END ---
 
@@ -229,17 +211,12 @@ exports.createScheduleInbound = async (req, res) => {
       message: "Inbound schedule and lots created/updated successfully!",
     });
   } catch (dbError) {
-    // Only rollback if transaction started AND not yet committed
-    // This check handles cases where commit might have happened but logging failed (though logging is outside try block usually)
     try {
       await transaction.rollback();
-    } catch (rollbackError) {
-      // Transaction might have been already committed or rolled back
-    }
+    } catch (rollbackError) {}
 
     console.error("Database error during scheduling:", dbError);
 
-    // Specific handling for Duplicate Schedule
     if (dbError.code === "DUPLICATE_SCHEDULE") {
       return res.status(409).json({
         message: dbError.message,
@@ -256,23 +233,81 @@ exports.createScheduleInbound = async (req, res) => {
   }
 };
 
+// --- DROPDOWN FETCHING ENDPOINTS ---
+
 exports.getAllBrands = async (req, res) => {
   try {
-    // This fetches all unique brand names from the 'brands' table
     const [results] = await sequelize.query(
       'SELECT "brandName" FROM public.brands ORDER BY "brandName" ASC'
     );
-
-    // Map the result to a simple array of strings
-    const brands = results.map((row) => row.brandName);
-    res.status(200).json(brands);
+    res.status(200).json(results.map((row) => row.brandName));
   } catch (error) {
     console.error("Error fetching brands:", error);
     res.status(500).json({ message: "Error fetching brands" });
   }
 };
 
-// --- MONITORING API ENDPOINTS (From Current) ---
+exports.getAllCommodities = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "commodityName" FROM public.commodities ORDER BY "commodityName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.commodityName));
+  } catch (error) {
+    console.error("Error fetching commodities:", error);
+    res.status(500).json({ message: "Error fetching commodities" });
+  }
+};
+
+exports.getAllShapes = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "shapeName" FROM public.shapes ORDER BY "shapeName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.shapeName));
+  } catch (error) {
+    console.error("Error fetching shapes:", error);
+    res.status(500).json({ message: "Error fetching shapes" });
+  }
+};
+
+exports.getAllExWarehouseLocations = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "exWarehouseLocationName" FROM public.exwarehouselocations ORDER BY "exWarehouseLocationName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.exWarehouseLocationName));
+  } catch (error) {
+    console.error("Error fetching Ex-Warehouse Locations:", error);
+    res.status(500).json({ message: "Error fetching Ex-Warehouse Locations" });
+  }
+};
+
+exports.getAllExLmeWarehouses = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "exLmeWarehouseName" FROM public.exlmewarehouses ORDER BY "exLmeWarehouseName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.exLmeWarehouseName));
+  } catch (error) {
+    console.error("Error fetching Ex LME Warehouses:", error);
+    res.status(500).json({ message: "Error fetching Ex LME Warehouses" });
+  }
+};
+
+exports.getAllInboundWarehouses = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "inboundWarehouseName" FROM public.inboundwarehouses ORDER BY "inboundWarehouseName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.inboundWarehouseName));
+  } catch (error) {
+    console.error("Error fetching Inbound Warehouses:", error);
+    res.status(500).json({ message: "Error fetching Inbound Warehouses" });
+  }
+};
+
+// --- MONITORING API ENDPOINTS ---
 exports.getInboundLogs = async (req, res) => {
   try {
     if (!fs.existsSync(LOGS_DIR)) {
@@ -304,7 +339,6 @@ exports.getInboundLogs = async (req, res) => {
         })
         .filter((item) => item !== null);
 
-      // Sort by newest first
       fileStats.sort((a, b) => b.createdAt - a.createdAt);
 
       res.status(200).json({
@@ -321,7 +355,7 @@ exports.getInboundLogs = async (req, res) => {
 
 exports.getInboundLogDetail = async (req, res) => {
   const { filename } = req.params;
-  const safeFilename = path.basename(filename); // Security: prevent directory traversal
+  const safeFilename = path.basename(filename);
   const filePath = path.join(LOGS_DIR, safeFilename);
 
   if (!fs.existsSync(filePath)) {
@@ -343,7 +377,6 @@ exports.getInboundLogDetail = async (req, res) => {
 };
 
 exports.uploadExcel = async (req, res) => {
-  // 1. Initial Check: Was a file actually received?
   if (!req.file) {
     console.error("[UPLOAD ERROR] No file received in request.");
     return res
@@ -354,23 +387,17 @@ exports.uploadExcel = async (req, res) => {
   console.log(`[UPLOAD START] Processing file: ${req.file.originalname}`);
 
   try {
-    // 2. Read Workbook
     const workbook = XLSX.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
 
-    // Convert to 2D array (header: 1) for manual header validation
     const jsonData = XLSX.utils.sheet_to_json(worksheet, {
       raw: false,
       dateNF: "yyyy-mm-dd",
       header: 1,
     });
 
-    // 3. Validation: Empty File
     if (jsonData.length < 2) {
-      console.error(
-        `[UPLOAD ERROR] File ${req.file.originalname} has no data rows.`
-      );
       return res
         .status(400)
         .json({ message: "Excel file is empty or missing data rows." });
@@ -379,12 +406,11 @@ exports.uploadExcel = async (req, res) => {
     const headers = jsonData[0];
     const dataRows = jsonData.slice(1);
 
-    // 4. Validation: Column Requirements
     const jobNoIndex = headers.indexOf("Job No");
     const forbiddenLotNoIndex = headers.indexOf("Lot No");
     if (forbiddenLotNoIndex !== -1) {
       return res.status(400).json({
-        errorCode: "REMOVE_LOT_NO_COLUMN", // Special error code for frontend
+        errorCode: "REMOVE_LOT_NO_COLUMN",
         message: "Please remove the 'Lot No' column from the Excel file.",
       });
     }
@@ -404,7 +430,6 @@ exports.uploadExcel = async (req, res) => {
     const jobDataMap = new Map();
     let totalLotsProcessed = 0;
 
-    // 5. Parse Rows into jobDataMap
     for (const row of dataRows) {
       if (
         !row ||
@@ -441,7 +466,6 @@ exports.uploadExcel = async (req, res) => {
       totalLotsProcessed++;
     }
 
-    // 6. Database Validation: Check for existing duplicates
     const allJobNos = Array.from(jobDataMap.keys());
     if (allJobNos.length > 0) {
       const existingLots = await Lot.findAll({
@@ -456,7 +480,6 @@ exports.uploadExcel = async (req, res) => {
         existingLots.map((l) => `${l.jobNo}|${l.exWarehouseLot}`)
       );
 
-      // ✅ FIX: Initialize the array here before using it
       const duplicateErrors = [];
 
       jobDataMap.forEach((value, jobNo) => {
@@ -471,9 +494,6 @@ exports.uploadExcel = async (req, res) => {
       });
 
       if (duplicateErrors.length > 0) {
-        console.error(
-          `[UPLOAD BLOCKED] Found ${duplicateErrors.length} duplicate entries.`
-        );
         return res.status(409).json({
           message: "The file contains data that already exists in the system.",
           errors: duplicateErrors,
@@ -481,12 +501,7 @@ exports.uploadExcel = async (req, res) => {
       }
     }
 
-    // 7. Success Response
     const responseData = Object.fromEntries(jobDataMap);
-    console.log(
-      `[UPLOAD SUCCESS] Processed ${totalLotsProcessed} lots for ${allJobNos.length} jobs.`
-    );
-
     res.status(200).json({
       message: "Excel data parsed successfully. Ready for scheduling.",
       lotCount: totalLotsProcessed,
@@ -499,7 +514,6 @@ exports.uploadExcel = async (req, res) => {
       error: error.message,
     });
   } finally {
-    // 8. Cleanup: Always delete the temporary file from /uploads/excel
     if (req.file && req.file.path) {
       fs.unlink(req.file.path, (err) => {
         if (err)
