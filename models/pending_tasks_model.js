@@ -15,7 +15,7 @@ const finalizeInboundJob = async (jobNo, userId, filters = {}) => {
   try {
     console.log(
       `[Model] Finalizing Job: ${jobNo} for User: ${userId} with filters:`,
-      filters
+      filters,
     );
 
     // 1. Build Filter Clauses
@@ -59,7 +59,7 @@ const finalizeInboundJob = async (jobNo, userId, filters = {}) => {
         replacements,
         type: db.sequelize.QueryTypes.UPDATE,
         transaction,
-      }
+      },
     );
 
     await transaction.commit();
@@ -74,7 +74,7 @@ const finalizeInboundJob = async (jobNo, userId, filters = {}) => {
 const getPendingInboundTasks = async (
   page = 1,
   pageSize = 10,
-  filters = {}
+  filters = {},
 ) => {
   try {
     console.log("\n--- [DEBUG] getPendingInboundTasks START ---");
@@ -242,10 +242,10 @@ const getPendingInboundTasks = async (
     Object.values(groupedByJobNo).forEach((group) => {
       if (group.inboundDates.length > 0) {
         const minDate = new Date(
-          Math.min(...group.inboundDates.map((d) => d.getTime()))
+          Math.min(...group.inboundDates.map((d) => d.getTime())),
         );
         const maxDate = new Date(
-          Math.max(...group.inboundDates.map((d) => d.getTime()))
+          Math.max(...group.inboundDates.map((d) => d.getTime())),
         );
 
         if (!isNaN(minDate.getTime())) {
@@ -267,7 +267,7 @@ const getPendingInboundTasks = async (
 
     console.log(
       "[DEBUG] Final Grouped Jobs:",
-      Object.keys(groupedByJobNo).length
+      Object.keys(groupedByJobNo).length,
     );
 
     return {
@@ -285,7 +285,7 @@ const getPendingInboundTasks = async (
 
 const updateScheduleOutboundDetails = async (
   scheduleOutboundId,
-  { containerNo, sealNo }
+  { containerNo, sealNo },
 ) => {
   try {
     if (containerNo === undefined && sealNo === undefined) return null;
@@ -322,7 +322,7 @@ const updateScheduleOutboundDetails = async (
 const getPendingOutboundTasks = async (
   page = 1,
   pageSize = 10,
-  filters = {}
+  filters = {},
 ) => {
   try {
     const { startDate, endDate, jobNo } = filters;
@@ -417,7 +417,7 @@ const getPendingOutboundTasks = async (
     });
 
     const paginatedScheduleIds = scheduleIdResults.map(
-      (s) => s.scheduleOutboundId
+      (s) => s.scheduleOutboundId,
     );
     if (paginatedScheduleIds.length === 0)
       return { data: [], page, pageSize, totalPages, totalCount };
@@ -508,10 +508,10 @@ const getPendingOutboundTasks = async (
     Object.values(groupedByScheduleId).forEach((group) => {
       if (group.releaseDates.length > 0) {
         const minDate = new Date(
-          Math.min(...group.releaseDates.map((d) => d.getTime()))
+          Math.min(...group.releaseDates.map((d) => d.getTime())),
         );
         const maxDate = new Date(
-          Math.max(...group.releaseDates.map((d) => d.getTime()))
+          Math.max(...group.releaseDates.map((d) => d.getTime())),
         );
         const minDateString = minDate.toDateString();
         const maxDateString = maxDate.toDateString();
@@ -543,7 +543,7 @@ const reportJobDiscrepancy = async (
   jobNo,
   reportedBy,
   discrepancyType,
-  options = {}
+  options = {},
 ) => {
   const managedTransaction = !options.transaction;
   const transaction = options.transaction || (await db.sequelize.transaction());
@@ -558,7 +558,7 @@ const reportJobDiscrepancy = async (
         replacements: { jobNo },
         type: db.sequelize.QueryTypes.SELECT,
         transaction,
-      }
+      },
     );
 
     if (lotsToUpdate.length === 0) {
@@ -573,7 +573,7 @@ const reportJobDiscrepancy = async (
         replacements: { jobNo, reportedById: reportedBy, discrepancyType },
         type: db.sequelize.QueryTypes.INSERT,
         transaction,
-      }
+      },
     );
 
     const [updateResult, updateCount] = await db.sequelize.query(
@@ -585,7 +585,7 @@ const reportJobDiscrepancy = async (
         replacements: { jobNo },
         type: db.sequelize.QueryTypes.UPDATE,
         transaction,
-      }
+      },
     );
 
     if (managedTransaction) await transaction.commit();
@@ -607,7 +607,7 @@ const reverseInbound = async (inboundId) => {
         type: db.sequelize.QueryTypes.SELECT,
         transaction: t,
         plain: true,
-      }
+      },
     );
 
     if (!inboundEntry) throw new Error("Inbound entry not found.");
@@ -621,7 +621,7 @@ const reverseInbound = async (inboundId) => {
         replacements: { jobNo, exWarehouseLot },
         type: db.sequelize.QueryTypes.UPDATE,
         transaction: t,
-      }
+      },
     );
 
     await db.sequelize.query(
@@ -630,7 +630,7 @@ const reverseInbound = async (inboundId) => {
         replacements: { inboundId },
         type: db.sequelize.QueryTypes.DELETE,
         transaction: t,
-      }
+      },
     );
 
     await t.commit();
@@ -730,7 +730,7 @@ const getSupervisorPendingStatus = async (userId) => {
 const setLastReadPendingTaskTime = async (userId, timestampIgnored) => {
   try {
     console.log(
-      `[PendingModel] setLastReadTime called for User: ${userId}. Setting to NOW() UTC.`
+      `[PendingModel] setLastReadTime called for User: ${userId}. Setting to NOW() UTC.`,
     );
 
     // Write standard UTC. This ensures future reads are saved correctly.
@@ -773,7 +773,7 @@ const notifySupervisorOfNewTask = async (lotId) => {
     if (!lotId) return;
     await db.sequelize.query(
       `UPDATE public.lot SET "updatedAt" = NOW() WHERE "lotId" = :lotId`,
-      { replacements: { lotId }, type: db.sequelize.QueryTypes.UPDATE }
+      { replacements: { lotId }, type: db.sequelize.QueryTypes.UPDATE },
     );
   } catch (error) {
     console.error("Error triggering supervisor notification:", error);

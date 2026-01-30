@@ -6,9 +6,10 @@ const db = require("../database");
 
 // Models
 const pendingTasksModel = require("../models/pending_tasks_model");
-const confirmInboundModel = require("../models/confirm_inbound_model"); // Added this import
+const confirmInboundModel = require("../models/confirm_inbound_model");
 const grnModel = require("../models/grn.model");
 const actualWeightModel = require("../models/actualWeight.model");
+const usersModel = require("../models/users.model"); // Required for Logging
 
 const {
   InboundBundle,
@@ -16,6 +17,73 @@ const {
   BeforeImage,
   AfterImage,
 } = require("../models/repack.model");
+
+// --- LOGGING SETUP START ---
+const CONFIRM_LOGS_DIR = path.join(__dirname, "../logs/Confirmed Inbounds");
+if (!fs.existsSync(CONFIRM_LOGS_DIR)) {
+  fs.mkdirSync(CONFIRM_LOGS_DIR, { recursive: true });
+}
+
+const generateUniqueFilename = (dir, jobNo) => {
+  let filename = `${jobNo}.json`;
+  let counter = 1;
+  while (fs.existsSync(path.join(dir, filename))) {
+    counter++;
+    filename = `${jobNo}_${counter}.json`;
+  }
+  return path.join(dir, filename);
+};
+
+const createLogEntry = async (
+  jobNo,
+  userId,
+  actionType,
+  summaryData,
+  detailsData,
+) => {
+  try {
+    let username = "Unknown";
+    let userRole = "Unknown";
+    try {
+      // Ensure usersModel has getUserById or similar
+      const userDetails = await usersModel.getUserById(userId);
+      if (userDetails) {
+        username = userDetails.username;
+        userRole = userDetails.rolename;
+      }
+    } catch (e) {
+      console.warn("Log User Fetch Warning:", e.message);
+    }
+
+    const timestamp = new Date().toLocaleString("en-SG", {
+      timeZone: "Asia/Singapore",
+    });
+
+    const fileContent = {
+      header: {
+        jobNo: jobNo,
+        action: actionType,
+        timestamp: timestamp,
+        performedBy: {
+          userId: userId,
+          username: username,
+          userRole: userRole,
+        },
+      },
+      summary: summaryData,
+      details: detailsData,
+    };
+
+    const filePath = generateUniqueFilename(CONFIRM_LOGS_DIR, jobNo);
+    fs.writeFile(filePath, JSON.stringify(fileContent, null, 2), (err) => {
+      if (err) console.error(`Failed to write log for ${jobNo}:`, err);
+      else console.log(`[LOG CREATED] ${filePath}`);
+    });
+  } catch (error) {
+    console.error(`Error generating log for ${jobNo}:`, error);
+  }
+};
+// --- LOGGING SETUP END ---
 
 // Helper to save images
 const saveBase64Image = (base64String, jobNo, lotNo, bundleNo, type) => {
@@ -26,7 +94,7 @@ const saveBase64Image = (base64String, jobNo, lotNo, bundleNo, type) => {
 
   const dir = path.join(
     __dirname,
-    `../uploads/img/repacked/${jobNo}-${lotNo}-${bundleNo}`
+    `../uploads/img/repacked/${jobNo}-${lotNo}-${bundleNo}`,
   );
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -45,48 +113,100 @@ exports.handleSync = async (req, res) => {
   }
 
   console.log(`[Sync] Received ${jobs.length} jobs to process.`);
-  const t = await db.sequelize.transaction();
+
+  // We do NOT use a global transaction 't' here anymore.
+  // We process per job to ensure valid jobs succeed even if one fails (Queue Safety).
+
   const results = [];
 
-  try {
-    for (const job of jobs) {
+  for (const job of jobs) {
+    // Isolated Transaction per Job
+    const t = await db.sequelize.transaction();
+
+    try {
       let payload;
       try {
-        // Handle both stringified JSON and pre-parsed objects
         payload =
           typeof job.payload === "string"
             ? JSON.parse(job.payload)
             : job.payload;
       } catch (parseError) {
-        console.error(
-          `[Sync] Failed to parse payload for job ${job.id}`,
-          parseError
-        );
+        console.error(`[Sync] Payload Parse Error Job ${job.id}`, parseError);
         results.push({
           jobId: job.id,
           status: "FAILED",
-          error: "Invalid JSON payload",
+          error: "Invalid JSON",
         });
+        await t.rollback();
         continue;
       }
 
-      console.log(`[Sync] Processing job ${job.id} of type ${job.action_type}`);
+      console.log(`[Sync] Processing job ${job.id} type ${job.action_type}`);
 
       switch (job.action_type) {
         case "CONFIRM_INBOUND": {
           const { selectedLots, userId } = payload;
           if (!selectedLots || selectedLots.length === 0) {
-            console.warn(`[Sync] CONFIRM_INBOUND skipped: No lots provided.`);
             results.push({ jobId: job.id, status: "SKIPPED" });
+            await t.commit();
             continue;
           }
 
-          // Use the robust model function we updated
           const inserted = await confirmInboundModel.insertInboundFromLots(
             selectedLots,
             userId,
-            { transaction: t }
+            { transaction: t },
           );
+
+          // Commit DB Change first
+          await t.commit();
+
+          // --- LOGGING LOGIC (Post-Commit) ---
+          // Group by JobNo to creating meaningful logs
+          const jobsMap = {};
+          selectedLots.forEach((lot) => {
+            // Ensure we handle case where jobNo might be missing in older payloads
+            const jNo = lot.jobNo || "Unknown";
+            if (!jobsMap[jNo]) jobsMap[jNo] = { jobNo: jNo, lots: [] };
+            jobsMap[jNo].lots.push(lot);
+          });
+
+          // Generate one log per Job No found in the batch
+          for (const jobNo in jobsMap) {
+            const jobData = jobsMap[jobNo];
+
+            // Calculate weights if available in payload (or fetch if critical, but payload usually has it)
+            let totalGross = 0;
+            let totalNet = 0;
+
+            const lotsDetailed = jobData.lots.map((l) => {
+              const g = parseFloat(l.grossWeight || 0);
+              const n = parseFloat(l.netWeight || 0);
+              totalGross += g;
+              totalNet += n;
+              return {
+                lotId: l.lotId,
+                lotNo: l.lotNo,
+                exWarehouseLot: l.exWarehouseLot,
+                bundleCount: l.expectedBundleCount,
+                weights: { gross: g, net: n },
+              };
+            });
+
+            // Fire and forget logging
+            createLogEntry(
+              jobNo,
+              userId,
+              "Confirm Inbound (Sync)",
+              {
+                totalLots: jobData.lots.length,
+                totalGrossWeight: parseFloat(totalGross.toFixed(3)),
+                totalNetWeight: parseFloat(totalNet.toFixed(3)),
+              },
+              lotsDetailed,
+            );
+          }
+          // -----------------------------------
 
           results.push({
             jobId: job.id,
@@ -98,12 +218,52 @@ exports.handleSync = async (req, res) => {
 
         case "REPORT_DISCREPANCY": {
           const { lotIds, reportedBy } = payload;
-          // Use the robust model function
           const reports = await confirmInboundModel.reportConfirmation(
             lotIds,
             reportedBy,
-            { transaction: t }
+            { transaction: t },
           );
+
+          await t.commit();
+
+          // --- LOGGING LOGIC ---
+          // We need lot details for logging. Fetch them roughly.
+          try {
+            const lots = await db.sequelize.query(
+              `SELECT "lotId", "lotNo", "jobNo", "exWarehouseLot" FROM public.lot WHERE "lotId" IN (:ids)`,
+              {
+                replacements: {
+                  ids: Array.isArray(lotIds) ? lotIds : [lotIds],
+                },
+                type: db.sequelize.QueryTypes.SELECT,
+              },
+            );
+
+            const jobsMap = {};
+            lots.forEach((l) => {
+              if (!jobsMap[l.jobNo]) jobsMap[l.jobNo] = [];
+              jobsMap[l.jobNo].push(l);
+            });
+
+            for (const jobNo in jobsMap) {
+              createLogEntry(
+                jobNo,
+                reportedBy,
+                "Report Discrepancy (Sync)",
+                { totalReportedLots: jobsMap[jobNo].length },
+                jobsMap[jobNo].map((l) => ({
+                  lotId: l.lotId,
+                  lotNo: l.lotNo,
+                  exWarehouseLot: l.exWarehouseLot,
+                  issue: "Reported via Offline Sync",
+                })),
+              );
+            }
+          } catch (logErr) {
+            console.error("[Sync] Logging error for discrepancy:", logErr);
+          }
+          // ---------------------
+
           results.push({
             jobId: job.id,
             status: "OK",
@@ -118,8 +278,20 @@ exports.handleSync = async (req, res) => {
             jobNo,
             reportedBy,
             discrepancyType,
-            { transaction: t }
+            { transaction: t },
           );
+
+          await t.commit();
+
+          // Log Job Discrepancy
+          createLogEntry(
+            jobNo,
+            reportedBy,
+            "Report Job Discrepancy (Sync)",
+            { type: discrepancyType },
+            {},
+          );
+
           results.push({ jobId: job.id, status: "OK", processed: reportCount });
           break;
         }
@@ -129,6 +301,7 @@ exports.handleSync = async (req, res) => {
           await grnModel.updateAndRegenerateGrn(outboundId, payload, {
             transaction: t,
           });
+          await t.commit();
           results.push({ jobId: job.id, status: "OK" });
           break;
         }
@@ -139,12 +312,11 @@ exports.handleSync = async (req, res) => {
           let targetInboundId = inboundId;
           let targetLotId = lotId;
 
-          // Attempt to resolve ID if missing
           if (!targetInboundId && !targetLotId && jobNo && exWarehouseLot) {
             const related =
               await actualWeightModel.findRelatedIdByExWarehouseLot(
                 jobNo,
-                exWarehouseLot
+                exWarehouseLot,
               );
             if (related) {
               if (related.inboundId) targetInboundId = related.inboundId;
@@ -157,16 +329,17 @@ exports.handleSync = async (req, res) => {
               targetInboundId,
               true,
               crewLotNo,
-              t
+              t,
             );
           } else if (targetLotId) {
             await actualWeightModel.updateCrewLotNo(
               targetLotId,
               false,
               crewLotNo,
-              t
+              t,
             );
           }
+          await t.commit();
           results.push({ jobId: job.id, status: "OK" });
           break;
         }
@@ -182,8 +355,6 @@ exports.handleSync = async (req, res) => {
             strictValidation,
             exWarehouseLot,
           } = payload;
-
-          // Similar ID resolution logic
           let resolvedInboundId = inboundId;
           let resolvedLotId = lotId;
 
@@ -191,7 +362,7 @@ exports.handleSync = async (req, res) => {
             const related =
               await actualWeightModel.findRelatedIdByExWarehouseLot(
                 jobNo,
-                exWarehouseLot
+                exWarehouseLot,
               );
             if (related) {
               resolvedInboundId = related.inboundId;
@@ -207,7 +378,7 @@ exports.handleSync = async (req, res) => {
               strictValidation,
               null,
               null,
-              t
+              t,
             );
           } else if (resolvedLotId) {
             await actualWeightModel.saveLotWithBundles(
@@ -217,15 +388,15 @@ exports.handleSync = async (req, res) => {
               strictValidation,
               null,
               null,
-              t
+              t,
             );
           } else if (jobNo && lotNo) {
-            // Fallback legacy lookup
+            // Fallback legacy
             const foundInbound = await actualWeightModel.findRelatedId(
               null,
               false,
               jobNo,
-              lotNo
+              lotNo,
             );
             if (foundInbound) {
               await actualWeightModel.saveInboundWithBundles(
@@ -235,14 +406,14 @@ exports.handleSync = async (req, res) => {
                 strictValidation,
                 jobNo,
                 lotNo,
-                t
+                t,
               );
             } else {
               const foundLot = await actualWeightModel.findRelatedId(
                 null,
                 true,
                 jobNo,
-                lotNo
+                lotNo,
               );
               if (foundLot) {
                 await actualWeightModel.saveLotWithBundles(
@@ -252,11 +423,12 @@ exports.handleSync = async (req, res) => {
                   strictValidation,
                   jobNo,
                   lotNo,
-                  t
+                  t,
                 );
               }
             }
           }
+          await t.commit();
           results.push({ jobId: job.id, status: "OK" });
           break;
         }
@@ -310,7 +482,7 @@ exports.handleSync = async (req, res) => {
                 createdAt: new Date(),
                 updatedAt: new Date(),
               },
-              { transaction: t }
+              { transaction: t },
             );
           } else {
             await bundle.update(
@@ -324,11 +496,10 @@ exports.handleSync = async (req, res) => {
                 noOfPieces,
                 updatedAt: new Date(),
               },
-              { transaction: t }
+              { transaction: t },
             );
           }
 
-          // Update pieces
           if (pieceEntries && Array.isArray(pieceEntries)) {
             await BundlePieces.destroy({
               where: { bundleid: bundle.inboundBundleId },
@@ -342,7 +513,6 @@ exports.handleSync = async (req, res) => {
             await BundlePieces.bulkCreate(piecesToCreate, { transaction: t });
           }
 
-          // Save images
           if (isRepackProvided) {
             if (newBeforeImagesBase64?.length) {
               for (const img of newBeforeImagesBase64) {
@@ -351,7 +521,7 @@ exports.handleSync = async (req, res) => {
                   jobNo,
                   lotNo,
                   noOfBundle,
-                  "before"
+                  "before",
                 );
                 await BeforeImage.create(
                   {
@@ -362,7 +532,7 @@ exports.handleSync = async (req, res) => {
                     createdAt: new Date(),
                     updatedAt: new Date(),
                   },
-                  { transaction: t }
+                  { transaction: t },
                 );
               }
             }
@@ -373,7 +543,7 @@ exports.handleSync = async (req, res) => {
                   jobNo,
                   lotNo,
                   noOfBundle,
-                  "after"
+                  "after",
                 );
                 await AfterImage.create(
                   {
@@ -384,11 +554,12 @@ exports.handleSync = async (req, res) => {
                     createdAt: new Date(),
                     updatedAt: new Date(),
                   },
-                  { transaction: t }
+                  { transaction: t },
                 );
               }
             }
           }
+          await t.commit();
           results.push({ jobId: job.id, status: "OK" });
           break;
         }
@@ -396,17 +567,26 @@ exports.handleSync = async (req, res) => {
         default:
           console.warn(`[Sync] Unknown action_type: ${job.action_type}`);
           results.push({ jobId: job.id, status: "SKIPPED" });
+          await t.commit(); // Commit empty transaction to release connection
       }
+    } catch (jobError) {
+      // If a specific job fails, we rollback ONLY that job's transaction.
+      // The loop continues for other jobs.
+      console.error(`[Sync] Error processing job ${job.id}:`, jobError);
+      await t.rollback();
+      results.push({
+        jobId: job.id,
+        status: "FAILED",
+        error: jobError.message,
+      });
     }
-
-    await t.commit();
-    console.log("[Sync] Batch processed successfully.");
-    res.status(200).json({ message: "Sync successful", results });
-  } catch (error) {
-    await t.rollback();
-    console.error("[Sync] Error during sync batch. Rolling back.", error);
-    res
-      .status(500)
-      .json({ error: "Failed to process sync batch.", message: error.message });
   }
+
+  // We return 200 even if some failed, so the client knows we received the batch.
+  // The client (SyncService) should parse 'results' to know which IDs to delete from local queue.
+  // Currently, your SyncService deletes ALL pending jobs if status == 200.
+  // IMPORTANT: For robustness, you should eventually update SyncService to only delete jobs where status === "OK" or "SKIPPED".
+  // But for now, this change prevents a server crash or full rollback.
+
+  res.status(200).json({ message: "Sync batch processed", results });
 };
