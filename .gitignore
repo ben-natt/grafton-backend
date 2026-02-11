@@ -1,2 +1,6 @@
 .env
 node_modules/
+logs/
+uploads/
+services/
+pdf.services.js

@@ -6,7 +6,7 @@ const findRelatedId = async (
   providedId,
   isLotId = null,
   jobNo = null,
-  lotNo = null
+  lotNo = null,
 ) => {
   try {
     // If we have jobNo and lotNo but no providedId, try to find the ID first
@@ -55,7 +55,7 @@ const findRelatedId = async (
         providedId,
         false,
         jobNo,
-        lotNo
+        lotNo,
       );
       if (asInboundResult)
         return { lotId: asInboundResult, providedIdType: "inbound" };
@@ -135,7 +135,7 @@ const checkDuplicateCrewLotNo = async (
   crewLotNo,
   jobNo,
   idValue,
-  transaction = null
+  transaction = null,
 ) => {
   if (!crewLotNo) return false; // Skip check if empty
 
@@ -162,7 +162,7 @@ const checkDuplicateCrewLotNo = async (
 
   if (duplicateResult.count > 0) {
     throw new Error(
-      `Crew Lot No ${crewLotNo} already exists for job ${jobNo} in inbound records.`
+      `Crew Lot No ${crewLotNo} already exists for job ${jobNo} in inbound records.`,
     );
   }
 
@@ -224,7 +224,7 @@ const updateCrewLotNo = async (idValue, isInbound, newCrewLotNo) => {
 
       if (!inbound)
         throw new Error(
-          "Corresponding inbound record not found or already weighted"
+          "Corresponding inbound record not found or already weighted",
         );
       jobNo = inbound.jobNo;
       exWarehouseLot = inbound.exWarehouseLot;
@@ -297,7 +297,7 @@ const upsertBundle = async (
   jobNo = null,
   lotNo = null,
   exWarehouseLot = null,
-  transaction = null
+  transaction = null,
 ) => {
   const options = transaction ? { transaction } : {};
   let idField = isInbound ? "inboundId" : "lotId";
@@ -324,7 +324,7 @@ const upsertBundle = async (
         console.log(
           `[upsertBundle] Found ${
             isInbound ? "inboundId" : "lotId"
-          }: ${idValue} using jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}`
+          }: ${idValue} using jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}`,
         );
       }
     }
@@ -336,10 +336,10 @@ const upsertBundle = async (
           idValue,
           !isInbound,
           jobNo,
-          exWarehouseLot
+          exWarehouseLot,
         );
         console.log(
-          `[upsertBundle] Found relatedId: ${relatedId} from idValue: ${idValue}`
+          `[upsertBundle] Found relatedId: ${relatedId} from idValue: ${idValue}`,
         );
       } else if (jobNo && exWarehouseLot) {
         // Try to find the related ID directly using jobNo and exWarehouseLot
@@ -361,7 +361,7 @@ const upsertBundle = async (
             ? relatedResult.inboundId
             : relatedResult.lotId;
           console.log(
-            `[upsertBundle] Found relatedId: ${relatedId} using jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}`
+            `[upsertBundle] Found relatedId: ${relatedId} using jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}`,
           );
         }
       }
@@ -370,10 +370,10 @@ const upsertBundle = async (
     // CRITICAL VALIDATION: Ensure we have at least one ID
     if (!idValue && !relatedId) {
       console.error(
-        `[upsertBundle] FAILED: No IDs available for jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}, bundleNo: ${bundleNo}`
+        `[upsertBundle] FAILED: No IDs available for jobNo: ${jobNo}, exWarehouseLot: ${exWarehouseLot}, bundleNo: ${bundleNo}`,
       );
       throw new Error(
-        "Cannot upsert bundle - neither primary ID nor related ID is available"
+        "Cannot upsert bundle - neither primary ID nor related ID is available",
       );
     }
 
@@ -461,7 +461,9 @@ const updateInboundActualWeight = async (
   actualWeight,
   strictValidation = false,
   crewLotNo = null,
-  bundles = null // New parameter to calculate total stickerWeight
+  bundles = null,
+  tareWeight = 0,
+  scaleNo = null,
 ) => {
   const transaction = await db.sequelize.transaction();
   try {
@@ -506,6 +508,8 @@ const updateInboundActualWeight = async (
         "actualWeight" = :actualWeight,      
         "isWeighted" = :isWeighted,
         "stickerWeight" = COALESCE(:stickerWeight, "stickerWeight"),
+        "tareWeight" = COALESCE(:tareWeight, "tareWeight"),
+        "scaleNo" = COALESCE(:scaleNo, "scaleNo"),
         "updatedAt" = NOW()
       WHERE "inboundId" = :inboundId
       RETURNING *
@@ -521,6 +525,8 @@ const updateInboundActualWeight = async (
         actualWeight: actualWeightInMetricTons,
         isWeighted,
         stickerWeight: totalStickerWeight,
+        tareWeight: tareWeight,
+        scaleNo: scaleNo,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -540,7 +546,9 @@ const updateLotActualWeight = async (
   actualWeight,
   strictValidation = false,
   crewLotNo = null, // New parameter for crewLotNo
-  bundles = null // New parameter to calculate total stickerWeight
+  bundles = null,
+  tareWeight = 0,
+  scaleNo = null,
 ) => {
   const transaction = await db.sequelize.transaction();
   try {
@@ -583,6 +591,8 @@ const updateLotActualWeight = async (
         "actualWeight" = :actualWeight, 
         "isWeighted" = :isWeighted,
         "stickerWeight" = COALESCE(:stickerWeight, "stickerWeight"),
+        "tareWeight" = COALESCE(:tareWeight, "tareWeight"),
+        "scaleNo" = COALESCE(:scaleNo, "scaleNo"),
         "updatedAt" = NOW()
       WHERE "lotId" = :lotId
       RETURNING *
@@ -598,6 +608,8 @@ const updateLotActualWeight = async (
         actualWeight: actualWeightInMetricTons,
         isWeighted,
         stickerWeight: totalStickerWeight,
+        tareWeight: tareWeight,
+        scaleNo: scaleNo,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
@@ -612,7 +624,6 @@ const updateLotActualWeight = async (
   }
 };
 
-// combination of the lotId and inboundId, has the related Id
 const saveInboundWithBundles = async (
   inboundId,
   actualWeight,
@@ -623,20 +634,23 @@ const saveInboundWithBundles = async (
   exWarehouseLot = null,
   tareWeight = 0,
   scaleNo = null,
-  userId = null
+  userId = null,
+  externalTransaction = null, // [UPDATED] Accept external transaction
 ) => {
-  const transaction = await db.sequelize.transaction();
+  // [UPDATED] Use external transaction if provided, else create new
+  const transaction = externalTransaction || (await db.sequelize.transaction());
 
   console.log(`[saveLotWithBundles] Starting save:`, {
     inboundId,
     jobNo,
     exWarehouseLot,
     bundleCount: bundles.length,
-    bundleNumbers: bundles.map((b) => b.bundleNo),
+    tareWeight,
+    scaleNo,
   });
 
   try {
-    // Find related lotId, using jobNo and lotNo if inboundId is null
+    // Find related lotId
     const relatedLotId = await findRelatedId(inboundId, false, jobNo, lotNo);
 
     // Upsert all bundles first
@@ -648,30 +662,25 @@ const saveInboundWithBundles = async (
         bundle.bundleNo,
         bundle.weight,
         bundle.meltNo,
-        bundle.stickerWeight, // Pass stickerWeight to upsertBundle
+        bundle.stickerWeight,
         relatedLotId,
         jobNo,
         exWarehouseLot,
-        transaction
+        transaction,
       );
       if (savedBundle) savedBundles.push(savedBundle);
     }
 
-    // --- MODIFIED LOGIC ---
-    // A lot is considered "weighted" (i.e., started) if any bundle has
-    // either a weight greater than 0 or a non-empty melt number.
     const hasAnyData = bundles.some(
       (b) =>
         (b.weight != null && b.weight > 0) ||
-        (b.meltNo != null && b.meltNo.trim() !== "")
+        (b.meltNo != null && b.meltNo.trim() !== ""),
     );
     const isWeighted = hasAnyData;
 
-    // Calculate total stickerWeight
     const totalStickerWeight = calculateTotalStickerWeight(bundles);
 
-    // Update inbound with crewLotNo and stickerWeight
-    // [MODIFIED] Added tareWeight, scaleNo, lottedById, lottedAt with COALESCE for lotted fields
+    // Update inbound with tareWeight and scaleNo
     const updateQuery = `
       UPDATE public.inbounds 
       SET 
@@ -687,18 +696,16 @@ const saveInboundWithBundles = async (
       RETURNING *
     `;
 
-    // Convert actualWeight from kg to metric tons (divide by 1000)
     const actualWeightInMetricTons = actualWeight / 1000;
 
-    const inboundResult = await db.sequelize.query(updateQuery, {
+    await db.sequelize.query(updateQuery, {
       replacements: {
         inboundId,
         actualWeight: actualWeightInMetricTons,
-        isWeighted, // Use the new conditional flag here
+        isWeighted,
         stickerWeight: totalStickerWeight,
-        // [NEW] Replacements
-        tareWeight: tareWeight,
-        scaleNo: scaleNo,
+        tareWeight: tareWeight, // [UPDATED] Ensure this is passed
+        scaleNo: scaleNo, // [UPDATED] Ensure this is passed
         userId: userId,
       },
       type: db.sequelize.QueryTypes.UPDATE,
@@ -725,20 +732,21 @@ const saveInboundWithBundles = async (
           replacements: {
             lotId: relatedLotId,
             actualWeight: actualWeightInMetricTons,
-            isWeighted, // And also use it here
+            isWeighted,
             stickerWeight: totalStickerWeight,
-            // [NEW] Replacements
             tareWeight: tareWeight,
             scaleNo: scaleNo,
             userId: userId,
           },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
-        }
+        },
       );
     }
 
-    await transaction.commit();
+    // [UPDATED] Only commit if we started the transaction ourselves
+    if (!externalTransaction) await transaction.commit();
+
     return {
       inboundId,
       lotId: relatedLotId,
@@ -746,12 +754,12 @@ const saveInboundWithBundles = async (
       bundles: savedBundles,
       isWeighted,
       stickerWeight: totalStickerWeight,
-      // [NEW]
       tareWeight,
       scaleNo,
     };
   } catch (error) {
-    await transaction.rollback();
+    // [UPDATED] Only rollback if we started the transaction ourselves
+    if (!externalTransaction) await transaction.rollback();
     console.error("Error saving inbound with bundles:", error);
     throw error;
   }
@@ -768,23 +776,24 @@ const saveLotWithBundles = async (
   exWarehouseLot = null,
   tareWeight = 0,
   scaleNo = null,
-  userId = null
+  userId = null,
+  externalTransaction = null, // [UPDATED] Accept external transaction
 ) => {
-  const transaction = await db.sequelize.transaction();
+  // [UPDATED] Use external transaction if provided
+  const transaction = externalTransaction || (await db.sequelize.transaction());
 
   console.log(`[saveInboundWithBundles] Starting save:`, {
     lotId,
     jobNo,
     exWarehouseLot,
     bundleCount: bundles.length,
-    bundleNumbers: bundles.map((b) => b.bundleNo),
+    tareWeight,
+    scaleNo,
   });
 
   try {
-    // Find related inboundId, using jobNo and lotNo if lotId is null
     const relatedInboundId = await findRelatedId(lotId, true, jobNo, lotNo);
 
-    // Upsert bundles first
     const savedBundles = [];
     for (const bundle of bundles) {
       const savedBundle = await upsertBundle(
@@ -793,32 +802,26 @@ const saveLotWithBundles = async (
         bundle.bundleNo,
         bundle.weight,
         bundle.meltNo,
-        bundle.stickerWeight, // Pass stickerWeight to upsertBundle
+        bundle.stickerWeight,
         relatedInboundId,
         jobNo,
         exWarehouseLot,
-        transaction
+        transaction,
       );
       if (savedBundle) {
         savedBundles.push(savedBundle);
       }
     }
 
-    // Calculate total stickerWeight
     const totalStickerWeight = calculateTotalStickerWeight(bundles);
 
-    // --- MODIFIED LOGIC ---
-    // A lot is considered "weighted" (i.e., started) if any bundle has
-    // either a weight greater than 0 or a non-empty melt number.
     const hasAnyData = bundles.some(
       (b) =>
         (b.weight != null && b.weight > 0) ||
-        (b.meltNo != null && b.meltNo.trim() !== "")
+        (b.meltNo != null && b.meltNo.trim() !== ""),
     );
     const isWeighted = hasAnyData;
 
-    // Update lot with crewLotNo and stickerWeight
-    // [MODIFIED] Added tareWeight, scaleNo, lottedById, lottedAt with COALESCE
     const updateQuery = `
       UPDATE public.lot 
       SET 
@@ -834,25 +837,22 @@ const saveLotWithBundles = async (
       RETURNING *
     `;
 
-    // Convert actualWeight from kg to metric tons (divide by 1000)
     const actualWeightInMetricTons = actualWeight / 1000;
 
-    const lotResult = await db.sequelize.query(updateQuery, {
+    await db.sequelize.query(updateQuery, {
       replacements: {
         lotId,
         actualWeight: actualWeightInMetricTons,
         isWeighted,
         stickerWeight: totalStickerWeight,
-        // [NEW]
-        tareWeight,
-        scaleNo,
+        tareWeight: tareWeight, // [UPDATED]
+        scaleNo: scaleNo, // [UPDATED]
         userId,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction,
     });
 
-    // Also update related inbound if exists (including crewLotNo and stickerWeight)
     if (relatedInboundId) {
       await db.sequelize.query(
         `
@@ -874,18 +874,19 @@ const saveLotWithBundles = async (
             actualWeight: actualWeightInMetricTons,
             isWeighted,
             stickerWeight: totalStickerWeight,
-            // [NEW]
-            tareWeight,
-            scaleNo,
+            tareWeight: tareWeight, // [UPDATED]
+            scaleNo: scaleNo, // [UPDATED]
             userId,
           },
           type: db.sequelize.QueryTypes.UPDATE,
           transaction,
-        }
+        },
       );
     }
 
-    await transaction.commit();
+    // [UPDATED] Only commit if we started the transaction ourselves
+    if (!externalTransaction) await transaction.commit();
+
     return {
       lotId,
       inboundId: relatedInboundId,
@@ -893,12 +894,12 @@ const saveLotWithBundles = async (
       bundles: savedBundles,
       stickerWeight: totalStickerWeight,
       isWeighted,
-      // [NEW]
       tareWeight,
       scaleNo,
     };
   } catch (error) {
-    await transaction.rollback();
+    // [UPDATED] Only rollback if we started the transaction ourselves
+    if (!externalTransaction) await transaction.rollback();
     console.error("Error saving lot with bundles:", error);
     throw error;
   }
@@ -907,7 +908,7 @@ const saveLotWithBundles = async (
 const getBundlesIfWeighted = async (
   idValue,
   isInbound,
-  strictValidation = false
+  strictValidation = false,
 ) => {
   try {
     let query;
@@ -1004,7 +1005,7 @@ const duplicateActualWeightBundles = async (
   sourceExWLot,
   targetExWLot,
   lotId,
-  resolvedBy
+  resolvedBy,
 ) => {
   const transaction = await db.sequelize.transaction();
   try {
@@ -1024,7 +1025,7 @@ const duplicateActualWeightBundles = async (
 
     if (!targetLot) {
       throw new Error(
-        `Target "coming lot" with Ex-Warehouse Lot '${targetExWLot}' not found.`
+        `Target "coming lot" with Ex-Warehouse Lot '${targetExWLot}' not found.`,
       );
     }
     const targetLotId = targetLot.lotId;
@@ -1043,12 +1044,12 @@ const duplicateActualWeightBundles = async (
         replacements: { sourceExWLot },
         type: db.sequelize.QueryTypes.SELECT,
         transaction,
-      }
+      },
     );
 
     if (!sourceTransaction || !sourceTransaction.inboundId) {
       throw new Error(
-        `No previous outbounded transaction found for Ex-Warehouse Lot '${sourceExWLot}' to copy weights from.`
+        `No previous outbounded transaction found for Ex-Warehouse Lot '${sourceExWLot}' to copy weights from.`,
       );
     }
     const sourceInboundId = sourceTransaction.inboundId;
@@ -1066,14 +1067,14 @@ const duplicateActualWeightBundles = async (
 
     if (sourceBundles.length === 0) {
       throw new Error(
-        `No original weighted bundles found for the historical inbound record (inboundId: ${sourceInboundId}).`
+        `No original weighted bundles found for the historical inbound record (inboundId: ${sourceInboundId}).`,
       );
     }
 
     // 4. Calculate total actual weight
     const totalActualWeight = sourceBundles.reduce(
       (sum, bundle) => sum + parseFloat(bundle.weight || 0),
-      0
+      0,
     );
 
     // 5. Update the target lot's weight
@@ -1110,7 +1111,7 @@ const duplicateActualWeightBundles = async (
     } catch (reportError) {
       console.error(
         `[ERROR] Duplication succeeded, but failed to update report status for lotId ${targetLotId}:`,
-        reportError
+        reportError,
       );
     }
 
@@ -1122,7 +1123,7 @@ const duplicateActualWeightBundles = async (
     await transaction.rollback();
     console.error(
       "[DEBUG] Error inside duplicateActualWeightBundles model function:",
-      error
+      error,
     );
     throw error;
   }
@@ -1133,7 +1134,7 @@ const checkOutboundScheduleStatus = async (
   idValue,
   isInbound,
   jobNo = null,
-  lotNo = null
+  lotNo = null,
 ) => {
   try {
     let query;
@@ -1255,7 +1256,7 @@ const getHistoricalBundlesByJobAndLot = async (jobNo, lotNo) => {
       {
         replacements,
         type: db.sequelize.QueryTypes.SELECT,
-      }
+      },
     );
 
     if (!sourceTransaction || !sourceTransaction.inboundId) {
