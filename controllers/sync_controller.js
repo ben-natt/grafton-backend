@@ -354,7 +354,12 @@ exports.handleSync = async (req, res) => {
             bundles,
             strictValidation,
             exWarehouseLot,
+            // [UPDATED] Extract these fields from payload
+            tareWeight,
+            scaleNo,
+            userId,
           } = payload;
+
           let resolvedInboundId = inboundId;
           let resolvedLotId = lotId;
 
@@ -376,9 +381,13 @@ exports.handleSync = async (req, res) => {
               actualWeight,
               bundles,
               strictValidation,
-              null,
-              null,
-              t,
+              jobNo, // [UPDATED] Pass jobNo
+              lotNo, // [UPDATED] Pass lotNo
+              exWarehouseLot, // [UPDATED] Pass exWarehouseLot
+              tareWeight, // [UPDATED] Pass tareWeight
+              scaleNo, // [UPDATED] Pass scaleNo
+              userId, // [UPDATED] Pass userId
+              t, // [UPDATED] Pass transaction as final argument
             );
           } else if (resolvedLotId) {
             await actualWeightModel.saveLotWithBundles(
@@ -386,12 +395,16 @@ exports.handleSync = async (req, res) => {
               actualWeight,
               bundles,
               strictValidation,
-              null,
-              null,
-              t,
+              jobNo,
+              lotNo,
+              exWarehouseLot,
+              tareWeight, // [UPDATED] Pass tareWeight
+              scaleNo, // [UPDATED] Pass scaleNo
+              userId, // [UPDATED] Pass userId
+              t, // [UPDATED] Pass transaction as final argument
             );
           } else if (jobNo && lotNo) {
-            // Fallback legacy
+            // Fallback legacy logic
             const foundInbound = await actualWeightModel.findRelatedId(
               null,
               false,
@@ -406,6 +419,10 @@ exports.handleSync = async (req, res) => {
                 strictValidation,
                 jobNo,
                 lotNo,
+                null, // exWarehouseLot
+                tareWeight, // [UPDATED]
+                scaleNo, // [UPDATED]
+                userId, // [UPDATED]
                 t,
               );
             } else {
@@ -423,6 +440,10 @@ exports.handleSync = async (req, res) => {
                   strictValidation,
                   jobNo,
                   lotNo,
+                  null, // exWarehouseLot
+                  tareWeight, // [UPDATED]
+                  scaleNo, // [UPDATED]
+                  userId, // [UPDATED]
                   t,
                 );
               }
