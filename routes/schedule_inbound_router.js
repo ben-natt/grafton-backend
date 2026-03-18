@@ -29,6 +29,8 @@ router.get("/ex-lme-warehouses", auth, scheduleInboundController.getExLmeWarehou
 router.get("/inbound-warehouses", auth, scheduleInboundController.getInboundWarehouses);
 router.get("/brands", auth, scheduleInboundController.getAllBrands);
 
+// Add this line to expose the commodities endpoint:
+router.get("/commodities", auth, scheduleInboundController.getCommodities);
 // Logging Logic
 router.get("/logs", auth, scheduleInboundController.getInboundLogs);
 router.get("/logs/:filename", auth, scheduleInboundController.getInboundLogDetail);
