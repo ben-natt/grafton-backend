@@ -18,7 +18,7 @@ if (!fs.existsSync(LOGS_DIR)) {
   fs.mkdirSync(LOGS_DIR, { recursive: true });
 }
 
-// --- HELPER FUNCTION: Auto-add missing relational data ---
+// --- HELPER FUNCTION ---
 const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
   if (!name || typeof name !== "string" || name.trim() === "") {
     return;
@@ -26,273 +26,499 @@ const findOrCreateRaw = async (table, nameColumn, name, transaction) => {
   const aName = name.trim();
 
   try {
-    // 1. Check if the record already exists (safer than ON CONFLICT if there's no unique constraint)
-    const existing = await sequelize.query(
-      `SELECT "${nameColumn}" FROM "${table}" WHERE "${nameColumn}" = :aName LIMIT 1`,
-      {
-        replacements: { aName },
-        type: sequelize.QueryTypes.SELECT,
-        transaction,
-      }
-    );
-
-    // 2. Insert if it doesn't exist
-    if (!existing || existing.length === 0) {
-      const query = `
-        INSERT INTO "${table}" ("${nameColumn}", "createdAt", "updatedAt")
-        VALUES (:aName, NOW(), NOW());
-      `;
-      await sequelize.query(query, {
-        replacements: { aName },
-        type: sequelize.QueryTypes.INSERT,
-        transaction,
-      });
-    }
-  } catch (error) {
-    console.error(`[INFO] Could not auto-add '${aName}' to ${table}. Reason: ${error.message}`);
-  }
-};
-
-// --- API ENDPOINTS FOR FRONTEND DROPDOWNS (Resolves 404s) ---
-const safeQueryList = async (table, column) => {
-  try {
-    return await sequelize.query(`SELECT DISTINCT "${column}" AS name FROM "${table}" WHERE "${column}" IS NOT NULL`, { 
-        type: sequelize.QueryTypes.SELECT 
+    const query = `
+      INSERT INTO public."${table}" ("${nameColumn}", "createdAt", "updatedAt")
+      VALUES (:aName, NOW(), NOW())
+      ON CONFLICT ("${nameColumn}") DO NOTHING;
+    `;
+    await sequelize.query(query, {
+      replacements: { aName },
+      type: sequelize.QueryTypes.INSERT,
+      transaction,
     });
-  } catch (e) {
-    console.warn(`[WARNING] Could not fetch from ${table} (Returning empty list). SQL Message: ${e.message}`);
-    return []; // Return empty list to stop 404s instead of crashing
+  } catch (error) {
+    console.error(`Error in findOrCreateRaw for table ${table}:`, error);
+    throw error;
   }
 };
 
-exports.getShapes = async (req, res) => res.status(200).json(await safeQueryList("shapes", "shapeName"));
-exports.getAllBrands = async (req, res) => res.status(200).json(await safeQueryList("brands", "brandName"));
+// --- MAIN CONTROLLER ---
+exports.createScheduleInbound = async (req, res) => {
+  // Safe access to user properties
+  const userPayload = req.user || {};
+  const userId = userPayload.userId;
 
-// FIXED: Passed exact lowercase table names to match Postgres Schema
-exports.getExWarehouseLocations = async (req, res) => res.status(200).json(await safeQueryList("exwarehouselocations", "exWarehouseLocationName"));
-exports.getExLmeWarehouses = async (req, res) => res.status(200).json(await safeQueryList("exlmewarehouses", "exLmeWarehouseName"));
-exports.getInboundWarehouses = async (req, res) => res.status(200).json(await safeQueryList("inboundwarehouses", "inboundWarehouseName"));
+  let username = "Unknown User";
+  let userRole = "Unknown Role";
 
-// FIXED: Changed table from "metals" to "commodities" and column from "name" to "commodityName"
-exports.getCommodities = async (req, res) => res.status(200).json(await safeQueryList("commodities", "commodityName"));
-// --- UPLOAD EXCEL FILE ---
-// --- UPLOAD EXCEL FILE ---
-exports.uploadExcel = async (req, res) => {
+  if (userId) {
+    try {
+      const fullUser = await usersModel.getUserById(userId);
+      if (fullUser) {
+        username = fullUser.username;
+        userRole = fullUser.rolename;
+      }
+    } catch (err) {
+      console.warn("Could not fetch user details for logging:", err.message);
+    }
+  }
+
+  const { inboundDate, jobDataMap } = req.body;
+
+  if (!jobDataMap || Object.keys(jobDataMap).length === 0) {
+    return res
+      .status(400)
+      .json({ message: "No lot data provided for scheduling." });
+  }
+
+  if (!inboundDate) {
+    return res
+      .status(400)
+      .json({ message: "Inbound Date is required for scheduling." });
+  }
+
+  const transaction = await sequelize.transaction();
+
   try {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+    for (const jobNo in jobDataMap) {
+      const { lots } = jobDataMap[jobNo];
 
-    const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
+      // --- DATA NORMALIZATION ---
+      for (const lot of lots) {
+        if (lot.shape && typeof lot.shape === "string") {
+          const shapeLower = lot.shape.toLowerCase();
+          if (shapeLower === "ing" || shapeLower === "ingot") {
+            lot.shape = "Ingot";
+          } else if (shapeLower === "tbar") {
+            lot.shape = "T-bar";
+          }
+        }
 
-    // Read as an array of arrays
-    const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-    if (!rawData || rawData.length === 0) {
-      return res.status(400).json({ message: "Excel file is empty." });
-    }
-
-    // --- NEW BACKEND FIX: Fetch DB commodities to enforce exact casing ---
-    const dbCommodities = await sequelize.query(
-      `SELECT "commodityName" FROM "commodities" WHERE "commodityName" IS NOT NULL`, 
-      { type: sequelize.QueryTypes.SELECT }
-    );
-    // Create a dictionary for case-insensitive matching (e.g., "nickel cathodes" -> "Nickel Cathodes")
-    const commodityMap = new Map(dbCommodities.map(c => [c.commodityName.toLowerCase().trim(), c.commodityName]));
-
-    // 1. Find Header Row dynamically
-    let headerRowIndex = 0;
-    let headers = [];
-    for (let i = 0; i < rawData.length; i++) {
-      if (rawData[i] && rawData[i].length > 0) {
-        headerRowIndex = i;
-        headers = rawData[i].map((h) => (typeof h === "string" ? h.trim().toLowerCase() : h));
-        break;
-      }
-    }
-
-    const getColIndex = (possibleNames) => {
-      for (let name of possibleNames) {
-        const idx = headers.findIndex((h) => h === name.toLowerCase());
-        if (idx !== -1) return idx;
-      }
-      return -1;
-    };
-
-    // 2. Map Columns
-    const colMap = {
-      jobNo: getColIndex(["job no", "job number", "jobno"]),
-      lotNo: getColIndex(["ex-whse lot", "lot no", "lot", "ex-warehouse lot"]),
-      warrant: getColIndex(["ex-whse warrant", "warrant"]),
-      metal: getColIndex(["metal"]),
-      brandCode: getColIndex(["brand code", "brand"]),
-      shape: getColIndex(["shape"]),
-      bundles: getColIndex(["bdle", "bundle", "bundles"]),
-      nw: getColIndex(["nw", "net weight"]),
-      gw: getColIndex(["gw", "gross weight"]),
-      exWhseLoc: getColIndex(["ex-whse location", "location"]),
-      exLmeWhse: getColIndex(["ex lme warehouse", "lme warehouse"]),
-      inboundWhse: getColIndex(["inbound warehouse"]),
-    };
-
-    const jobDataMap = new Map();
-    let totalLotsProcessed = 0;
-    const skippedRows = [];
-
-    // 3. Process Data Rows
-    for (let i = headerRowIndex + 1; i < rawData.length; i++) {
-      const row = rawData[i];
-      if (!row || row.length === 0) continue;
-
-      const jobNo = colMap.jobNo !== -1 ? row[colMap.jobNo] : row[0];
-      const lotNo = colMap.lotNo !== -1 ? row[colMap.lotNo] : row[2];
-
-      if (!jobNo || !lotNo) {
-        skippedRows.push({ rowIndex: i + 1, data: row });
-        continue;
-      }
-
-      const jobKey = String(jobNo).trim();
-      const lotKey = String(lotNo).trim();
-
-      if (!jobDataMap.has(jobKey)) {
-        jobDataMap.set(jobKey, {
-          jobNo: jobKey,
-          inboundDate: new Date(),
-          lots: [],
-        });
-      }
-
-      // --- NEW BACKEND FIX: Sanitize the commodity string ---
-      let rawCommodity = colMap.metal !== -1 ? row[colMap.metal] : row[3];
-      let sanitizedCommodity = rawCommodity;
-
-      if (typeof rawCommodity === 'string') {
-        const lowerCommodity = rawCommodity.trim().toLowerCase();
-        console.log ("Raw", rawCommodity);
-        
-        if (commodityMap.has(lowerCommodity)) {
-          // It matches the database (ignoring case), so use the EXACT database casing!
-          sanitizedCommodity = commodityMap.get(lowerCommodity);
-        } else {
-          // Fallback: If it truly is a brand new commodity, format it nicely (Title Case)
-          sanitizedCommodity = rawCommodity
-            .trim()
-            .replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
-            console.log("Sanitised", sanitizedCommodity);
+        if (lot.commodity && typeof lot.commodity === "string") {
+          if (lot.commodity.toUpperCase() === "LEAD") {
+            lot.commodity = "Lead";
+          } else if (lot.commodity.toUpperCase() === "ZINC") {
+            lot.commodity = "Zinc";
+          }
         }
       }
 
-      jobDataMap.get(jobKey).lots.push({
-        exWarehouseLot: lotKey,
-        exWarehouseWarrant: colMap.warrant !== -1 ? row[colMap.warrant] : row[1],
-        
-        commodity: sanitizedCommodity, // <-- Sends the safe, database-matching casing
-        
-        brand: colMap.brandCode !== -1 ? row[colMap.brandCode] : row[4],
-        shape: colMap.shape !== -1 ? row[colMap.shape] : row[6],
-        expectedBundleCount: colMap.bundles !== -1 ? row[colMap.bundles] : row[7], 
-        netWeight: colMap.nw !== -1 ? row[colMap.nw] : row[8],
-        grossWeight: colMap.gw !== -1 ? row[colMap.gw] : row[9],
-        exWarehouseLocation: colMap.exWhseLoc !== -1 ? row[colMap.exWhseLoc] : row[10],
-        exLmeWarehouse: colMap.exLmeWhse !== -1 ? row[colMap.exLmeWhse] : row[11],
-        inboundWarehouse: colMap.inboundWhse !== -1 ? row[colMap.inboundWhse] : row[12],
-      });
-      totalLotsProcessed++;
-    }
+      // --- HELPER TABLE INSERTIONS ---
+      for (const lot of lots) {
+        await findOrCreateRaw(
+          "commodities",
+          "commodityName",
+          lot.commodity,
+          transaction
+        );
+        await findOrCreateRaw("brands", "brandName", lot.brand, transaction);
+        await findOrCreateRaw("shapes", "shapeName", lot.shape, transaction);
+        await findOrCreateRaw(
+          "exwarehouselocations",
+          "exWarehouseLocationName",
+          lot.exWarehouseLocation,
+          transaction
+        );
+        await findOrCreateRaw(
+          "exlmewarehouses",
+          "exLmeWarehouseName",
+          lot.exLmeWarehouse,
+          transaction
+        );
+        await findOrCreateRaw(
+          "inboundwarehouses",
+          "inboundWarehouseName",
+          lot.inboundWarehouse,
+          transaction
+        );
+      }
 
-    // console.log("Raw", rawCommodity);
-    // console.log("Sanitised", sanitizedCommodity);
+      // --- UPSERT PARENT ---
+      const [scheduleInbound] = await ScheduleInbound.upsert(
+        {
+          jobNo: jobNo,
+          inboundDate: new Date(inboundDate),
+          userId: userId,
+        },
+        {
+          transaction: transaction,
+          returning: true,
+        }
+      );
 
-    const responseData = Object.fromEntries(jobDataMap);
-    
-    res.status(200).json({
-      message: "Excel data parsed successfully. Ready for scheduling.",
-      lotCount: totalLotsProcessed,
-      skippedCount: skippedRows.length,
-      data: responseData,
-    });
-  } catch (error) {
-    console.error("[CRITICAL UPLOAD ERROR]:", error);
-    res.status(500).json({ message: "A server error occurred", error: error.message });
-  }
-};
+      const scheduleInboundId = scheduleInbound.scheduleInboundId;
 
-// --- CREATE SCHEDULE INBOUND (Saves data & auto-adds missing fields) ---
-exports.createScheduleInbound = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  try {
-    const { jobDataMap } = req.body; // <-- Update: matching your Dart payload
-    
-    // Safety check just in case the frontend sends it wrapped differently
-    const dataToProcess = jobDataMap || req.body.data;
-    
-    for (const jobKey in dataToProcess) {
-      const jobData = dataToProcess[jobKey];
-
-      // Create main ScheduleInbound
-      const schedule = await ScheduleInbound.create({
-        jobNo: jobData.jobNo || jobKey, // fallback to key if missing
-        inboundDate: req.body.inboundDate || jobData.inboundDate || new Date(), // Check root payload first
-        userId: req.user ? req.user.id : null,
-      }, { transaction });
-
-      // Create Lots and auto-add relationships dynamically
-      for (const lot of jobData.lots) {
-        
-        // AUTO-ADD missing values into databases
-        if (lot.brand) await findOrCreateRaw("brands", "brandName", lot.brand, transaction);
-        if (lot.shape) await findOrCreateRaw("shapes", "shapeName", lot.shape, transaction);
-        
-        // CHANGED: Auto-add based on frontend 'commodity' key
-        if (lot.commodity) await findOrCreateRaw("commodities", "commodityName", lot.commodity, transaction); 
-        
-        if (lot.exWarehouseLocation) await findOrCreateRaw("exwarehouselocations", "exWarehouseLocationName", lot.exWarehouseLocation, transaction);
-        if (lot.exLmeWarehouse) await findOrCreateRaw("exlmewarehouses", "exLmeWarehouseName", lot.exLmeWarehouse, transaction);
-        if (lot.inboundWarehouse) await findOrCreateRaw("inboundwarehouses", "inboundWarehouseName", lot.inboundWarehouse, transaction);
-
-        // Finally create the lot
-        await Lot.create({
-          scheduleInboundId: schedule.scheduleInboundId,
-          exWarehouseLot: lot.exWarehouseLot,
-          exWarehouseWarrant: lot.exWarehouseWarrant,
-          
-          // CHANGED: Translating frontend 'commodity' back to database 'metal'
-          metal: lot.commodity, 
-          brand: lot.brand,
-          shape: lot.shape,
-          
-          // CHANGED: Translating frontend 'expectedBundleCount' back to database 'bundles'
-          bundles: lot.expectedBundleCount || 0, 
-          netWeight: lot.netWeight || 0,
-          grossWeight: lot.grossWeight || 0,
-          exWarehouseLocation: lot.exWarehouseLocation,
-          exLmeWarehouse: lot.exLmeWarehouse,
-          inboundWarehouse: lot.inboundWarehouse,
-        }, { transaction });
+      // --- UPSERT CHILDREN ---
+      for (const lot of lots) {
+        await Lot.upsert(
+          {
+            ...lot,
+            scheduleInboundId: scheduleInboundId,
+            inbounddate: new Date(inboundDate),
+          },
+          {
+            transaction: transaction,
+          }
+        );
       }
     }
 
     await transaction.commit();
-    res.status(200).json({ message: "Inbound Schedule created successfully" });
-  } catch (error) {
-    await transaction.rollback();
-    console.error("[CRITICAL] Create Schedule Error:", error);
-    res.status(500).json({ message: "Failed to create schedule inbound", error: error.message });
+
+    // --- LOGGING SYSTEM ---
+    try {
+      const timestamp = new Date().toLocaleString();
+      const isoTimestamp = new Date().toISOString();
+
+      if (!fs.existsSync(LOGS_DIR)) {
+        fs.mkdirSync(LOGS_DIR, { recursive: true });
+      }
+
+      for (const jobNo in jobDataMap) {
+        const currentLots = jobDataMap[jobNo].lots || [];
+        const lotCount = currentLots.length;
+
+        const logData = {
+          jobNo: jobNo,
+          updatedBy: {
+            userId: userId,
+            username: username,
+            userRole: userRole,
+          },
+          updateTime: timestamp,
+          isoTimestamp: isoTimestamp,
+          totalLots: lotCount,
+          inboundDate: inboundDate,
+          lotsDetails: currentLots,
+        };
+
+        const logFilePath = path.join(LOGS_DIR, `${jobNo}.json`);
+
+        fs.writeFile(logFilePath, JSON.stringify(logData, null, 2), (err) => {
+          if (err) {
+            console.error(`[LOG ERROR] Failed to write log for ${jobNo}:`, err);
+          } else {
+            console.log(`[LOG CREATED] ${logFilePath}`);
+          }
+        });
+      }
+    } catch (logError) {
+      console.error("[LOGGING SYSTEM FAILURE]", logError);
+    }
+    // --- LOGGING END ---
+
+    res.status(200).json({
+      message: "Inbound schedule and lots created/updated successfully!",
+    });
+  } catch (dbError) {
+    try {
+      await transaction.rollback();
+    } catch (rollbackError) {}
+
+    console.error("Database error during scheduling:", dbError);
+
+    if (dbError.code === "DUPLICATE_SCHEDULE") {
+      return res.status(409).json({
+        message: dbError.message,
+        errorCode: "DUPLICATE_SCHEDULE",
+      });
+    }
+
+    if (!res.headersSent) {
+      res.status(500).json({
+        message: "An error occurred during the scheduling process.",
+        error: dbError.message,
+      });
+    }
   }
 };
 
-// --- LOGGING METHODS ---
+// --- DROPDOWN FETCHING ENDPOINTS ---
+
+exports.getAllBrands = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "brandName" FROM public.brands ORDER BY "brandName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.brandName));
+  } catch (error) {
+    console.error("Error fetching brands:", error);
+    res.status(500).json({ message: "Error fetching brands" });
+  }
+};
+
+exports.getAllCommodities = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "commodityName" FROM public.commodities ORDER BY "commodityName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.commodityName));
+  } catch (error) {
+    console.error("Error fetching commodities:", error);
+    res.status(500).json({ message: "Error fetching commodities" });
+  }
+};
+
+exports.getAllShapes = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "shapeName" FROM public.shapes ORDER BY "shapeName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.shapeName));
+  } catch (error) {
+    console.error("Error fetching shapes:", error);
+    res.status(500).json({ message: "Error fetching shapes" });
+  }
+};
+
+exports.getAllExWarehouseLocations = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "exWarehouseLocationName" FROM public.exwarehouselocations ORDER BY "exWarehouseLocationName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.exWarehouseLocationName));
+  } catch (error) {
+    console.error("Error fetching Ex-Warehouse Locations:", error);
+    res.status(500).json({ message: "Error fetching Ex-Warehouse Locations" });
+  }
+};
+
+exports.getAllExLmeWarehouses = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "exLmeWarehouseName" FROM public.exlmewarehouses ORDER BY "exLmeWarehouseName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.exLmeWarehouseName));
+  } catch (error) {
+    console.error("Error fetching Ex LME Warehouses:", error);
+    res.status(500).json({ message: "Error fetching Ex LME Warehouses" });
+  }
+};
+
+exports.getAllInboundWarehouses = async (req, res) => {
+  try {
+    const [results] = await sequelize.query(
+      'SELECT "inboundWarehouseName" FROM public.inboundwarehouses ORDER BY "inboundWarehouseName" ASC'
+    );
+    res.status(200).json(results.map((row) => row.inboundWarehouseName));
+  } catch (error) {
+    console.error("Error fetching Inbound Warehouses:", error);
+    res.status(500).json({ message: "Error fetching Inbound Warehouses" });
+  }
+};
+
+// --- MONITORING API ENDPOINTS ---
 exports.getInboundLogs = async (req, res) => {
   try {
-    const files = fs.readdirSync(LOGS_DIR);
-    res.json(files);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    if (!fs.existsSync(LOGS_DIR)) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    fs.readdir(LOGS_DIR, (err, files) => {
+      if (err) {
+        console.error("Error reading logs directory:", err);
+        return res
+          .status(500)
+          .json({ message: "Unable to scan logs directory" });
+      }
+
+      const logFiles = files.filter((file) => file.endsWith(".json"));
+
+      const fileStats = logFiles
+        .map((file) => {
+          try {
+            const stats = fs.statSync(path.join(LOGS_DIR, file));
+            return {
+              filename: file,
+              jobNo: file.replace(".json", ""),
+              createdAt: stats.birthtime,
+            };
+          } catch (statErr) {
+            return null;
+          }
+        })
+        .filter((item) => item !== null);
+
+      fileStats.sort((a, b) => b.createdAt - a.createdAt);
+
+      res.status(200).json({
+        success: true,
+        data: fileStats,
+      });
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Server error fetching logs", error: error.message });
+  }
 };
 
 exports.getInboundLogDetail = async (req, res) => {
+  const { filename } = req.params;
+  const safeFilename = path.basename(filename);
+  const filePath = path.join(LOGS_DIR, safeFilename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ message: "Log file not found" });
+  }
+
+  fs.readFile(filePath, "utf8", (err, data) => {
+    if (err) {
+      console.error("Error reading log file:", err);
+      return res.status(500).json({ message: "Error reading log file" });
+    }
+    try {
+      const jsonData = JSON.parse(data);
+      res.status(200).json({ success: true, data: jsonData });
+    } catch (parseError) {
+      res.status(500).json({ message: "Error parsing log file content" });
+    }
+  });
+};
+
+exports.uploadExcel = async (req, res) => {
+  if (!req.file) {
+    console.error("[UPLOAD ERROR] No file received in request.");
+    return res
+      .status(400)
+      .json({ message: "No file uploaded. Please select an Excel file." });
+  }
+
+  console.log(`[UPLOAD START] Processing file: ${req.file.originalname}`);
+
   try {
-    const fileData = fs.readFileSync(path.join(LOGS_DIR, req.params.filename), "utf-8");
-    res.json({ content: fileData });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const workbook = XLSX.readFile(req.file.path);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+      raw: false,
+      dateNF: "yyyy-mm-dd",
+      header: 1,
+    });
+
+    if (jsonData.length < 2) {
+      return res
+        .status(400)
+        .json({ message: "Excel file is empty or missing data rows." });
+    }
+
+    const headers = jsonData[0];
+    const dataRows = jsonData.slice(1);
+
+    const jobNoIndex = headers.indexOf("Job No");
+    const forbiddenLotNoIndex = headers.indexOf("Lot No");
+    if (forbiddenLotNoIndex !== -1) {
+      return res.status(400).json({
+        errorCode: "REMOVE_LOT_NO_COLUMN",
+        message: "Please remove the 'Lot No' column from the Excel file.",
+      });
+    }
+    const nwIndex = headers.indexOf("NW");
+    const gwIndex = headers.indexOf("GW");
+    const actualWeightIndex = headers.indexOf("Actual Weight");
+    const exLotIndex = headers.indexOf("Ex-Whse Lot");
+    const exWarrantIndex = headers.indexOf("Ex-Whse Warrant");
+    const bdleIndex = headers.indexOf("Bdle");
+    const brandIndex = headers.indexOf("Brand");
+    const metalIndex = headers.indexOf("Metal");
+    const shapeIndex = headers.indexOf("Shape");
+    const exLocIndex = headers.indexOf("Ex-Whse Location");
+    const exLMEIndex = headers.indexOf("Ex LME Warehouse");
+    const inWarehouseIndex = headers.indexOf("Inbound Warehouse");
+
+    const jobDataMap = new Map();
+    let totalLotsProcessed = 0;
+
+    for (const row of dataRows) {
+      if (
+        !row ||
+        row.length === 0 ||
+        row.every((cell) => cell === null || cell === "")
+      )
+        continue;
+
+      const jobNo = row[jobNoIndex]?.toString().trim() || null;
+      if (!jobNo) continue;
+
+      if (!jobDataMap.has(jobNo)) {
+        jobDataMap.set(jobNo, { lots: [] });
+      }
+
+      const lotData = {
+        jobNo: jobNo,
+        netWeight: parseFloat(row[nwIndex]) || null,
+        grossWeight: parseFloat(row[gwIndex]) || null,
+        actualWeight: parseFloat(row[actualWeightIndex]) || null,
+        exWarehouseLot: row[exLotIndex]?.toString().trim() || null,
+        exWarehouseWarrant: row[exWarrantIndex]?.toString().trim() || null,
+        expectedBundleCount: parseInt(row[bdleIndex], 10) || null,
+        brand: row[brandIndex]?.toString().trim() || null,
+        commodity: row[metalIndex]?.toString().trim() || null,
+        shape: row[shapeIndex]?.toString().trim() || null,
+        exWarehouseLocation: row[exLocIndex]?.toString().trim() || null,
+        exLmeWarehouse: row[exLMEIndex]?.toString().trim() || null,
+        inboundWarehouse: row[inWarehouseIndex]?.toString().trim() || null,
+        status: "Pending",
+      };
+
+      jobDataMap.get(jobNo).lots.push(lotData);
+      totalLotsProcessed++;
+    }
+
+    const allJobNos = Array.from(jobDataMap.keys());
+    if (allJobNos.length > 0) {
+      const existingLots = await Lot.findAll({
+        where: {
+          jobNo: allJobNos,
+        },
+        attributes: ["jobNo", "exWarehouseLot"],
+        raw: true,
+      });
+
+      const dbLotSet = new Set(
+        existingLots.map((l) => `${l.jobNo}|${l.exWarehouseLot}`)
+      );
+
+      const duplicateErrors = [];
+
+      jobDataMap.forEach((value, jobNo) => {
+        value.lots.forEach((lot) => {
+          const key = `${jobNo}|${lot.exWarehouseLot}`;
+          if (dbLotSet.has(key)) {
+            duplicateErrors.push(
+              `Job: ${jobNo} / Ex-W-Lot: ${lot.exWarehouseLot} already exists in the system.`
+            );
+          }
+        });
+      });
+
+      if (duplicateErrors.length > 0) {
+        return res.status(409).json({
+          message: "The file contains data that already exists in the system.",
+          errors: duplicateErrors,
+        });
+      }
+    }
+
+    const responseData = Object.fromEntries(jobDataMap);
+    res.status(200).json({
+      message: "Excel data parsed successfully. Ready for scheduling.",
+      lotCount: totalLotsProcessed,
+      data: responseData,
+    });
+  } catch (error) {
+    console.error("[CRITICAL UPLOAD ERROR]:", error);
+    res.status(500).json({
+      message: "A server error occurred while reading the Excel file.",
+      error: error.message,
+    });
+  } finally {
+    if (req.file && req.file.path) {
+      fs.unlink(req.file.path, (err) => {
+        if (err)
+          console.error("[CLEANUP ERROR] Failed to delete temp file:", err);
+      });
+    }
+  }
 };
