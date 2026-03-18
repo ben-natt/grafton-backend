@@ -76,7 +76,7 @@ exports.getInboundWarehouses = async (req, res) => res.status(200).json(await sa
 // FIXED: Changed table from "metals" to "commodities" and column from "name" to "commodityName"
 exports.getCommodities = async (req, res) => res.status(200).json(await safeQueryList("commodities", "commodityName"));
 // --- UPLOAD EXCEL FILE ---
-// --- UPLOAD EXCEL FILE ---
+// --- UPLOAD EXCEL FILE (With Strict Backend Validation) ---
 exports.uploadExcel = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -92,15 +92,18 @@ exports.uploadExcel = async (req, res) => {
       return res.status(400).json({ message: "Excel file is empty." });
     }
 
-    // --- NEW BACKEND FIX: Fetch DB commodities to enforce exact casing ---
+    // --- 1. FETCH VALID COMMODITIES FROM DATABASE ---
     const dbCommodities = await sequelize.query(
       `SELECT "commodityName" FROM "commodities" WHERE "commodityName" IS NOT NULL`, 
       { type: sequelize.QueryTypes.SELECT }
     );
-    // Create a dictionary for case-insensitive matching (e.g., "nickel cathodes" -> "Nickel Cathodes")
-    const commodityMap = new Map(dbCommodities.map(c => [c.commodityName.toLowerCase().trim(), c.commodityName]));
+    
+    // Create a Set of lowercase commodity names for easy, case-insensitive validation
+    const validCommoditiesSet = new Set(
+      dbCommodities.map(c => c.commodityName.trim().toLowerCase())
+    );
 
-    // 1. Find Header Row dynamically
+    // 2. Find Header Row dynamically
     let headerRowIndex = 0;
     let headers = [];
     for (let i = 0; i < rawData.length; i++) {
@@ -119,7 +122,7 @@ exports.uploadExcel = async (req, res) => {
       return -1;
     };
 
-    // 2. Map Columns
+    // 3. Map Columns
     const colMap = {
       jobNo: getColIndex(["job no", "job number", "jobno"]),
       lotNo: getColIndex(["ex-whse lot", "lot no", "lot", "ex-warehouse lot"]),
@@ -138,8 +141,9 @@ exports.uploadExcel = async (req, res) => {
     const jobDataMap = new Map();
     let totalLotsProcessed = 0;
     const skippedRows = [];
+    const invalidCommoditiesFound = new Set(); // To collect all bad commodities
 
-    // 3. Process Data Rows
+    // 4. Process Data Rows
     for (let i = headerRowIndex + 1; i < rawData.length; i++) {
       const row = rawData[i];
       if (!row || row.length === 0) continue;
@@ -150,6 +154,20 @@ exports.uploadExcel = async (req, res) => {
       if (!jobNo || !lotNo) {
         skippedRows.push({ rowIndex: i + 1, data: row });
         continue;
+      }
+
+      // --- 5. VALIDATE THE COMMODITY ---
+      let rawCommodity = colMap.metal !== -1 ? row[colMap.metal] : row[3];
+      
+      if (rawCommodity) {
+        const lowerCommodity = String(rawCommodity).trim().toLowerCase();
+        
+        // If the database doesn't have this commodity, flag it as invalid
+        if (!validCommoditiesSet.has(lowerCommodity)) {
+          invalidCommoditiesFound.add(String(rawCommodity).trim());
+        }
+      } else {
+        invalidCommoditiesFound.add("Missing/Empty Commodity");
       }
 
       const jobKey = String(jobNo).trim();
@@ -163,30 +181,11 @@ exports.uploadExcel = async (req, res) => {
         });
       }
 
-      // --- NEW BACKEND FIX: Sanitize the commodity string ---
-      let rawCommodity = colMap.metal !== -1 ? row[colMap.metal] : row[3];
-      let sanitizedCommodity = rawCommodity;
-
-      if (typeof rawCommodity === 'string') {
-        const lowerCommodity = rawCommodity.trim().toLowerCase();
-        
-        if (commodityMap.has(lowerCommodity)) {
-          // It matches the database (ignoring case), so use the EXACT database casing!
-          sanitizedCommodity = commodityMap.get(lowerCommodity);
-        } else {
-          // Fallback: If it truly is a brand new commodity, format it nicely (Title Case)
-          sanitizedCommodity = rawCommodity
-            .trim()
-            .replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
-        }
-      }
-
+      // We still map the data temporarily, but we won't save it if validation fails
       jobDataMap.get(jobKey).lots.push({
         exWarehouseLot: lotKey,
         exWarehouseWarrant: colMap.warrant !== -1 ? row[colMap.warrant] : row[1],
-        
-        commodity: sanitizedCommodity, // <-- Sends the safe, database-matching casing
-        
+        commodity: rawCommodity ? String(rawCommodity).trim() : null,
         brand: colMap.brandCode !== -1 ? row[colMap.brandCode] : row[4],
         shape: colMap.shape !== -1 ? row[colMap.shape] : row[6],
         expectedBundleCount: colMap.bundles !== -1 ? row[colMap.bundles] : row[7], 
@@ -199,10 +198,20 @@ exports.uploadExcel = async (req, res) => {
       totalLotsProcessed++;
     }
 
+    // --- 6. BLOCK UPLOAD IF VALIDATION FAILED ---
+    if (invalidCommoditiesFound.size > 0) {
+      return res.status(400).json({ 
+        message: "Validation Failed: Unrecognized commodities found in the Excel file.", 
+        invalidItems: Array.from(invalidCommoditiesFound),
+        instruction: "Please fix these items in the spreadsheet or add them to the database first."
+      });
+    }
+
+    // Convert map to standard object to send back
     const responseData = Object.fromEntries(jobDataMap);
     
     res.status(200).json({
-      message: "Excel data parsed successfully. Ready for scheduling.",
+      message: "Excel data validated and parsed successfully. Ready for scheduling.",
       lotCount: totalLotsProcessed,
       skippedCount: skippedRows.length,
       data: responseData,
