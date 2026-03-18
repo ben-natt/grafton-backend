@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const scheduleInboundController = require("../controllers/schedule_inbound_controller"); // Correct path to your controller
+const scheduleInboundController = require("../controllers/schedule_inbound_controller"); 
 const auth = require("../middleware/auth");
 
 const storage = multer.diskStorage({
@@ -14,6 +14,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
+// Upload and Creation logic
 router.post(
   "/upload-excel",
   upload.single("excelFile"),
@@ -21,16 +22,15 @@ router.post(
 );
 router.post("/create", auth, scheduleInboundController.createScheduleInbound);
 
-// Get list of all logs
-router.get("/logs", auth, scheduleInboundController.getInboundLogs);
-
-// Get specific log content by filename
-router.get(
-  "/logs/:filename",
-  auth,
-  scheduleInboundController.getInboundLogDetail
-);
-
+// Validation / Dropdown Endpoints (Resolves 404 Errors)
+router.get("/shapes", auth, scheduleInboundController.getShapes);
+router.get("/ex-warehouse-locations", auth, scheduleInboundController.getExWarehouseLocations);
+router.get("/ex-lme-warehouses", auth, scheduleInboundController.getExLmeWarehouses);
+router.get("/inbound-warehouses", auth, scheduleInboundController.getInboundWarehouses);
 router.get("/brands", auth, scheduleInboundController.getAllBrands);
+
+// Logging Logic
+router.get("/logs", auth, scheduleInboundController.getInboundLogs);
+router.get("/logs/:filename", auth, scheduleInboundController.getInboundLogDetail);
 
 module.exports = router;

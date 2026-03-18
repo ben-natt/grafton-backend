@@ -197,6 +197,9 @@ exports.uploadExcel = async (req, res) => {
           ? masterInbound.actualWeight
           : masterInbound.netWeight;
 
+        // Support for checking both column variations for robust container extraction
+        const excelContainerNo = getCellValue("Container Number") || getCellValue("Container No");
+
         const lotDataForFrontend = {
           inboundId: masterInbound.inboundId,
           jobNo: masterInbound.jobNo,
@@ -220,7 +223,7 @@ exports.uploadExcel = async (req, res) => {
           lotReleaseWeight: weightToUse,
           exportDate: toLocalYYYYMMDD(exportDateExcel),
           stuffingDate: toLocalYYYYMMDD(stuffingDateExcel),
-          containerNo: getCellValue("Container No")?.toString().trim() ?? null,
+          containerNo: excelContainerNo?.toString().trim() ?? null,
           sealNo: getCellValue("Seal No")?.toString().trim() ?? null,
           uom: getCellValue("UOM")?.toString().trim() ?? null,
           tareWeight: getCellValue("Tare Weight")?.toString().trim() ?? null,

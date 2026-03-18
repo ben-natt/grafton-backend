@@ -687,16 +687,18 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
 
     if (parsedLots?.length > 0) {
       const selectedInboundsQuery = `
-        INSERT INTO public.selectedinbounds (
-          "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt",
-          "releaseDate", "releaseEndDate", "exportDate", "deliveryDate", "storageReleaseLocation"
-        )
-        VALUES (
-          :inboundId, :scheduleOutboundId, :lotNo, :jobNo, NOW(), NOW(),
-          :releaseDate, :releaseEndDate, :exportDate, :deliveryDate, :storageReleaseLocation
-        )
-        ON CONFLICT ("jobNo", "lotNo") DO NOTHING;
-      `;
+  INSERT INTO public.selectedinbounds (
+    "inboundId", "scheduleOutboundId", "lotNo", "jobNo", "createdAt", "updatedAt",
+    "releaseDate", "releaseEndDate", "exportDate", "deliveryDate", "storageReleaseLocation",
+    "containerNo", "sealNo", "tareWeight", "uom", "stuffingDate"
+  )
+  VALUES (
+    :inboundId, :scheduleOutboundId, :lotNo, :jobNo, NOW(), NOW(),
+    :releaseDate, :releaseEndDate, :exportDate, :deliveryDate, :storageReleaseLocation,
+    :containerNo, :sealNo, :tareWeight, :uom, :stuffingDate
+  )
+  ON CONFLICT ("jobNo", "lotNo") DO NOTHING;
+`;
 
       const updateInboundQuantityQuery = `
        UPDATE public.inbounds
@@ -722,24 +724,30 @@ const createScheduleOutbound = async (scheduleData, userId, files = []) => {
 
         if (!jobNo || isNaN(lotNo)) continue;
 
-        await db.sequelize.query(selectedInboundsQuery, {
-          replacements: {
-            inboundId,
-            scheduleOutboundId,
-            lotNo,
-            jobNo,
-            releaseDate: releaseStartDate,
-            releaseEndDate: releaseEndDate || null,
-            // FIX START: Ensure exportDate and deliveryDate are handled here too
-            exportDate: exportDate || null,
-            deliveryDate: deliveryDate || null,
-            // FIX END
-            storageReleaseLocation:
-              lot.storageReleaseLocation || storageReleaseLocation,
-          },
-          type: db.sequelize.QueryTypes.INSERT,
-          transaction: t,
-        });
+      await db.sequelize.query(selectedInboundsQuery, {
+  replacements: {
+    inboundId,
+    scheduleOutboundId,
+    lotNo,
+    jobNo,
+    releaseDate: releaseStartDate,
+    releaseEndDate: releaseEndDate || null,
+    
+    // Check lot-specific dates first, fall back to master
+    exportDate: lot.exportDate || exportDate || null,
+    deliveryDate: lot.deliveryDate || deliveryDate || null,
+    storageReleaseLocation: lot.storageReleaseLocation || storageReleaseLocation,
+    
+    // --- FIX: ADD LOT-SPECIFIC CONTAINER INFO ---
+    containerNo: lot.containerNo || containerNo || null,
+    sealNo: lot.sealNo || sealNo || null,
+    tareWeight: lot.tareWeight || tareWeight || null,
+    uom: lot.uom || uom || null,
+    stuffingDate: lot.stuffingDate || stuffingDate || null,
+  },
+  type: db.sequelize.QueryTypes.INSERT,
+  transaction: t,
+});
 
         if (quantity != null) {
           await db.sequelize.query(updateInboundQuantityQuery, {

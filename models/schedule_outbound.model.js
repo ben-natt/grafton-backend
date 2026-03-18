@@ -19,13 +19,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         field: "userId",
       },
-      // Changed from ID to string as per updated schema
       storageReleaseLocation: {
-        type: DataTypes.STRING(255), // MODIFIED: Increased size for comma-separated values
+        type: DataTypes.STRING(255),
         allowNull: false,
         field: "storageReleaseLocation",
       },
-      // Changed from ID to string as per updated schema
       releaseWarehouse: {
         type: DataTypes.STRING(20),
         allowNull: false,
@@ -36,14 +34,13 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         field: "lotReleaseWeight",
       },
-      // Changed from ID to string as per updated schema
       transportVendor: {
         type: DataTypes.STRING(255),
         allowNull: false,
         field: "transportVendor",
       },
       outboundType: {
-        type: DataTypes.ENUM("Flatbed", "Container"), // Example enum values
+        type: DataTypes.ENUM("Flatbed", "Container"),
         allowNull: true,
         field: "outboundType",
       },
@@ -103,7 +100,7 @@ module.exports = (sequelize, DataTypes) => {
     }
   );
 
-  // NEW: Define StuffingPhotos model
+  // Define StuffingPhotos model
   const StuffingPhotos = sequelize.define(
     "StuffingPhotos",
     {
@@ -141,13 +138,11 @@ module.exports = (sequelize, DataTypes) => {
         field: "selectedInboundId",
       },
       inboundId: {
-        // This now refers to the primary key of the 'inbounds' table
         type: DataTypes.INTEGER,
         allowNull: true,
         field: "inboundId",
       },
       scheduleOutboundId: {
-        // Foreign key to ScheduleOutbound
         type: DataTypes.INTEGER,
         allowNull: true,
         field: "scheduleOutboundId",
@@ -158,18 +153,15 @@ module.exports = (sequelize, DataTypes) => {
         field: "isOutbounded",
       },
       lotNo: {
-        // Lot number from the original 'inbounds' table
         type: DataTypes.INTEGER,
         allowNull: true,
         field: "lotNo",
       },
       jobNo: {
-        // Job number from the original 'inbounds' table
         type: DataTypes.STRING(16),
         allowNull: true,
         field: "jobNo",
       },
-      // ADDED: New field to store location for each selected lot
       storageReleaseLocation: {
         type: DataTypes.STRING(255),
         allowNull: true,
@@ -185,6 +177,32 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: "releaseEndDate",
       },
+      // --- PER-LOT CONTAINER INFO ---
+      containerNo: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: "containerNo",
+      },
+      sealNo: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: "sealNo",
+      },
+      tareWeight: {
+        type: DataTypes.DECIMAL(10, 3),
+        allowNull: true,
+        field: "tareWeight",
+      },
+      uom: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        field: "uom",
+      },
+      stuffingDate: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: "stuffingDate",
+      },
       exportDate: {
         type: DataTypes.DATE,
         allowNull: true,
@@ -195,6 +213,7 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: true,
         field: "deliveryDate",
       },
+      // -----------------------------
       createdAt: {
         type: DataTypes.DATE,
         allowNull: false,
@@ -216,7 +235,6 @@ module.exports = (sequelize, DataTypes) => {
     }
   );
 
-  // Define the Inbounds model (master record)
   const Inbounds = sequelize.define(
     "Inbounds",
     {
@@ -355,11 +373,10 @@ module.exports = (sequelize, DataTypes) => {
       },
     },
     {
-      tableName: "inbounds", // This is the actual table name
+      tableName: "inbounds",
       timestamps: true,
       updatedAt: "updatedAt",
       createdAt: "createdAt",
-      // Add unique index on jobNo and lotNo if they form a composite unique key
       indexes: [
         {
           unique: true,
@@ -369,7 +386,6 @@ module.exports = (sequelize, DataTypes) => {
     }
   );
 
-  // Define new models for lookup tables: Brands, Commodities, Shapes
   const Brand = sequelize.define(
     "Brand",
     {
@@ -380,11 +396,10 @@ module.exports = (sequelize, DataTypes) => {
         field: "brandId",
       },
       name: {
-        // This will hold the 'brandName' from the DB
         type: DataTypes.STRING(255),
         allowNull: false,
         unique: true,
-        field: "brandName", // Explicitly map to the 'brandName' column
+        field: "brandName",
       },
       createdAt: {
         type: DataTypes.DATE,
@@ -415,11 +430,10 @@ module.exports = (sequelize, DataTypes) => {
         field: "commodityId",
       },
       name: {
-        // This will hold the 'commodityName' from the DB
         type: DataTypes.STRING(255),
         allowNull: false,
         unique: true,
-        field: "commodityName", // Assuming your commodities table has 'commodityName'
+        field: "commodityName",
       },
       createdAt: {
         type: DataTypes.DATE,
@@ -450,11 +464,10 @@ module.exports = (sequelize, DataTypes) => {
         field: "shapeId",
       },
       name: {
-        // This will hold the 'shapeName' from the DB
         type: DataTypes.STRING(255),
         allowNull: false,
         unique: true,
-        field: "shapeName", // Assuming your shapes table has 'shapeName'
+        field: "shapeName",
       },
       createdAt: {
         type: DataTypes.DATE,
@@ -475,7 +488,6 @@ module.exports = (sequelize, DataTypes) => {
     }
   );
 
-  // Define associations for Inbounds with the lookup tables
   Inbounds.belongsTo(Brand, { foreignKey: "brandId", as: "brandDetails" });
   Inbounds.belongsTo(Commodity, {
     foreignKey: "commodityId",
@@ -483,7 +495,6 @@ module.exports = (sequelize, DataTypes) => {
   });
   Inbounds.belongsTo(Shape, { foreignKey: "shapeId", as: "shapeDetails" });
 
-  // Re-define ScheduleInbound and Lot models as they will be queried
   const ScheduleInbound = sequelize.define(
     "ScheduleInbound",
     {
@@ -517,7 +528,7 @@ module.exports = (sequelize, DataTypes) => {
       },
     },
     {
-      tableName: "scheduleinbounds", // Assuming this is the table name for ScheduleInbound
+      tableName: "scheduleinbounds",
       timestamps: true,
       updatedAt: "updatedAt",
       createdAt: "createdAt",
@@ -570,7 +581,7 @@ module.exports = (sequelize, DataTypes) => {
         field: "expectedBundleCount",
       },
       status: {
-        type: DataTypes.ENUM("pending", "completed", "cancelled", "outbounded"), // Added 'outbounded' status
+        type: DataTypes.ENUM("pending", "completed", "cancelled", "outbounded"),
         allowNull: false,
         defaultValue: "pending",
       },
@@ -631,7 +642,6 @@ module.exports = (sequelize, DataTypes) => {
     }
   );
 
-  // Define associations for ScheduleOutbound and SelectedInbounds
   ScheduleOutbound.hasMany(SelectedInbounds, {
     foreignKey: "scheduleOutboundId",
     as: "selectedInbounds",
@@ -642,7 +652,6 @@ module.exports = (sequelize, DataTypes) => {
     as: "scheduleOutbound",
   });
 
-  // NEW: Association for StuffingPhotos
   ScheduleOutbound.hasMany(StuffingPhotos, {
     foreignKey: "scheduleOutboundId",
     as: "stuffingPhotos",
@@ -651,9 +660,8 @@ module.exports = (sequelize, DataTypes) => {
     foreignKey: "scheduleOutboundId",
   });
 
-  // Link SelectedInbounds to Inbounds (master record)
   SelectedInbounds.belongsTo(Inbounds, {
-    foreignKey: "inboundId", // This is the PK of the Inbounds table
+    foreignKey: "inboundId",
     targetKey: "inboundId",
     constraints: false,
     as: "masterInbound",

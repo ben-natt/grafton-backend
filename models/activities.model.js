@@ -1117,8 +1117,11 @@ const getScheduleOutboundRecordById = async (id) => {
         selin."storageReleaseLocation" AS "StorageReleaseLocation",
         so."outboundJobNo" AS "Outbound No",
         so."transportVendor" AS "TransportVendor",
-        so."containerNo" AS "ContainerNo",
-        so."sealNo" AS "SealNo",
+        
+        -- The Coalesce Fix you added
+        COALESCE(selin."containerNo", so."containerNo") AS "ContainerNo",
+        COALESCE(selin."sealNo", so."sealNo") AS "SealNo",
+        
         scheduler."username" AS "ScheduledBy",
         processor."username" AS "ProcessedBy",
         TO_CHAR(selin."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD hh12:mi AM') AS "UpdatedAt",
@@ -1154,13 +1157,17 @@ const getScheduleOutboundRecordById = async (id) => {
       type: db.sequelize.QueryTypes.SELECT,
     });
 
+    // --- ADD THESE LOGS HERE ---
+    console.log(`\n=== DB QUERY RESULT: getScheduleOutboundRecordById (ID: ${id}) ===`);
+    console.log(JSON.stringify(result, null, 2));
+    console.log(`==================================================================\n`);
+
     return result;
   } catch (error) {
     console.error("Error fetching schedule outbound record by id:", error);
     throw error;
   }
 };
-
 module.exports = {
   getInboundSummary,
   getOutboundSummary,

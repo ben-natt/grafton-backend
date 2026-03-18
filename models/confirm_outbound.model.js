@@ -32,10 +32,10 @@ const getConfirmationDetailsById = async (selectedInboundId) => {
     TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "deliveryDate",
     TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "stuffingDate",
     TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') AS "releaseDate",
-    so."containerNo",
-    so."sealNo",
-    so."tareWeight",
-    so."uom",
+    COALESCE(si."containerNo", so."containerNo") AS "containerNo",
+    COALESCE(si."sealNo", so."sealNo") AS "sealNo",
+    COALESCE(si."tareWeight", so."tareWeight") AS "tareWeight",
+    COALESCE(si."uom", so."uom") AS "uom",
     si."jobNo",
     si."lotNo" as "lotNo",
     i."actualWeight",
@@ -93,41 +93,26 @@ const updateOutboundDetails = async (
   try {
     const { releaseDate, containerNo, sealNo, tareWeight, uom } = details;
 
-    // Update the release date on the specific selected inbound record
-    if (releaseDate) {
-      const updateSelectedInboundQuery = `
-        UPDATE public.selectedinbounds
-        SET "releaseDate" = :releaseDate, "updatedAt" = NOW()
-        WHERE "selectedInboundId" = :selectedInboundId;
-      `;
-      await db.sequelize.query(updateSelectedInboundQuery, {
-        replacements: {
-          releaseDate,
-          selectedInboundId,
-        },
-        type: db.sequelize.QueryTypes.UPDATE,
-        transaction: t,
-      });
-    }
-
-    // Update the container details on the parent schedule record
-    const updateScheduleQuery = `
-      UPDATE public.scheduleoutbounds
+    const updateSelectedInboundQuery = `
+      UPDATE public.selectedinbounds
       SET 
-        "containerNo" = :containerNo, 
-        "sealNo" = :sealNo, 
-        "tareWeight" = :tareWeight, 
-        "uom" = :uom, 
+        "releaseDate" = COALESCE(:releaseDate, "releaseDate"), 
+        "containerNo" = COALESCE(:containerNo, "containerNo"),
+        "sealNo" = COALESCE(:sealNo, "sealNo"),
+        "tareWeight" = COALESCE(:tareWeight, "tareWeight"),
+        "uom" = COALESCE(:uom, "uom"),
         "updatedAt" = NOW()
-      WHERE "scheduleOutboundId" = :scheduleOutboundId;
+      WHERE "selectedInboundId" = :selectedInboundId;
     `;
-    await db.sequelize.query(updateScheduleQuery, {
+    
+    await db.sequelize.query(updateSelectedInboundQuery, {
       replacements: {
-        containerNo,
-        sealNo,
-        tareWeight: tareWeight ? parseFloat(tareWeight) : null,
-        uom,
-        scheduleOutboundId,
+        releaseDate: releaseDate || null,
+        containerNo: containerNo || null,
+        sealNo: sealNo || null,
+        tareWeight: tareWeight ? String(tareWeight) : null,
+        uom: uom || null,
+        selectedInboundId,
       },
       type: db.sequelize.QueryTypes.UPDATE,
       transaction: t,
@@ -202,7 +187,8 @@ const getGrnDetailsForSelection = async (
       TO_CHAR(si."deliveryDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "deliveryDate", 
       TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "exportDate", 
       TO_CHAR(so."stuffingDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "stuffingDate", 
-      so."containerNo", so."sealNo",
+      COALESCE(si."containerNo", so."containerNo") AS "containerNo", 
+      COALESCE(si."sealNo", so."sealNo") AS "sealNo",
       so."lotReleaseWeight",
       so."userId" AS "scheduledBy"
   FROM public.selectedinbounds si
@@ -260,7 +246,7 @@ const getGrnDetailsForSelection = async (
       return uniqueFormattedDates.join(", ");
     };
 
-    const firstLot = lots[0];
+   const firstLot = lots[0];
 
     const result = {
       releaseDate: formatMultipleDates(lots, "scheduledReleaseDate"),
@@ -273,7 +259,10 @@ const getGrnDetailsForSelection = async (
       ourReference: outboundJobNo,
       grnNo,
       fileName,
-      warehouse: firstLot.releaseWarehouse ? firstLot.releaseWarehouse : "N/A",
+      
+      // MODIFIED: Prioritize storageReleaseLocation, fallback to releaseWarehouse
+      warehouse: firstLot.storageReleaseLocation || firstLot.releaseWarehouse || "N/A",
+      
       cargoDetails: {
         commodity: aggregateDetails("commodity")
           ? aggregateDetails("commodity")
@@ -503,6 +492,9 @@ const createGrnAndTransactions = async (formData) => {
     }
 
     if (containerNo !== undefined && sealNo !== undefined) {
+      // NOTE: We only update the schedule table container here if you actually want to overwrite
+      // the master record's container. If you only want lot-level container edits, you'd update
+      // public.selectedinbounds instead. Assuming we keep schedule fallback logic here:
       const updateScheduleQuery = `
             UPDATE public.scheduleoutbounds
             SET "containerNo" = :containerNo, "sealNo" = :sealNo, "updatedAt" = NOW()
@@ -550,7 +542,9 @@ const createGrnAndTransactions = async (formData) => {
           s."shapeName" as shape, c."commodityName" as commodity, b."brandName" as brand,
           TO_CHAR(si."releaseDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "scheduledReleaseDate", 
           so."releaseWarehouse", si."storageReleaseLocation", so."transportVendor",
-          so."outboundType", so."stuffingDate", so."containerNo", so."sealNo",
+          so."outboundType", so."stuffingDate", 
+          COALESCE(si."containerNo", so."containerNo") AS "containerNo", 
+          COALESCE(si."sealNo", so."sealNo") AS "sealNo",
           so."lotReleaseWeight",
           so."userId" AS "scheduledBy",
           TO_CHAR(si."exportDate" AT TIME ZONE 'Asia/Singapore', 'YYYY-MM-DD"T"HH24:MI:SS.MSOF') as "exportDate",

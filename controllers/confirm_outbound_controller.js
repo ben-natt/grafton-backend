@@ -406,9 +406,12 @@ const createGrnAndTransactions = async (req, res) => {
     const finalContainerNo =
       containerNo && containerNo.trim() !== ""
         ? containerNo
-        : scheduleInfo.containerNo;
+        : (scheduleInfo?.containerNo || "N/A"); 
+
     const finalSealNo =
-      sealNo && sealNo.trim() !== "" ? sealNo : scheduleInfo.sealNo;
+      sealNo && sealNo.trim() !== "" 
+        ? sealNo 
+        : (scheduleInfo?.sealNo || "N/A");
 
     const containerAndSealNo =
       finalContainerNo && finalSealNo
@@ -433,7 +436,9 @@ const createGrnAndTransactions = async (req, res) => {
         year: "numeric",
         timeZone: "Asia/Singapore",
       }),
-      warehouse: lotsForPdf.length > 0 ? lotsForPdf[0].releaseWarehouse : "N/A",
+      warehouse: lotsForPdf.length > 0 
+        ? (lotsForPdf[0].storageReleaseLocation || lotsForPdf[0].releaseWarehouse || "N/A") 
+        : "N/A",
       transportVendor:
         lotsForPdf.length > 0 ? lotsForPdf[0].transportVendor : "N/A",
       containerAndSealNo: containerAndSealNo,
