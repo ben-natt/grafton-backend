@@ -96,7 +96,6 @@ const createLogEntry = async (
 };
 // --- END LOGGING CONFIGURATION ---
 
-// Save actual weight for inbound or lot
 router.post("/actual/save-weight", async (req, res) => {
   const {
     inboundId,
@@ -112,6 +111,18 @@ router.post("/actual/save-weight", async (req, res) => {
     scaleNo,
     userId,
   } = req.body;
+
+  // ADD THIS LOG BLOCK:
+  console.log('\n=== [ROUTER] RECEIVED SAVE REQUEST ===');
+  console.log(JSON.stringify({
+    jobNo,
+    lotNo,
+    crewLotNo,
+    exWarehouseLot,
+    inboundId,
+    lotId
+  }, null, 2));
+  console.log('======================================\n');
 
   try {
     // Validation - must have either IDs or jobNo/lotNo
@@ -179,15 +190,17 @@ router.post("/actual/save-weight", async (req, res) => {
       );
     } else {
       // Handle case where we only have jobNo and lotNo
-      // First try to find inboundId
+      console.log(`[ROUTER] No IDs provided. Falling back to jobNo: ${jobNo}, lotNo: ${lotNo}`); // <--- ADD THIS
+      
       const inboundResult = await actualWeightModel.findRelatedId(
         null,
         false,
         jobNo,
-        exWarehouseLot
+        lotNo 
       );
 
       if (inboundResult) {
+        console.log(`[ROUTER] Found inboundId: ${inboundResult} via fallback lookup.`); // <--- ADD THIS
         result = await actualWeightModel.saveInboundWithBundles(
           inboundResult,
           actualWeight,
